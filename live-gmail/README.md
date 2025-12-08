@@ -17,8 +17,8 @@ A userscript for Zen browser that displays Gmail inbox emails in a floating pane
 If you're already using [fx-autoconfig](https://github.com/MrOtherGuy/fx-autoconfig), installation is simple:
 
 1. **Copy files to your Zen profile chrome directory:**
-   - Copy `chrome/live-gmail.uc.js` to `<profile>/chrome/live-gmail.uc.js`
-   - Copy `chrome/live-gmail.css` to `<profile>/chrome/live-gmail.css`
+   - Copy `chrome/live-gmail.uc.js` to `<profile>/chrome/JS/live-gmail.uc.js`
+   - Copy `chrome/live-gmail.css` to `<profile>/chrome/modules/live-gmail.css`
 
 2. **Find your profile directory:**
    - Windows: `%APPDATA%\Zen\Profiles\<profile-name>\`
@@ -28,17 +28,6 @@ If you're already using [fx-autoconfig](https://github.com/MrOtherGuy/fx-autocon
 3. **Restart Zen browser** - fx-autoconfig will automatically load the `.uc.js` file
 
 That's it! The script will load automatically on browser startup.
-
-### Alternative: Manual Loading
-
-If you're not using fx-autoconfig, you can manually load the script:
-
-1. Find the browser.js file in your Zen installation
-2. Add this line in the `onLoad()` function:
-   ```javascript
-   Services.scriptloader.loadSubScript("chrome://browser/content/live-gmail.uc.js", window);
-   ```
-3. Copy `live-gmail.uc.js` to the browser content directory
 
 ## Configuration
 
