@@ -1,11 +1,9 @@
 // ==UserScript==
 // @name         Zen Workspace Collapse
-// @version      1.1
 // @description  Add chevron icon to collapse/expand pinned folders and tabs in Zen Browser. No persistence.
-// @author       bxth (Modified)
+// @author       Bxth
 // @match        chrome://browser/content/browser.xhtml
 // @match        chrome://browser/content/browser.xul
-// @grant        none
 // ==/UserScript==
 
 (function() {
