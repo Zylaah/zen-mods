@@ -31,9 +31,10 @@ That's it! The script will load automatically on browser startup.
 
 ## Configuration
 
-### Developer Setup (One-Time)
+####Prerequisits
 
-**IMPORTANT:** If you're the developer distributing this script, you need to configure the OAuth client:
+1. Create a Google Cloud Project
+2. Add an OAuth 2.0 Client to it
 
 #### Step 1: Add Redirect URI
 
