@@ -159,26 +159,6 @@ Services.prefs.setStringPref('live-gmail.url', 'mail.google.com'); // Gmail URL 
 - Check browser console for loading errors (look for `[Live Gmail] Initializing...`)
 - Ensure the file has `.uc.js` extension (required by fx-autoconfig)
 
-## File Structure
-
-```
-<profile>/
-└── chrome/
-    ├── live-gmail.uc.js      # Main userscript (auto-loaded by fx-autoconfig)
-    ├── live-gmail.css         # Panel styling
-    └── userChrome.css         # Optional: imports live-gmail.css
-```
-
-**Note:** If you're using fx-autoconfig, you don't need `config.js` or `defaults/preferences/autoconfig.js` - those files are only needed if setting up autoconfig manually.
-
-## Development
-
-To modify the script:
-1. Edit `chrome/live-gmail.uc.js`
-2. Restart Zen browser
-3. Check browser console for errors
-4. Test with a Gmail essential tab
-
 ## Notes
 
 - The script requires Gmail API access with proper authentication
