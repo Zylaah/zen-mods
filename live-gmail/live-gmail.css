@@ -1,0 +1,407 @@
+/* Live Gmail Panel Styling - Zen Native Theme */
+
+/* ============================================
+   LIGHT MODE (Default)
+   ============================================ */
+
+#live-gmail-panel {
+  position: fixed;
+  z-index: 10000;
+  background: #ffffff;
+  border: 1px solid #d1d1d1;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  min-width: 230px;
+  max-width: 270px;
+  max-height: 360px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 11px;
+  color: #0c0c0d;
+  transition: opacity 0.15s ease-in-out;
+}
+
+#live-gmail-panel.live-gmail-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Header */
+.live-gmail-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #d1d1d1;
+  background: #f0f0f0;
+}
+
+.live-gmail-title {
+  font-weight: 600;
+  font-size: 12px;
+  color: #0c0c0d;
+  display: flex;
+  align-items: center;
+  flex-grow: 1; /* Push disconnect button to the right */
+}
+
+/* Content Area */
+.live-gmail-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: 300px;
+}
+
+/* Loading State */
+.live-gmail-loading {
+  padding: 16px;
+  text-align: center;
+  color: #737373;
+  font-size: 12px;
+}
+
+/* Error State */
+.live-gmail-error {
+  padding: 16px;
+  background: rgba(255, 0, 0, 0.1);
+  color: #d70022;
+  border-radius: 4px;
+  margin: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Empty State */
+.live-gmail-empty {
+  padding: 16px;
+  text-align: center;
+  color: #737373;
+  font-size: 12px;
+}
+
+/* Emails Container */
+.live-gmail-emails {
+  padding: 0;
+}
+
+/* Email Item */
+.live-gmail-email-item {
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  position: relative;
+  border-bottom: 1px solid rgba(200, 200, 200, 0.3);
+}
+
+.live-gmail-email-item:last-child {
+  border-bottom: none;
+}
+
+/* Unread email indicator */
+.live-gmail-email-item.live-gmail-unread {
+  padding-left: 9px; /* Adjust padding to account for border */
+}
+
+.live-gmail-email-item.live-gmail-unread .live-gmail-email-from {
+  font-weight: 700; /* Bolder for unread */
+}
+
+.live-gmail-email-item.live-gmail-unread .live-gmail-email-subject {
+  font-weight: 600; /* Bolder for unread */
+}
+
+.live-gmail-email-item:hover {
+  background-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Email Header (From + Date) */
+.live-gmail-email-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.live-gmail-email-from {
+  font-weight: 600;
+  font-size: 11px;
+  color: #0c0c0d;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: 6px;
+}
+
+.live-gmail-email-date {
+  font-size: 10px;
+  color: #737373;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Email Subject */
+.live-gmail-email-subject {
+  font-weight: 500;
+  font-size: 11px;
+  color: #0c0c0d;
+  margin-bottom: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Email Snippet */
+.live-gmail-email-snippet {
+  font-size: 10px;
+  color: #737373;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  max-height: 2.6em;
+}
+
+/* ============================================
+   DARK MODE (via data-theme="dark" attribute set by JS)
+   ============================================ */
+
+#live-gmail-panel[data-theme="dark"] {
+  background: #1b1b1b !important;
+  border-color: #3a3a3a !important;
+  color: #f9f9fa !important;
+}
+
+#live-gmail-panel[data-theme="dark"] .live-gmail-header {
+  background: #252525 !important;
+  border-bottom-color: #3a3a3a !important;
+}
+
+#live-gmail-panel[data-theme="dark"] .live-gmail-title {
+  color: #f9f9fa !important;
+}
+
+#live-gmail-panel[data-theme="dark"] .live-gmail-email-item:hover {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+#live-gmail-panel[data-theme="dark"] .live-gmail-email-from,
+#live-gmail-panel[data-theme="dark"] .live-gmail-email-subject {
+  color: #f9f9fa !important;
+}
+
+#live-gmail-panel[data-theme="dark"] .live-gmail-email-snippet,
+#live-gmail-panel[data-theme="dark"] .live-gmail-email-date {
+  color: #b1b1b1 !important;
+}
+
+#live-gmail-panel[data-theme="dark"] .live-gmail-error {
+  background: rgba(255, 0, 0, 0.2) !important;
+  color: #ff6b6b !important;
+}
+
+#live-gmail-panel[data-theme="dark"] .live-gmail-loading,
+#live-gmail-panel[data-theme="dark"] .live-gmail-empty {
+  color: #b1b1b1 !important;
+}
+
+/* Scrollbar Styling */
+.live-gmail-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.live-gmail-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.live-gmail-content::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.live-gmail-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+#live-gmail-panel[data-theme="dark"] .live-gmail-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+#live-gmail-panel[data-theme="dark"] .live-gmail-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  #live-gmail-panel {
+    max-width: calc(100vw - 20px);
+    min-width: 280px;
+  }
+}
+
+/* ============================================
+   OAuth / Connect UI Styles
+   ============================================ */
+
+/* Disconnect button in header */
+.live-gmail-disconnect-btn {
+  background: transparent;
+  border: none;
+  color: #737373;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  margin-right: -4px;
+}
+
+.live-gmail-disconnect-btn svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.live-gmail-disconnect-btn:hover {
+  background: rgba(255, 0, 0, 0.1);
+  color: #d70022;
+}
+
+#live-gmail-panel[data-theme="dark"] .live-gmail-disconnect-btn {
+  color: #b1b1b1;
+}
+
+#live-gmail-panel[data-theme="dark"] .live-gmail-disconnect-btn:hover {
+  background: rgba(255, 0, 0, 0.2);
+  color: #ff6b6b;
+}
+
+/* Connect UI container */
+.live-gmail-connect {
+  padding: 24px 16px;
+  text-align: center;
+}
+
+.live-gmail-connect-text {
+  color: #737373;
+  font-size: 13px;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.live-gmail-connect-button {
+  background: #0066cc;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.live-gmail-connect-button:hover {
+  background: #0055aa;
+  transform: translateY(-1px);
+}
+
+#live-gmail-panel[data-theme="dark"] .live-gmail-connect-text {
+  color: #b1b1b1;
+}
+
+.live-gmail-connect-button:active {
+  transform: translateY(0);
+}
+
+/* OAuth Instructions */
+.live-gmail-oauth-instructions {
+  padding: 16px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.live-gmail-oauth-instructions p {
+  margin: 8px 0;
+  color: #0c0c0d;
+}
+
+.live-gmail-auth-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d1d1d1;
+  border-radius: 6px;
+  font-size: 12px;
+  margin: 12px 0;
+  background: #ffffff;
+  color: #0c0c0d;
+  box-sizing: border-box;
+}
+
+.live-gmail-auth-input:focus {
+  outline: none;
+  border-color: #0066cc;
+  box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.2);
+}
+
+.live-gmail-auth-button {
+  background: #0066cc;
+  color: white;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-right: 8px;
+  transition: all 0.15s ease;
+}
+
+.live-gmail-auth-button:hover {
+  background: #0055aa;
+}
+
+.live-gmail-cancel-button {
+  background: transparent;
+  color: #737373;
+  border: 1px solid #d1d1d1;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.live-gmail-cancel-button:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+/* Dark mode for OAuth UI */
+#live-gmail-panel[data-theme="dark"] .live-gmail-oauth-instructions p {
+  color: #f9f9fa;
+}
+
+#live-gmail-panel[data-theme="dark"] .live-gmail-auth-input {
+  background: #2a2a2a;
+  border-color: #3a3a3a;
+  color: #f9f9fa;
+}
+
+#live-gmail-panel[data-theme="dark"] .live-gmail-cancel-button {
+  border-color: #3a3a3a;
+  color: #b1b1b1;
+}
+
+#live-gmail-panel[data-theme="dark"] .live-gmail-cancel-button:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
