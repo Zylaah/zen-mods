@@ -67,7 +67,7 @@ The userscript has a **built-in OAuth flow** - end users don't need any setup!
 #### First Time Setup
 
 1. Make sure the userscript is loaded (restart Zen if needed)
-2. Hover over a Gmail essential tab
+2. Hover over a Gmail essential tab (need to be opened once for it to work)
 3. Click the **"Connect Gmail"** button in the panel
 4. A new tab will open for Google sign-in
 5. Sign in with your Google account
