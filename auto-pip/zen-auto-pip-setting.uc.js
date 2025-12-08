@@ -1,3 +1,11 @@
+// ==UserScript==
+// @name           Auto-pip
+// @description    Adds auto-pip option in the unified panel
+// @author         Bxth
+// @version        1.0
+// @namespace      https://github.com/zen-browser/desktop
+// ==/UserScript==
+
 /* eslint-env es6, browser */
 /* global Services */
 
