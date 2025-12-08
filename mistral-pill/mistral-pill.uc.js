@@ -1,3 +1,11 @@
+// ==UserScript==
+// @name           Mistral Pill
+// @description    Adds a Mistral pill to the search bar when Mistral is used as Search engine
+// @author         Bxth
+// @version        1.0
+// @namespace      https://github.com/zen-browser/desktop
+// ==/UserScript==
+
 /**
  * Highlights the Firefox urlbar search mode indicator when it shows
  * "Mistral AI" so it is easier to distinguish.
