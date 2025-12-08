@@ -31,7 +31,7 @@ That's it! The script will load automatically on browser startup.
 
 ## Configuration
 
-####Prerequisits
+#### Prerequisits
 
 1. Create a Google Cloud Project
 2. Add an OAuth 2.0 Client to it
