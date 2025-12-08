@@ -148,7 +148,7 @@ Services.prefs.setStringPref('live-gmail.url', 'mail.google.com'); // Gmail URL 
 - Check browser console for detailed error messages
 
 ### Styling issues
-- Ensure `live-gmail.css` is in the `chrome` folder
+- Ensure `live-gmail.css` is in the `JS` folder
 - Check that userChrome.css is enabled in Zen
 - Verify CSS variables are available (Zen theme system)
 
