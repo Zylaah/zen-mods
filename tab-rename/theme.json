@@ -1,0 +1,19 @@
+{
+  "id": "tab-rename",
+  "name": "Tab Rename",
+  "description": "Let's you rename non-pinned tabs by double-clicking on them",
+  "js": true,
+  "homepage": "https://github.com/Zylaah/zen-mods",
+  "readme": "https://raw.githubusercontent.com/Zylaah/zen-mods/refs/heads/main/tab-rename/README.md",
+  "author": "Bxh",
+  "version": "1.0",
+  "tags": [
+    "Zen Browser",
+    "Rename",
+    "Non-pinned",
+    "Tabs"
+  ],
+  "createdAt": "2025-12-08",
+  "updatedAt": "2025-12-09",
+  "fork": ["zen"]
+}
