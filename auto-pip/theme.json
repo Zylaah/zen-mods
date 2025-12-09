@@ -1,0 +1,18 @@
+{
+  "id": "auto-pip-setting",
+  "name": "Auto-PiP-Setting",
+  "description": "Adds auto-picture-in-picture setting in the unified panel",
+  "js": true,
+  "homepage": "https://github.com/Zylaah/zen-mods",
+  "readme": "https://raw.githubusercontent.com/Vertex-Mods/Zen-Tidy-Tabs/main/README.md",
+  "author": "Bxh",
+  "version": "1.0",
+  "tags": [
+    "Zen Browser",
+    "Auto-PiP",
+    "Unified Panel"
+  ],
+  "createdAt": "2025-12-08",
+  "updatedAt": "2025-12-09",
+  "fork": ["zen"]
+}
