@@ -4,7 +4,7 @@
   "description": "Adds auto-picture-in-picture setting in the unified panel",
   "js": true,
   "homepage": "https://github.com/Zylaah/zen-mods",
-  "readme": "https://raw.githubusercontent.com/Vertex-Mods/Zen-Tidy-Tabs/main/README.md",
+  "readme": "https://raw.githubusercontent.com/Zylaah/zen-mods/refs/heads/main/auto-pip/README.md",
   "author": "Bxh",
   "version": "1.0",
   "tags": [
