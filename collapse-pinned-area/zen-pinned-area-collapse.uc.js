@@ -591,6 +591,9 @@
             initialized = true;
         });
 
+        // Block double-click on workspace icons
+        blockWorkspaceIconDoubleClick();
+
         return initialized;
     }
 
@@ -640,6 +643,29 @@
         }
     }
     
+    // Function to block double-click on workspace icons
+    function blockWorkspaceIconDoubleClick() {
+        const indicators = document.querySelectorAll('.zen-current-workspace-indicator-icon');
+        
+        indicators.forEach(icon => {
+            // Check if we already attached the blocker to this specific element
+            if (icon.dataset.zenDblClickBlocked) return;
+
+            // Add a capturing listener to stop the event before it reaches the bubble phase handler
+            icon.addEventListener('dblclick', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                console.log('[Zen Collapse] Blocked double-click on workspace icon');
+            }, true); // Use capture phase
+
+            icon.dataset.zenDblClickBlocked = "true";
+        });
+        
+        if (indicators.length > 0) {
+            console.log(`[Zen Collapse] Double-click blocker attached to ${indicators.length} icon(s).`);
+        }
+    }
+
     // Initialize when DOM is ready
     function initialize() {
         console.log('[Zen Collapse] Initializing...');
@@ -649,6 +675,9 @@
         
         // Set up emoji picker interception to show icon when picker is open
         setupEmojiPickerInterception();
+        
+        // Block double-click on workspace icons
+        blockWorkspaceIconDoubleClick();
         
         // Add drag event listeners to prevent animation conflicts
         document.addEventListener('dragstart', handleDragStart, true);
@@ -910,6 +939,9 @@
                         workspaceIconBox.appendChild(chevron);
                     }
                 }
+                
+                // Block double-click on workspace icon
+                blockWorkspaceIconDoubleClick();
             }
         }
     }
@@ -923,6 +955,7 @@
         
         setTimeout(() => {
             initChevron();
+            blockWorkspaceIconDoubleClick();
             // Ensure folders are consistent
             closeAllFoldersOnStartup();
         }, 100);
@@ -935,6 +968,7 @@
         
         setTimeout(() => {
             initChevron();
+            blockWorkspaceIconDoubleClick();
             updateChevronVisibility();
         }, 100);
     }, true);
@@ -970,7 +1004,10 @@
                         node.matches('.zen-current-workspace-indicator') ||
                         node.querySelector('.zen-current-workspace-indicator')
                     )) {
-                        setTimeout(initChevron, 50);
+                        setTimeout(() => {
+                            initChevron();
+                            blockWorkspaceIconDoubleClick();
+                        }, 50);
                         return;
                     }
                 }
@@ -992,7 +1029,10 @@
         });
         
         if (needsInit) {
-            setTimeout(initChevron, 50);
+            setTimeout(() => {
+                initChevron();
+                blockWorkspaceIconDoubleClick();
+            }, 50);
         }
     });
 
@@ -1071,6 +1111,13 @@
         }
         .zen-current-workspace-indicator-icon {
             position: relative;
+        }
+        /* Workspace indicator spacing (moved from chrome.css) */
+        .zen-current-workspace-indicator .zen-current-workspace-indicator-icon {
+            margin-bottom: 4px !important;
+        }
+        .zen-current-workspace-indicator .zen-current-workspace-indicator-name {
+            margin-bottom: 2px !important;
         }
     `;
     document.head.appendChild(style);
