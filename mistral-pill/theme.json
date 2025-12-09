@@ -1,0 +1,19 @@
+{
+  "id": "mistral-pill",
+  "name": "Mistral Pill",
+  "description": "Adds a style to the Mistral Pill in the floating urlbar if Mistral is used as a search engine",
+  "js": true,
+  "homepage": "https://github.com/Zylaah/zen-mods",
+  "readme": "https://raw.githubusercontent.com/Zylaah/zen-mods/refs/heads/main/mistral-pill/README.md",
+  "author": "Bxh",
+  "version": "1.0",
+  "tags": [
+    "Zen Browser",
+    "Urlbar",
+    "Search Engine",
+    "Pill"
+  ],
+  "createdAt": "2025-12-08",
+  "updatedAt": "2025-12-09",
+  "fork": ["zen"]
+}
