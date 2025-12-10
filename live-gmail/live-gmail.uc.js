@@ -662,43 +662,12 @@
     initCalled = true;
     debugLog('Initializing...');
 
-    injectStyles();
     createPanel();
     setupTabMonitoring();
     initDomMode();
     updatePanelContent();
     
     debugLog('Initialized successfully');
-  }
-
-  /**
-   * Inject CSS styles
-   */
-  function injectStyles() {
-    if (document.getElementById('live-gmail-styles')) return;
-
-    try {
-      const styleSheet = document.createElement('link');
-      styleSheet.id = 'live-gmail-styles';
-      styleSheet.rel = 'stylesheet';
-      styleSheet.type = 'text/css';
-      
-      if (typeof Services !== 'undefined') {
-        const profileDir = Services.dirsvc.get('ProfD', Ci.nsIFile);
-        const chromeDir = profileDir.clone();
-        chromeDir.append('chrome');
-        const cssFile = chromeDir.clone();
-        cssFile.append('live-gmail.css');
-        
-        if (cssFile.exists()) {
-          styleSheet.href = Services.io.newFileURI(cssFile).spec;
-          document.head.appendChild(styleSheet);
-            return;
-          }
-      }
-    } catch (e) {
-      console.warn('[Live Gmail] Could not load external CSS:', e);
-    }
   }
 
   /**
