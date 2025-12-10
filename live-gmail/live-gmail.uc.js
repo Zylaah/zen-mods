@@ -9,6 +9,7 @@
 (function() {
   'use strict';
 
+  // Prevent double-loading
   if (window.__LIVE_GMAIL_INITED__) {
     return;
   }
@@ -56,6 +57,7 @@
   let lastScanRequestTs = 0;
   let lastLogTs = 0;
   let initCalled = false; // Track if init has been called
+  let pendingOpenThread = new Map(); // Track pending OpenThread messages to prevent duplicates
 
 
   /**
@@ -628,11 +630,6 @@
     setupMessageListeners();
     requestScanFromGmailTabs();
     
-    // Periodic refresh
-    setInterval(() => {
-      requestScanFromGmailTabs();
-    }, 30000);
-    
     return true;
   }
 
@@ -1093,6 +1090,16 @@
         e.preventDefault();
         e.stopPropagation();
         
+        // Prevent multiple clicks on the same email
+        const emailId = email.id || email.threadId;
+        if (pendingOpenThread.has(emailId)) {
+          debugLog('OpenThread already pending for email:', emailId);
+          return;
+        }
+        
+        // Mark as pending
+        pendingOpenThread.set(emailId, Date.now());
+        
         let targetTab = hoveredTab;
         let tabWasAlreadyReady = false;
         
@@ -1177,39 +1184,33 @@
                       // First time: inject frame script and wait for Gmail to be ready
                       loadFrameScript(browser);
                       
-                      // Set up listener for ready status
+                      // Set up listener for ready status (only once per waitForTabReady call)
                       if (!readyCheckListener) {
+                        const emailId = email.id || email.threadId;
+                        let sent = false; // Flag to prevent multiple sends from same listener
+                        
                         readyCheckListener = (message) => {
+                          if (sent) return; // Already sent, ignore
+                          
                           if (message.name === 'LiveGmail:ReadyStatus' && message.data && message.data.ready) {
                             gmailReady = true;
+                            sent = true; // Mark as sent
                             debugLog('Gmail inbox is ready, rows:', message.data.rows);
                             
                             // Now send the OpenThread message
                             setTimeout(() => {
-                              try {
-                                debugLog('Sending OpenThread message:', {
-                                  threadId: email.threadId || email.id,
-                                  url: gmailUrl,
-                                  rowIndex: email.rowIndex
-                                });
-                                browser.messageManager.sendAsyncMessage('LiveGmail:OpenThread', {
-                                  threadId: email.threadId || email.id,
-                                  url: gmailUrl,
-                                  rowIndex: email.rowIndex
-                                });
-                                debugLog('Sent OpenThread to tab');
-                                
+                              if (sendOpenThreadOnce(browser)) {
                                 // Clean up listener
                                 if (readyCheckListener) {
                                   Services.mm.removeMessageListener('LiveGmail:ReadyStatus', readyCheckListener);
                                 }
                                 resolve(true);
-                              } catch (err) {
-                                console.warn('[Live Gmail] Could not send OpenThread:', err);
+                              } else {
+                                // Already sent, just resolve
                                 if (readyCheckListener) {
                                   Services.mm.removeMessageListener('LiveGmail:ReadyStatus', readyCheckListener);
                                 }
-                                resolve(false);
+                                resolve(true);
                               }
                             }, 300);
                           }
@@ -1268,6 +1269,41 @@
           });
         };
 
+        // Helper function to send OpenThread (with duplicate protection)
+        const sendOpenThreadOnce = (browserToUse) => {
+          const emailId = email.id || email.threadId;
+          
+          // Check if already sent
+          if (!pendingOpenThread.has(emailId)) {
+            debugLog('OpenThread already sent for email:', emailId);
+            return false;
+          }
+          
+          try {
+            browserToUse.messageManager.sendAsyncMessage('LiveGmail:OpenThread', {
+              threadId: email.threadId || email.id,
+              url: gmailUrl,
+              rowIndex: email.rowIndex
+            });
+            debugLog('Sent OpenThread message:', {
+              threadId: email.threadId || email.id,
+              url: gmailUrl,
+              rowIndex: email.rowIndex
+            });
+            
+            // Remove from pending after a short delay (to prevent rapid re-clicks)
+            setTimeout(() => {
+              pendingOpenThread.delete(emailId);
+            }, 1000);
+            
+            return true;
+          } catch (err) {
+            console.warn('[Live Gmail] Could not send OpenThread:', err);
+            pendingOpenThread.delete(emailId);
+            return false;
+          }
+        };
+        
         // Fast path: if tab was already ready, send OpenThread immediately
         if (tabWasAlreadyReady && browser && browser.messageManager) {
           debugLog('Tab already ready, sending OpenThread immediately');
@@ -1277,16 +1313,7 @@
           
           // Send OpenThread with minimal delay (just enough for frame script to be ready)
           setTimeout(() => {
-            try {
-              browser.messageManager.sendAsyncMessage('LiveGmail:OpenThread', {
-                threadId: email.threadId || email.id,
-                url: gmailUrl,
-                rowIndex: email.rowIndex
-              });
-              debugLog('Sent OpenThread immediately');
-            } catch (err) {
-              console.warn('[Live Gmail] Could not send OpenThread:', err);
-            }
+            sendOpenThreadOnce(browser);
           }, 50);
         } else {
           // Slow path: tab needs to be loaded, use waitForTabReady
