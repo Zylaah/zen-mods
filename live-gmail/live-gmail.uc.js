@@ -9,7 +9,6 @@
 (function() {
   'use strict';
 
-  // Prevent double-loading
   if (window.__LIVE_GMAIL_INITED__) {
     return;
   }
@@ -1095,11 +1094,12 @@
         e.stopPropagation();
         
         let targetTab = hoveredTab;
+        let tabWasAlreadyReady = false;
         
         // If no hoveredTab (cached email), find or create Gmail essential tab
         if (!targetTab && gBrowser) {
           const pattern = getGmailUrlPattern();
-          const gmailUrl = `https://${pattern}/`;
+          const defaultGmailUrl = `https://${pattern}/`;
           
           // Try to find existing Gmail essential tab
           for (const tab of gBrowser.tabs) {
@@ -1115,7 +1115,7 @@
           // If not found, create new tab
           if (!targetTab) {
             try {
-              targetTab = gBrowser.addTab(gmailUrl);
+              targetTab = gBrowser.addTab(defaultGmailUrl);
               if (targetTab && !targetTab.hasAttribute('zen-essential')) {
                 targetTab.setAttribute('zen-essential', 'true');
               }
@@ -1127,6 +1127,17 @@
         }
         
         if (!targetTab || !gBrowser) return;
+        
+        // Check if tab is already ready (on Gmail with messageManager)
+        const browser = targetTab.linkedBrowser;
+        if (browser && browser.messageManager && browser.currentURI) {
+          try {
+            const currentUrl = browser.currentURI.spec;
+            if (currentUrl.includes(getGmailUrlPattern())) {
+              tabWasAlreadyReady = true;
+            }
+          } catch (e) {}
+        }
         
         // Select the tab
         if (gBrowser.selectedTab !== targetTab) {
@@ -1143,7 +1154,7 @@
           }
         }
         
-        debugLog('Opening email at rowIndex:', email.rowIndex, 'url:', gmailUrl);
+        debugLog('Opening email at rowIndex:', email.rowIndex, 'url:', gmailUrl, 'tabReady:', tabWasAlreadyReady);
 
         // Wait for tab to be ready, then send OpenThread message
         const waitForTabReady = (tab, maxAttempts = 50) => {
@@ -1257,25 +1268,48 @@
           });
         };
 
-        // Always use waitForTabReady to ensure frame script is loaded
-        waitForTabReady(targetTab).then((success) => {
-          if (success) {
-            debugLog('Successfully navigated to email');
-          } else {
-            console.warn('[Live Gmail] Failed to navigate to email, falling back to URL navigation');
-            // Fallback: navigate via URL
+        // Fast path: if tab was already ready, send OpenThread immediately
+        if (tabWasAlreadyReady && browser && browser.messageManager) {
+          debugLog('Tab already ready, sending OpenThread immediately');
+          
+          // Ensure frame script is loaded (idempotent)
+          loadFrameScript(browser);
+          
+          // Send OpenThread with minimal delay (just enough for frame script to be ready)
+          setTimeout(() => {
             try {
-              const browser = targetTab.linkedBrowser;
-              if (browser && browser.currentURI) {
-                browser.loadURI(gmailUrl, {
-                  triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
-                });
-              }
+              browser.messageManager.sendAsyncMessage('LiveGmail:OpenThread', {
+                threadId: email.threadId || email.id,
+                url: gmailUrl,
+                rowIndex: email.rowIndex
+              });
+              debugLog('Sent OpenThread immediately');
             } catch (err) {
-              console.warn('[Live Gmail] Could not navigate via URL:', err);
+              console.warn('[Live Gmail] Could not send OpenThread:', err);
             }
-          }
-        });
+          }, 50);
+        } else {
+          // Slow path: tab needs to be loaded, use waitForTabReady
+          debugLog('Tab not ready, using waitForTabReady');
+          waitForTabReady(targetTab).then((success) => {
+            if (success) {
+              debugLog('Successfully navigated to email');
+            } else {
+              console.warn('[Live Gmail] Failed to navigate to email, falling back to URL navigation');
+              // Fallback: navigate via URL
+              try {
+                const tabBrowser = targetTab.linkedBrowser;
+                if (tabBrowser && tabBrowser.currentURI) {
+                  tabBrowser.loadURI(gmailUrl, {
+                    triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
+                  });
+                }
+              } catch (err) {
+                console.warn('[Live Gmail] Could not navigate via URL:', err);
+              }
+            }
+          });
+        }
         
         // Track clicked email by its stable ID
         clickedEmailIds.add(email.id);
