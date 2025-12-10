@@ -1070,18 +1070,24 @@
       el.className = 'live-gmail-email-item';
       if (email.isUnread) el.classList.add('live-gmail-unread');
       
+      // Ensure consistent height
+      el.style.minHeight = '70px';
+      el.style.height = '70px';
+      el.style.display = 'flex';
+      el.style.flexDirection = 'column';
+      
       const from = email.from.replace(/<[^>]*>/g, '').trim();
       const subject = email.subject || '(No subject)';
       const snippet = email.snippet || '';
       const date = formatDate(email.date);
 
       el.innerHTML = `
-        <div class="live-gmail-email-header">
+        <div class="live-gmail-email-header" style="flex-shrink: 0;">
           <span class="live-gmail-email-from">${escapeHtml(from)}</span>
           <span class="live-gmail-email-date">${escapeHtml(date)}</span>
         </div>
-        <div class="live-gmail-email-subject">${escapeHtml(subject)}</div>
-        <div class="live-gmail-email-snippet">${escapeHtml(snippet)}</div>
+        <div class="live-gmail-email-subject" style="flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(subject)}</div>
+        <div class="live-gmail-email-snippet" style="flex: 1; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-height: 0; padding-top: 2px; line-height: 1.3;">${escapeHtml(snippet)}</div>
       `;
 
       el.addEventListener('click', async (e) => {
