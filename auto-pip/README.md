@@ -10,19 +10,5 @@ Adds an Auto Picture-in-Picture toggle control to Zen Browser's unified site dat
 - Updates when switching tabs or when media starts/stops
 - Persists the preference setting across browser sessions
 
-## How it works
 
-- Monitors the `zen-unified-site-data-panel` for media presence
-- Uses multiple detection methods to check for active media controllers
-- Toggles the Firefox preference `media.videocontrols.picture-in-picture.enable-when-switching-tabs.enabled`
-
-## Installation
-
-Place `zen-auto-pip-setting.uc.js` in your JS directory and ensure your script loader is configured to execute it.
-
-## Requirements
-
-- Zen Browser (Firefox-based)
-- User script loader (fx-autoconfig)
-- Access to `Services` API
-
+<img width="234" height="360" alt="Capture d&#39;écran 2025-12-14 171324" src="https://github.com/user-attachments/assets/375f408f-e8b1-485a-8c65-9c6562098c63" />
