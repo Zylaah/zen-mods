@@ -19,3 +19,4 @@ Adds a chevron icon to workspace indicators that allows you to collapse and expa
 3. The chevron remains visible when the workspace is collapsed
 4. When expanded, the chevron appears on hover
 
+![Zen Browser 2025-12-14 17 09 07](https://github.com/user-attachments/assets/e3be8095-dde3-48ff-9f46-e02b58d86739)
