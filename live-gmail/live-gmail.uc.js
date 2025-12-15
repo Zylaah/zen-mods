@@ -57,7 +57,6 @@
   let lastScanRequestTs = 0;
   let lastLogTs = 0;
   let initCalled = false; // Track if init has been called
-  let pendingOpenThread = new Map(); // Track pending OpenThread messages to prevent duplicates
 
 
   /**
@@ -630,7 +629,109 @@
     setupMessageListeners();
     requestScanFromGmailTabs();
     
+    // Periodic refresh
+    setInterval(() => {
+      requestScanFromGmailTabs();
+    }, 30000);
+    
     return true;
+  }
+
+  /**
+   * Patch ZenPinnedTabManager to prevent unloading of Gmail essential tabs
+   */
+  function patchZenPinnedTabManager() {
+    if (!window.gZenPinnedTabManager) {
+      debugLog('ZenPinnedTabManager not ready, retrying in 1s');
+      setTimeout(patchZenPinnedTabManager, 1000);
+      return;
+    }
+
+    if (window.gZenPinnedTabManager._liveGmailPatched) {
+      return;
+    }
+
+    debugLog('Patching ZenPinnedTabManager.onCloseTabShortcut');
+    
+    // Save original function
+    const originalOnClose = window.gZenPinnedTabManager.onCloseTabShortcut.bind(window.gZenPinnedTabManager);
+
+    // Overwrite with our wrapper
+    window.gZenPinnedTabManager.onCloseTabShortcut = async function(event, selectedTab, options = {}) {
+      try {
+        // Normalize input tabs (logic copied from ZenPinnedTabManager)
+        const tabs = Array.isArray(selectedTab) ? selectedTab : [selectedTab || gBrowser.selectedTab];
+        
+        // Expand split views and filter pinned tabs
+        const allTargetTabs = [
+          ...new Set(
+            tabs
+              .flatMap((tab) => {
+                if (tab && tab.group && tab.group.hasAttribute('split-view-group')) {
+                  // If it's a split view group, get all tabs inside
+                  return Array.from(tab.group.tabs || []);
+                }
+                return tab;
+              })
+              .filter((tab) => tab && tab.pinned)
+          ),
+        ];
+
+        if (allTargetTabs.length === 0) {
+          return await originalOnClose(event, selectedTab, options);
+        }
+
+        const gmailTabs = [];
+        const otherTabs = [];
+
+        for (const tab of allTargetTabs) {
+          if (isGmailEssentialTab(tab)) {
+            gmailTabs.push(tab);
+          } else {
+            otherTabs.push(tab);
+          }
+        }
+
+        // 1. Handle non-Gmail tabs normally
+        if (otherTabs.length > 0) {
+          // We pass the specific array of other tabs to avoid re-processing Gmail tabs
+          await originalOnClose(event, otherTabs, options);
+        }
+
+        // 2. Handle Gmail tabs (prevent unload)
+        if (gmailTabs.length > 0) {
+          debugLog('Intercepted close/unload for ' + gmailTabs.length + ' Gmail tabs');
+          
+          if (event) {
+            try {
+              event.stopPropagation();
+              event.preventDefault();
+            } catch(e) {}
+          }
+
+          // If any Gmail tab is selected, switch away from it
+          const selectedGmailTabs = gmailTabs.filter(t => t.selected);
+          if (selectedGmailTabs.length > 0) {
+            if (this._handleTabSwitch) {
+              this._handleTabSwitch(selectedGmailTabs[0]);
+            } else {
+              // Fallback if _handleTabSwitch is not available
+              gBrowser.tabContainer.advanceSelectedTab(1, true);
+            }
+          }
+          
+          // CRITICAL: We do NOT call unload or removeTab for these tabs.
+          // They remain loaded in the background.
+        }
+      } catch (e) {
+        console.error('[Live Gmail] Error in patched onCloseTabShortcut:', e);
+        // Fallback to original if something goes wrong
+        return await originalOnClose(event, selectedTab, options);
+      }
+    };
+
+    window.gZenPinnedTabManager._liveGmailPatched = true;
+    debugLog('ZenPinnedTabManager successfully patched');
   }
 
   // Initialize when browser is ready
@@ -657,6 +758,8 @@
 
     initCalled = true;
     debugLog('Initializing...');
+
+    patchZenPinnedTabManager();
 
     createPanel();
     setupTabMonitoring();
@@ -1090,23 +1193,12 @@
         e.preventDefault();
         e.stopPropagation();
         
-        // Prevent multiple clicks on the same email
-        const emailId = email.id || email.threadId;
-        if (pendingOpenThread.has(emailId)) {
-          debugLog('OpenThread already pending for email:', emailId);
-          return;
-        }
-        
-        // Mark as pending
-        pendingOpenThread.set(emailId, Date.now());
-        
         let targetTab = hoveredTab;
-        let tabWasAlreadyReady = false;
         
         // If no hoveredTab (cached email), find or create Gmail essential tab
         if (!targetTab && gBrowser) {
           const pattern = getGmailUrlPattern();
-          const defaultGmailUrl = `https://${pattern}/`;
+          const gmailUrl = `https://${pattern}/`;
           
           // Try to find existing Gmail essential tab
           for (const tab of gBrowser.tabs) {
@@ -1122,7 +1214,7 @@
           // If not found, create new tab
           if (!targetTab) {
             try {
-              targetTab = gBrowser.addTab(defaultGmailUrl);
+              targetTab = gBrowser.addTab(gmailUrl);
               if (targetTab && !targetTab.hasAttribute('zen-essential')) {
                 targetTab.setAttribute('zen-essential', 'true');
               }
@@ -1134,17 +1226,6 @@
         }
         
         if (!targetTab || !gBrowser) return;
-        
-        // Check if tab is already ready (on Gmail with messageManager)
-        const browser = targetTab.linkedBrowser;
-        if (browser && browser.messageManager && browser.currentURI) {
-          try {
-            const currentUrl = browser.currentURI.spec;
-            if (currentUrl.includes(getGmailUrlPattern())) {
-              tabWasAlreadyReady = true;
-            }
-          } catch (e) {}
-        }
         
         // Select the tab
         if (gBrowser.selectedTab !== targetTab) {
@@ -1161,7 +1242,7 @@
           }
         }
         
-        debugLog('Opening email at rowIndex:', email.rowIndex, 'url:', gmailUrl, 'tabReady:', tabWasAlreadyReady);
+        debugLog('Opening email at rowIndex:', email.rowIndex, 'url:', gmailUrl);
 
         // Wait for tab to be ready, then send OpenThread message
         const waitForTabReady = (tab, maxAttempts = 50) => {
@@ -1184,33 +1265,39 @@
                       // First time: inject frame script and wait for Gmail to be ready
                       loadFrameScript(browser);
                       
-                      // Set up listener for ready status (only once per waitForTabReady call)
+                      // Set up listener for ready status
                       if (!readyCheckListener) {
-                        const emailId = email.id || email.threadId;
-                        let sent = false; // Flag to prevent multiple sends from same listener
-                        
                         readyCheckListener = (message) => {
-                          if (sent) return; // Already sent, ignore
-                          
                           if (message.name === 'LiveGmail:ReadyStatus' && message.data && message.data.ready) {
                             gmailReady = true;
-                            sent = true; // Mark as sent
                             debugLog('Gmail inbox is ready, rows:', message.data.rows);
                             
                             // Now send the OpenThread message
                             setTimeout(() => {
-                              if (sendOpenThreadOnce(browser)) {
+                              try {
+                                debugLog('Sending OpenThread message:', {
+                                  threadId: email.threadId || email.id,
+                                  url: gmailUrl,
+                                  rowIndex: email.rowIndex
+                                });
+                                browser.messageManager.sendAsyncMessage('LiveGmail:OpenThread', {
+                                  threadId: email.threadId || email.id,
+                                  url: gmailUrl,
+                                  rowIndex: email.rowIndex
+                                });
+                                debugLog('Sent OpenThread to tab');
+                                
                                 // Clean up listener
                                 if (readyCheckListener) {
                                   Services.mm.removeMessageListener('LiveGmail:ReadyStatus', readyCheckListener);
                                 }
                                 resolve(true);
-                              } else {
-                                // Already sent, just resolve
+                              } catch (err) {
+                                console.warn('[Live Gmail] Could not send OpenThread:', err);
                                 if (readyCheckListener) {
                                   Services.mm.removeMessageListener('LiveGmail:ReadyStatus', readyCheckListener);
                                 }
-                                resolve(true);
+                                resolve(false);
                               }
                             }, 300);
                           }
@@ -1269,74 +1356,25 @@
           });
         };
 
-        // Helper function to send OpenThread (with duplicate protection)
-        const sendOpenThreadOnce = (browserToUse) => {
-          const emailId = email.id || email.threadId;
-          
-          // Check if already sent
-          if (!pendingOpenThread.has(emailId)) {
-            debugLog('OpenThread already sent for email:', emailId);
-            return false;
-          }
-          
-          try {
-            browserToUse.messageManager.sendAsyncMessage('LiveGmail:OpenThread', {
-              threadId: email.threadId || email.id,
-              url: gmailUrl,
-              rowIndex: email.rowIndex
-            });
-            debugLog('Sent OpenThread message:', {
-              threadId: email.threadId || email.id,
-              url: gmailUrl,
-              rowIndex: email.rowIndex
-            });
-            
-            // Remove from pending after a short delay (to prevent rapid re-clicks)
-            setTimeout(() => {
-              pendingOpenThread.delete(emailId);
-            }, 1000);
-            
-            return true;
-          } catch (err) {
-            console.warn('[Live Gmail] Could not send OpenThread:', err);
-            pendingOpenThread.delete(emailId);
-            return false;
-          }
-        };
-        
-        // Fast path: if tab was already ready, send OpenThread immediately
-        if (tabWasAlreadyReady && browser && browser.messageManager) {
-          debugLog('Tab already ready, sending OpenThread immediately');
-          
-          // Ensure frame script is loaded (idempotent)
-          loadFrameScript(browser);
-          
-          // Send OpenThread with minimal delay (just enough for frame script to be ready)
-          setTimeout(() => {
-            sendOpenThreadOnce(browser);
-          }, 50);
-        } else {
-          // Slow path: tab needs to be loaded, use waitForTabReady
-          debugLog('Tab not ready, using waitForTabReady');
-          waitForTabReady(targetTab).then((success) => {
-            if (success) {
-              debugLog('Successfully navigated to email');
-            } else {
-              console.warn('[Live Gmail] Failed to navigate to email, falling back to URL navigation');
-              // Fallback: navigate via URL
-              try {
-                const tabBrowser = targetTab.linkedBrowser;
-                if (tabBrowser && tabBrowser.currentURI) {
-                  tabBrowser.loadURI(gmailUrl, {
-                    triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
-                  });
-                }
-              } catch (err) {
-                console.warn('[Live Gmail] Could not navigate via URL:', err);
+        // Always use waitForTabReady to ensure frame script is loaded
+        waitForTabReady(targetTab).then((success) => {
+          if (success) {
+            debugLog('Successfully navigated to email');
+          } else {
+            console.warn('[Live Gmail] Failed to navigate to email, falling back to URL navigation');
+            // Fallback: navigate via URL
+            try {
+              const browser = targetTab.linkedBrowser;
+              if (browser && browser.currentURI) {
+                browser.loadURI(gmailUrl, {
+                  triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
+                });
               }
+            } catch (err) {
+              console.warn('[Live Gmail] Could not navigate via URL:', err);
             }
-          });
-        }
+          }
+        });
         
         // Track clicked email by its stable ID
         clickedEmailIds.add(email.id);
