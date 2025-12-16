@@ -2,18 +2,13 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        2.0
+// @version        2.1
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
 (function() {
   'use strict';
 
-  // Prevent double-loading
-  if (window.__LIVE_GMAIL_INITED__) {
-    return;
-  }
-  window.__LIVE_GMAIL_INITED__ = true;
 
   // Configuration
   const CONFIG = {
@@ -56,7 +51,6 @@
   let messageListenersRegistered = false;
   let lastScanRequestTs = 0;
   let lastLogTs = 0;
-  let initCalled = false; // Track if init has been called
 
 
   /**
@@ -64,7 +58,19 @@
    */
   function isGmailEssentialTab(tab) {
     if (!tab || !tab.hasAttribute('zen-essential')) return false;
-    
+
+    // Respect container-specific essentials: ignore essentials from other containers
+    try {
+      if (window.gZenWorkspaces && gZenWorkspaces.containerSpecificEssentials) {
+        const active = gZenWorkspaces.getActiveWorkspaceFromCache();
+        const activeContainerId = active?.containerTabId || 0;
+        const tabContainerId = parseInt(tab.getAttribute('usercontextid') || 0, 10);
+        if (activeContainerId && tabContainerId !== activeContainerId) {
+          return false;
+        }
+      }
+    } catch (e) {}
+
     const pattern = getGmailUrlPattern();
     const dataUrl = tab.getAttribute('data-url') || '';
     
@@ -468,14 +474,12 @@
       const scriptDataUrl = 'data:application/javascript;charset=utf-8,' + encodeURIComponent(GMAIL_FRAME_SCRIPT);
       browser.messageManager.loadFrameScript(scriptDataUrl, true);
       
-      // Send debug state to frame script
-      setTimeout(() => {
-        try {
-          browser.messageManager.sendAsyncMessage('LiveGmail:SetDebug', {
-            enabled: isDebugEnabled()
-          });
-        } catch (e) {}
-      }, 100);
+      // Send debug state to frame script immediately
+      try {
+        browser.messageManager.sendAsyncMessage('LiveGmail:SetDebug', {
+          enabled: isDebugEnabled()
+        });
+      } catch (e) {}
       
       debugLog('Frame script loaded into tab');
       return true;
@@ -629,10 +633,10 @@
     setupMessageListeners();
     requestScanFromGmailTabs();
     
-    // Periodic refresh
-    setInterval(() => {
-      requestScanFromGmailTabs();
-    }, 30000);
+    // Periodic refresh - REMOVED as MutationObserver handles updates
+    // setInterval(() => {
+    //   requestScanFromGmailTabs();
+    // }, 30000);
     
     return true;
   }
@@ -732,41 +736,6 @@
 
     window.gZenPinnedTabManager._liveGmailPatched = true;
     debugLog('ZenPinnedTabManager successfully patched');
-  }
-
-  // Initialize when browser is ready
-  if (typeof gBrowserInit !== 'undefined' && gBrowserInit.delayedStartupFinished) {
-    init();
-  } else {
-    window.addEventListener('DOMContentLoaded', init);
-    if (document.readyState === 'complete') {
-      init();
-    }
-  }
-
-  function init() {
-    // Prevent multiple initializations
-    if (initCalled) {
-      debugLog('Init already called, skipping');
-      return;
-    }
-    
-    if (typeof gBrowser === 'undefined') {
-      setTimeout(init, 100);
-      return;
-    }
-
-    initCalled = true;
-    debugLog('Initializing...');
-
-    patchZenPinnedTabManager();
-
-    createPanel();
-    setupTabMonitoring();
-    initDomMode();
-    updatePanelContent();
-    
-    debugLog('Initialized successfully');
   }
 
   /**
@@ -940,9 +909,22 @@
     if (!gBrowser || !gBrowser.tabs) return;
 
     const pattern = getGmailUrlPattern();
-    
+
+    const activeWorkspace = window.gZenWorkspaces?.getActiveWorkspaceFromCache?.();
+    const activeContainerId = activeWorkspace?.containerTabId || 0;
+
     for (const tab of gBrowser.tabs) {
       if (!tab.hasAttribute('zen-essential')) continue;
+
+      // Skip essentials from other containers if container-specific essentials is enabled
+      try {
+        if (window.gZenWorkspaces?.containerSpecificEssentials && activeContainerId) {
+          const tabContainerId = parseInt(tab.getAttribute('usercontextid') || 0, 10);
+          if (tabContainerId !== activeContainerId) {
+            continue;
+          }
+        }
+      } catch (e) {}
 
       // Check both data-url (works when tab is hidden) and current URI (when tab is visible)
       const dataUrl = tab.getAttribute('data-url') || '';
@@ -1199,24 +1181,47 @@
         if (!targetTab && gBrowser) {
           const pattern = getGmailUrlPattern();
           const gmailUrl = `https://${pattern}/`;
-          
-          // Try to find existing Gmail essential tab
+
+          const activeWorkspace = window.gZenWorkspaces?.getActiveWorkspaceFromCache?.();
+          const activeContainerId = activeWorkspace?.containerTabId || 0;
+
+          // Try to find existing Gmail essential tab in the active container (if applicable)
           for (const tab of gBrowser.tabs) {
-            if (tab.hasAttribute('zen-essential')) {
-              const tabUrl = tab.linkedBrowser?.currentURI?.spec || tab.getAttribute('data-url') || '';
-              if (tabUrl.includes(pattern)) {
-                targetTab = tab;
-                break;
+            if (!tab.hasAttribute('zen-essential')) {
+              continue;
+            }
+
+            if (window.gZenWorkspaces?.containerSpecificEssentials && activeContainerId) {
+              const tabContainerId = parseInt(tab.getAttribute('usercontextid') || 0, 10);
+              if (tabContainerId !== activeContainerId) {
+                continue;
               }
             }
+
+            const tabUrl = tab.linkedBrowser?.currentURI?.spec || tab.getAttribute('data-url') || '';
+            if (tabUrl.includes(pattern)) {
+              targetTab = tab;
+              break;
+            }
           }
-          
-          // If not found, create new tab
+
+          // If not found, create new tab (ideally in the active container)
           if (!targetTab) {
             try {
-              targetTab = gBrowser.addTab(gmailUrl);
+              let addTabArgs = {
+                triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
+              };
+              if (activeContainerId) {
+                addTabArgs.userContextId = activeContainerId;
+              }
+
+              targetTab = gBrowser.addTab(gmailUrl, addTabArgs);
               if (targetTab && !targetTab.hasAttribute('zen-essential')) {
-                targetTab.setAttribute('zen-essential', 'true');
+                if (window.gZenPinnedTabManager?.addToEssentials) {
+                  window.gZenPinnedTabManager.addToEssentials(targetTab);
+                } else {
+                  targetTab.setAttribute('zen-essential', 'true');
+                }
               }
             } catch (err) {
               console.warn('[Live Gmail] Could not create Gmail tab:', err);
@@ -1272,53 +1277,49 @@
                             gmailReady = true;
                             debugLog('Gmail inbox is ready, rows:', message.data.rows);
                             
-                            // Now send the OpenThread message
-                            setTimeout(() => {
-                              try {
-                                debugLog('Sending OpenThread message:', {
-                                  threadId: email.threadId || email.id,
-                                  url: gmailUrl,
-                                  rowIndex: email.rowIndex
-                                });
-                                browser.messageManager.sendAsyncMessage('LiveGmail:OpenThread', {
-                                  threadId: email.threadId || email.id,
-                                  url: gmailUrl,
-                                  rowIndex: email.rowIndex
-                                });
-                                debugLog('Sent OpenThread to tab');
-                                
-                                // Clean up listener
-                                if (readyCheckListener) {
-                                  Services.mm.removeMessageListener('LiveGmail:ReadyStatus', readyCheckListener);
-                                }
-                                resolve(true);
-                              } catch (err) {
-                                console.warn('[Live Gmail] Could not send OpenThread:', err);
-                                if (readyCheckListener) {
-                                  Services.mm.removeMessageListener('LiveGmail:ReadyStatus', readyCheckListener);
-                                }
-                                resolve(false);
+                            // Now send the OpenThread message immediately
+                            try {
+                              debugLog('Sending OpenThread message:', {
+                                threadId: email.threadId || email.id,
+                                url: gmailUrl,
+                                rowIndex: email.rowIndex
+                              });
+                              browser.messageManager.sendAsyncMessage('LiveGmail:OpenThread', {
+                                threadId: email.threadId || email.id,
+                                url: gmailUrl,
+                                rowIndex: email.rowIndex
+                              });
+                              debugLog('Sent OpenThread to tab');
+                              
+                              // Clean up listener
+                              if (readyCheckListener) {
+                                Services.mm.removeMessageListener('LiveGmail:ReadyStatus', readyCheckListener);
                               }
-                            }, 300);
+                              resolve(true);
+                            } catch (err) {
+                              console.warn('[Live Gmail] Could not send OpenThread:', err);
+                              if (readyCheckListener) {
+                                Services.mm.removeMessageListener('LiveGmail:ReadyStatus', readyCheckListener);
+                              }
+                              resolve(false);
+                            }
                           }
                         };
                         
                         Services.mm.addMessageListener('LiveGmail:ReadyStatus', readyCheckListener);
                       }
                       
-                      // Request ready check from frame script
-                      setTimeout(() => {
-                        try {
-                          browser.messageManager.sendAsyncMessage('LiveGmail:CheckReady', {});
-                        } catch (e) {
-                          debugLog('Could not send CheckReady:', e);
-                        }
-                      }, 500);
+                      // Request ready check from frame script immediately
+                      try {
+                        browser.messageManager.sendAsyncMessage('LiveGmail:CheckReady', {});
+                      } catch (e) {
+                        debugLog('Could not send CheckReady:', e);
+                      }
                     }
                     
                     // Continue checking if not ready yet
                     if (!gmailReady && attempts < maxAttempts) {
-                      setTimeout(checkReady, 200);
+                      setTimeout(checkReady, 50);
                     } else if (!gmailReady) {
                       console.warn('[Live Gmail] Gmail did not become ready in time');
                       if (readyCheckListener) {
@@ -1468,6 +1469,30 @@
     return div.innerHTML;
   }
 
+  // ============================================
+  // Initialization
+  // ============================================
+
+  const UC_LIVE_GMAIL = {
+    init: function() {
+      if (!window.gBrowser || !window.gZenPinnedTabManager) {
+        if (isDebugEnabled()) console.warn('LiveGmail: gBrowser or ZenPinnedTabManager not ready, retrying...');
+        setTimeout(() => this.init(), 200);
+        return;
+      }
+
+      debugLog('Initializing UC_LIVE_GMAIL...');
+
+      patchZenPinnedTabManager();
+      createPanel();
+      setupTabMonitoring();
+      initDomMode();
+      updatePanelContent();
+      
+      debugLog('Initialized successfully');
+    }
+  };
+
   // Debug functions
   window.liveGmailDebug = {
     showPanel: () => {
@@ -1479,7 +1504,14 @@
     },
     hidePanel,
     scan: requestScanFromGmailTabs,
-    emails: () => currentEmails
+    emails: () => currentEmails,
+    reInit: () => UC_LIVE_GMAIL.init()
   };
+
+  if (document.readyState === 'complete') {
+    UC_LIVE_GMAIL.init();
+  } else {
+    window.addEventListener('DOMContentLoaded', () => UC_LIVE_GMAIL.init());
+  }
 
 })();
