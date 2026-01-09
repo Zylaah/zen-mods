@@ -2,7 +2,13 @@
   "id": "mistral-pill",
   "name": "Mistral Pill",
   "description": "Adds a style to the Mistral Pill in the floating urlbar if Mistral is used as a search engine",
-  "js": true,
+  "scripts": {
+    "mistral-pill.uc.js": {
+      "include": [
+        "chrome://browser/content/browser.xhtml"
+      ]
+    }
+  },
   "homepage": "https://github.com/Zylaah/zen-mods",
   "readme": "https://raw.githubusercontent.com/Zylaah/zen-mods/refs/heads/main/mistral-pill/README.md",
   "author": "Bxth",

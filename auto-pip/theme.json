@@ -2,7 +2,13 @@
   "id": "auto-pip-setting",
   "name": "Auto-PiP-Setting",
   "description": "Adds auto-picture-in-picture setting in the unified panel",
-  "js": true,
+  "scripts": {
+    "zen-auto-pip-setting.uc.js": {
+      "include": [
+        "chrome://browser/content/browser.xhtml"
+      ]
+    }
+  },
   "homepage": "https://github.com/Zylaah/zen-mods",
   "readme": "https://raw.githubusercontent.com/Zylaah/zen-mods/refs/heads/main/auto-pip/README.md",
   "author": "Bxth",
