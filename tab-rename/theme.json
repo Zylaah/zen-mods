@@ -2,7 +2,13 @@
   "id": "tab-rename",
   "name": "Tab Rename",
   "description": "Let's you rename non-pinned tabs by double-clicking on them",
-  "js": true,
+  "scripts": {
+    "tab-rename.uc.js": {
+      "include": [
+        "chrome://browser/content/browser.xhtml"
+      ]
+    }
+  },
   "homepage": "https://github.com/Zylaah/zen-mods",
   "readme": "https://raw.githubusercontent.com/Zylaah/zen-mods/refs/heads/main/tab-rename/README.md",
   "author": "Bxth",
