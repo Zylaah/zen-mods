@@ -172,13 +172,13 @@
     const nameLabel = document.createXULElement('label');
     nameLabel.setAttribute('flex', '1');
     nameLabel.setAttribute('class', 'permission-popup-permission-label');
-    nameLabel.textContent = 'Auto Picture-in-Picture';
+    nameLabel.textContent = 'Picture-in-Picture';
     labelContainer.appendChild(nameLabel);
 
     // Create state label
     const stateLabel = document.createXULElement('label');
     stateLabel.setAttribute('class', 'zen-permission-popup-permission-state-label');
-    stateLabel.textContent = isEnabled ? 'Enabled' : 'Disabled';
+    stateLabel.textContent = isEnabled ? 'Automatic' : 'Off';
     labelContainer.appendChild(stateLabel);
 
     // Store the preference info on the label container for click handling
@@ -234,7 +234,7 @@
 
     const stateLabel = item.querySelector('.zen-permission-popup-permission-state-label');
     if (stateLabel) {
-      stateLabel.textContent = newValue ? 'Enabled' : 'Disabled';
+      stateLabel.textContent = newValue ? 'Automatic' : 'Off';
     }
   }
 })();
