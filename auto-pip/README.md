@@ -10,5 +10,3 @@ Adds an Auto Picture-in-Picture toggle control to Zen Browser's unified site dat
 - Updates when switching tabs or when media starts/stops
 - Persists the preference setting across browser sessions
 
-
-<img width="234" height="360" alt="Capture d&#39;écran 2025-12-14 171324" src="https://github.com/user-attachments/assets/375f408f-e8b1-485a-8c65-9c6562098c63" />
