@@ -1,5 +1,5 @@
 {
-  "version": "1.1",
+  "version": "1.2",
   "id": "auto-pip-setting",
   "name": "Auto-PiP-Setting",
   "description": "Adds auto-picture-in-picture setting in the unified panel",
@@ -20,6 +20,6 @@
     "Unified Panel"
   ],
   "createdAt": "2025-12-08",
-  "updatedAt": "2026-02-24",
+  "updatedAt": "2026-03-19",
   "fork": ["zen"]
 }

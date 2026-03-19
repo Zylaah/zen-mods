@@ -2,7 +2,7 @@
 // @name           Auto-pip
 // @description    Adds auto-pip option in the unified panel
 // @author         Bxth
-// @version        1.1
+// @version        1.2
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -23,12 +23,20 @@
   }
 
   let addAutoPiPSettingTimeout = null;
+  let initRetryCount = 0;
+  const INIT_RETRY_MAX = 50; // 5 seconds at 100ms intervals
+  const INIT_RETRY_DELAY = 100;
 
   function init() {
-    // Find the panel element
+    // Find the panel element (may not exist yet on some startups)
     const panel = document.getElementById('zen-unified-site-data-panel');
     if (!panel) {
-      console.error('zen-auto-pip-setting: Could not find zen-unified-site-data-panel');
+      if (initRetryCount < INIT_RETRY_MAX) {
+        initRetryCount++;
+        setTimeout(init, INIT_RETRY_DELAY);
+      } else {
+        console.error('zen-auto-pip-setting: Could not find zen-unified-site-data-panel after retries');
+      }
       return;
     }
 
@@ -58,9 +66,6 @@
         scheduleAddAutoPiPSetting(150);
       }
     });
-
-    // Handle clicks on our custom setting
-    document.addEventListener('click', handleAutoPiPClick, true);
   }
 
   function scheduleAddAutoPiPSetting(delay) {
@@ -198,6 +203,10 @@
     labelContainer._isAutoPip = true;
     labelContainer._prefValue = isEnabled;
 
+    // Attach click handler directly to container (like native permission items)
+    // More reliable than document-level - avoids capture order / different-document issues
+    container.addEventListener('click', handleAutoPiPClick, true);
+
     container.appendChild(img);
     container.appendChild(labelContainer);
 
@@ -217,8 +226,13 @@
   }
 
   function handleAutoPiPClick(event) {
-    const item = event.target.closest('.permission-popup-permission-item-auto-pip');
-    if (!item) {
+    if (typeof Services === 'undefined') {
+      return;
+    }
+
+    // Listener is on container, so currentTarget is our item
+    const item = event.currentTarget;
+    if (!item?.classList?.contains('permission-popup-permission-item-auto-pip')) {
       return;
     }
 
@@ -236,12 +250,11 @@
     let currentValue;
     try {
       currentValue = Services.prefs.getBoolPref(PREF_PIP_AUTO, false);
+      // Skip if pref is locked (e.g. enterprise policy) - prefIsLocked can throw for non-existent prefs
+      if (Services.prefs.prefIsLocked(PREF_PIP_AUTO)) {
+        return;
+      }
     } catch (e) {
-      return;
-    }
-
-    // Skip if pref is locked (e.g. enterprise policy)
-    if (Services.prefs.prefIsLocked(PREF_PIP_AUTO)) {
       return;
     }
 
