@@ -15,6 +15,23 @@
   // The preference for Auto Picture-in-Picture
   const PREF_PIP_AUTO = 'media.videocontrols.picture-in-picture.enable-when-switching-tabs.enabled';
 
+  /** about:config — enable verbose Browser Console logging for this mod */
+  const PREF_DEBUG = 'extensions.zen.mods.auto-pip.debug';
+
+  /**
+   * Logs to Browser Console only when {@link PREF_DEBUG} is true.
+   */
+  function debugLog(...args) {
+    try {
+      if (typeof Services === 'undefined' || !Services.prefs.getBoolPref(PREF_DEBUG, false)) {
+        return;
+      }
+    } catch (_e) {
+      return;
+    }
+    console.log('[zen-auto-pip]', ...args);
+  }
+
   // Wait for the window to be ready
   if (window.gBrowserInit && window.gBrowserInit.delayedStartupFinished) {
     init();
@@ -33,22 +50,28 @@
     if (!panel) {
       if (initRetryCount < INIT_RETRY_MAX) {
         initRetryCount++;
+        debugLog('panel not ready, retry', initRetryCount, '/', INIT_RETRY_MAX);
         setTimeout(init, INIT_RETRY_DELAY);
       } else {
         console.error('zen-auto-pip-setting: Could not find zen-unified-site-data-panel after retries');
+        debugLog('giving up waiting for zen-unified-site-data-panel');
       }
       return;
     }
 
+    debugLog('init OK, zen-unified-site-data-panel found');
+
     // Listen for when the panel is about to be shown
     // Use setTimeout to ensure it runs after the original panel preparation
     panel.addEventListener('popupshowing', () => {
+      debugLog('popupshowing → addAutoPiPSetting');
       setTimeout(addAutoPiPSetting, 0);
     }, true);
 
     // Update the panel when tab changes (in case panel is open)
     window.addEventListener('TabSelect', () => {
       if (!panel.hasAttribute('hidden')) {
+        debugLog('TabSelect while panel visible → schedule refresh');
         scheduleAddAutoPiPSetting(0);
       }
     });
@@ -57,12 +80,14 @@
     // Debounce to avoid rapid recreate cycles that can race with click handling
     window.addEventListener('DOMAudioPlaybackStarted', () => {
       if (!panel.hasAttribute('hidden')) {
+        debugLog('DOMAudioPlaybackStarted while panel visible → schedule refresh (150ms)');
         scheduleAddAutoPiPSetting(150);
       }
     });
 
     window.addEventListener('DOMAudioPlaybackStopped', () => {
       if (!panel.hasAttribute('hidden')) {
+        debugLog('DOMAudioPlaybackStopped while panel visible → schedule refresh (150ms)');
         scheduleAddAutoPiPSetting(150);
       }
     });
@@ -72,6 +97,7 @@
     if (addAutoPiPSettingTimeout) {
       clearTimeout(addAutoPiPSettingTimeout);
     }
+    debugLog('scheduleAddAutoPiPSetting delay=', delay);
     addAutoPiPSettingTimeout = setTimeout(() => {
       addAutoPiPSettingTimeout = null;
       addAutoPiPSetting();
@@ -81,23 +107,29 @@
   function hasMediaOnCurrentTab() {
     // Check if ZenMediaController is available
     if (!window.gZenMediaController) {
+      debugLog('hasMediaOnCurrentTab: false (no gZenMediaController)');
       return false;
     }
 
     // Get the currently selected browser
     const selectedBrowser = window.gBrowser?.selectedBrowser;
     if (!selectedBrowser) {
+      debugLog('hasMediaOnCurrentTab: false (no selectedBrowser)');
       return false;
     }
+
+    const browserId = selectedBrowser.browserId;
 
     // Method 1: Check if the browser's browsing context has an active media controller
     // This is the most direct way to check for media on a specific browser
     try {
       const mediaController = selectedBrowser.browsingContext?.mediaController;
       if (mediaController?.isActive) {
+        debugLog('hasMediaOnCurrentTab: true (browsingContext.mediaController)', { browserId });
         return true;
       }
     } catch (e) {
+      debugLog('hasMediaOnCurrentTab: browsingContext check threw', e);
       // browsingContext might not be available (e.g., tab is loading)
     }
 
@@ -106,6 +138,7 @@
       window.gZenMediaController._currentBrowser?.browserId === selectedBrowser.browserId &&
       window.gZenMediaController._currentMediaController?.isActive
     ) {
+      debugLog('hasMediaOnCurrentTab: true (gZenMediaController current)', { browserId });
       return true;
     }
 
@@ -113,27 +146,32 @@
     // This catches cases where media exists but isn't the "current" controller
     for (const entry of window.gZenMediaController.mediaControllersMap?.values() || []) {
       if (entry.browser?.browserId === selectedBrowser.browserId && entry.controller?.isActive) {
+        debugLog('hasMediaOnCurrentTab: true (mediaControllersMap)', { browserId });
         return true;
       }
     }
 
+    debugLog('hasMediaOnCurrentTab: false (no active controller for tab)', { browserId });
     return false;
   }
 
   function addAutoPiPSetting() {
     const list = document.getElementById('zen-site-data-settings-list');
     if (!list) {
+      debugLog('addAutoPiPSetting: skip (no zen-site-data-settings-list)');
       return;
     }
 
     // Remove existing Auto PiP item if it exists
     const existing = list.querySelector('.permission-popup-permission-item-auto-pip');
     if (existing) {
+      debugLog('addAutoPiPSetting: removing existing auto-pip row');
       existing.remove();
     }
 
     // Only show Auto PiP setting if media is detected on the current tab
     if (!hasMediaOnCurrentTab()) {
+      debugLog('addAutoPiPSetting: hide row (no media on tab)');
       // Update section visibility in case we removed the item
       const section = list.closest('.zen-site-data-section');
       if (section) {
@@ -218,6 +256,8 @@
       list.appendChild(container);
     }
 
+    debugLog('addAutoPiPSetting: row added, pref enabled=', isEnabled);
+
     // Update section visibility
     const section = list.closest('.zen-site-data-section');
     if (section) {
@@ -227,6 +267,7 @@
 
   function handleAutoPiPClick(event) {
     if (typeof Services === 'undefined') {
+      debugLog('handleAutoPiPClick: no Services');
       return;
     }
 
@@ -252,13 +293,16 @@
       currentValue = Services.prefs.getBoolPref(PREF_PIP_AUTO, false);
       // Skip if pref is locked (e.g. enterprise policy) - prefIsLocked can throw for non-existent prefs
       if (Services.prefs.prefIsLocked(PREF_PIP_AUTO)) {
+        debugLog('handleAutoPiPClick: skip, pref locked', PREF_PIP_AUTO);
         return;
       }
     } catch (e) {
+      debugLog('handleAutoPiPClick: skip, could not read pref', e);
       return;
     }
 
     const newValue = !currentValue;
+    debugLog('handleAutoPiPClick: toggle', { from: currentValue, to: newValue });
 
     // Update the preference
     try {
