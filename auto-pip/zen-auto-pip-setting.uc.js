@@ -2,7 +2,7 @@
 // @name           Auto-pip
 // @description    Adds auto-pip option in the unified panel
 // @author         Bxth
-// @version        1.2
+// @version        1.3
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -32,34 +32,82 @@
     console.log('[zen-auto-pip]', ...args);
   }
 
-  // Wait for the window to be ready
-  if (window.gBrowserInit && window.gBrowserInit.delayedStartupFinished) {
-    init();
-  } else {
-    window.addEventListener('load', init, { once: true });
-  }
-
   let addAutoPiPSettingTimeout = null;
+  /** True once listeners are attached — avoids duplicates if bootstrap runs twice */
+  let lifecycleHooksInstalled = false;
+  let panelRetryTimer = null;
   let initRetryCount = 0;
   const INIT_RETRY_MAX = 50; // 5 seconds at 100ms intervals
   const INIT_RETRY_DELAY = 100;
+  /** After fast retries fail (very late UI), keep trying slowly until the panel exists */
+  const INIT_SLOW_RETRY_MS = 30000;
 
-  function init() {
-    // Find the panel element (may not exist yet on some startups)
-    const panel = document.getElementById('zen-unified-site-data-panel');
-    if (!panel) {
-      if (initRetryCount < INIT_RETRY_MAX) {
-        initRetryCount++;
-        debugLog('panel not ready, retry', initRetryCount, '/', INIT_RETRY_MAX);
-        setTimeout(init, INIT_RETRY_DELAY);
-      } else {
-        console.error('zen-auto-pip-setting: Could not find zen-unified-site-data-panel after retries');
-        debugLog('giving up waiting for zen-unified-site-data-panel');
-      }
+  /**
+   * Zen may inject this script after `load` has already fired. In that case
+   * `addEventListener('load', …)` never runs and init would never execute.
+   * Always attempt soon; also subscribe to `load` if the document is not complete yet.
+   */
+  function bootstrapInit() {
+    requestInitAttempt();
+  }
+
+  bootstrapInit();
+  if (document.readyState !== 'complete') {
+    window.addEventListener('load', bootstrapInit, { once: true });
+  }
+
+  /**
+   * Find `zen-unified-site-data-panel` and attach listeners once.
+   */
+  function requestInitAttempt() {
+    if (lifecycleHooksInstalled) {
       return;
     }
 
-    debugLog('init OK, zen-unified-site-data-panel found');
+    const panel = document.getElementById('zen-unified-site-data-panel');
+    if (panel) {
+      if (panelRetryTimer !== null) {
+        clearTimeout(panelRetryTimer);
+        panelRetryTimer = null;
+      }
+      initRetryCount = 0;
+      installLifecycleHooks(panel);
+      debugLog('init OK, zen-unified-site-data-panel found');
+      return;
+    }
+
+    if (panelRetryTimer !== null) {
+      return;
+    }
+
+    if (initRetryCount < INIT_RETRY_MAX) {
+      initRetryCount++;
+      debugLog('panel not ready, retry', initRetryCount, '/', INIT_RETRY_MAX);
+      panelRetryTimer = setTimeout(() => {
+        panelRetryTimer = null;
+        requestInitAttempt();
+      }, INIT_RETRY_DELAY);
+      return;
+    }
+
+    console.warn(
+      'zen-auto-pip-setting: Panel not found after fast retries; retrying slowly every',
+      INIT_SLOW_RETRY_MS / 1000,
+      's (Zen may load UI late).'
+    );
+    debugLog('slow retry scheduled — panel still missing');
+    initRetryCount = 0;
+    panelRetryTimer = setTimeout(() => {
+      panelRetryTimer = null;
+      requestInitAttempt();
+    }, INIT_SLOW_RETRY_MS);
+  }
+
+  function installLifecycleHooks(panel) {
+    if (lifecycleHooksInstalled) {
+      return;
+    }
+    lifecycleHooksInstalled = true;
 
     // Listen for when the panel is about to be shown
     // Use setTimeout to ensure it runs after the original panel preparation
