@@ -1,0 +1,28 @@
+{
+  "version": "2.2",
+  "id": "live-gmail",
+  "name": "Live Gmail Panel",
+  "description": "Unread Gmail preview when hovering Gmail essential tabs",
+  "scripts": {
+    "live-gmail.uc.js": {
+      "include": [
+        "chrome://browser/content/browser.xhtml"
+      ]
+    }
+  },
+  "style": {
+    "chrome": "chrome.css"
+  },
+  "homepage": "https://github.com/Zylaah/zen-mods/tree/main/live-gmail",
+  "readme": "https://raw.githubusercontent.com/Zylaah/zen-mods/refs/heads/main/live-gmail/README.md",
+  "author": "Bxth",
+  "tags": [
+    "Zen Browser",
+    "Gmail",
+    "Essentials",
+    "Unread"
+  ],
+  "createdAt": "2025-12-08",
+  "updatedAt": "2026-05-18",
+  "fork": ["zen"]
+}
