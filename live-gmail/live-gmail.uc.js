@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        2.2.3
+// @version        2.2.4
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -57,39 +57,79 @@
   let lastLogTs = 0;
   let backgroundScanTimer = null;
   let scannerCreateInProgress = false;
+  let scanInProgress = false;
 
+
+  /**
+   * Whether this essential belongs to the active workspace container
+   */
+  function isEssentialInActiveContainer(tab) {
+    if (!tab?.hasAttribute('zen-essential')) return false;
+    try {
+      if (window.gZenWorkspaces?.containerSpecificEssentials) {
+        const active = gZenWorkspaces.getActiveWorkspaceFromCache();
+        const activeContainerId = active?.containerTabId || 0;
+        const tabContainerId = parseInt(tab.getAttribute('usercontextid') || '0', 10);
+        if (activeContainerId && tabContainerId !== activeContainerId) {
+          return false;
+        }
+      }
+    } catch (e) {}
+    return true;
+  }
+
+  /**
+   * Collect URL hints from a tab (works when unloaded — data-url may be missing until first open)
+   */
+  function getTabUrlHints(tab) {
+    const hints = [];
+    if (!tab) return hints;
+
+    for (const attr of ['data-url', 'pending', 'zen-origin-url', 'data-original-url']) {
+      const value = tab.getAttribute(attr);
+      if (value) hints.push(value);
+    }
+
+    try {
+      const spec = tab.linkedBrowser?.currentURI?.spec;
+      if (spec) hints.push(spec);
+    } catch (e) {}
+
+    const image = tab.getAttribute('image') || '';
+    if (image) hints.push(image);
+
+    const label = tab.getAttribute('label') || tab.label || '';
+    if (label) hints.push(label);
+
+    return hints;
+  }
+
+  /**
+   * Match Gmail by URL pattern, pending URI, favicon, or label (unloaded essentials)
+   */
+  function tabMatchesGmailPattern(tab) {
+    const pattern = getGmailUrlPattern();
+    const hints = getTabUrlHints(tab);
+
+    if (hints.some((hint) => hint.includes(pattern))) {
+      return true;
+    }
+
+    const label = (tab.getAttribute('label') || tab.label || '').toLowerCase();
+    if (label === 'gmail' || label.includes('mail.google')) {
+      return true;
+    }
+
+    return false;
+  }
 
   /**
    * Check if a tab is a Gmail essential tab
    */
   function isGmailEssentialTab(tab) {
     if (!tab || !tab.hasAttribute('zen-essential')) return false;
-
-    // Respect container-specific essentials: ignore essentials from other containers
-    try {
-      if (window.gZenWorkspaces && gZenWorkspaces.containerSpecificEssentials) {
-        const active = gZenWorkspaces.getActiveWorkspaceFromCache();
-        const activeContainerId = active?.containerTabId || 0;
-        const tabContainerId = parseInt(tab.getAttribute('usercontextid') || 0, 10);
-        if (activeContainerId && tabContainerId !== activeContainerId) {
-          return false;
-        }
-      }
-    } catch (e) {}
-
-    const pattern = getGmailUrlPattern();
-    const dataUrl = tab.getAttribute('data-url') || '';
-    
-    if (dataUrl.includes(pattern)) return true;
-    
-    if (tab.linkedBrowser && tab.linkedBrowser.currentURI) {
-      try {
-        const tabUrl = tab.linkedBrowser.currentURI.spec;
-        if (tabUrl && tabUrl.includes(pattern)) return true;
-      } catch (e) {}
-    }
-    
-    return false;
+    if (!isEssentialInActiveContainer(tab)) return false;
+    return tabMatchesGmailPattern(tab);
   }
 
   /**
@@ -315,6 +355,8 @@
    */
   function wakeGmailForScan() {
     if (!gBrowser) return;
+
+    scanInProgress = true;
 
     if (scanLoadedGmailTabs()) return;
 
@@ -849,6 +891,7 @@
       }
     }
 
+    scanInProgress = false;
     hideError();
     updateEmailDisplay();
   }
@@ -1011,11 +1054,17 @@
       gBrowser.tabContainer.addEventListener('TabClose', handleTabChange);
     }
 
+    setupEssentialsHoverDelegation();
+
     const observer = new MutationObserver(updateGmailTabs);
 
     const essentials = document.getElementById('zen-essentials');
     if (essentials) {
-      observer.observe(essentials, { childList: true, attributes: true, attributeFilter: ['zen-essential', 'data-url'] });
+      observer.observe(essentials, {
+        childList: true,
+        attributes: true,
+        attributeFilter: ['zen-essential', 'data-url', 'pending', 'label', 'image']
+      });
     }
 
     const tabs = document.getElementById('tabbrowser-tabs');
@@ -1051,35 +1100,19 @@
         }
       } catch (e) {}
 
-      // Check both data-url (works when tab is hidden) and current URI (when tab is visible)
-      const dataUrl = tab.getAttribute('data-url') || '';
-      let tabUrl = '';
-      
-      // If tab is loaded (visible or hidden), prefer current URI
-      if (tab.linkedBrowser && tab.linkedBrowser.currentURI) {
-        try {
-          tabUrl = tab.linkedBrowser.currentURI.spec;
-        } catch (e) {}
-      }
-      
-      // Fall back to data-url if no current URI
-      if (!tabUrl) {
-        tabUrl = dataUrl;
+      if (!tab.hasAttribute('data-live-gmail-listener')) {
+        tab.addEventListener('mouseenter', handleTabHover);
+        tab.addEventListener('mouseleave', handleTabLeave);
+        tab.setAttribute('data-live-gmail-listener', 'true');
       }
 
-      // Add if URL matches Gmail pattern
-      if (tabUrl && tabUrl.includes(pattern)) {
-        gmailTabs.set(tab, tabUrl);
-        
-        if (!tab.hasAttribute('data-live-gmail-listener')) {
-          tab.addEventListener('mouseenter', handleTabHover);
-          tab.addEventListener('mouseleave', handleTabLeave);
-          tab.setAttribute('data-live-gmail-listener', 'true');
-        }
-      }
+      if (!tabMatchesGmailPattern(tab)) continue;
+
+      const hints = getTabUrlHints(tab);
+      const tabUrl = hints.find((h) => h.includes(pattern)) || hints[0] || '';
+      gmailTabs.set(tab, tabUrl);
     }
 
-    // Request scan from open Gmail tabs
     requestScanFromGmailTabs();
   }
 
@@ -1096,37 +1129,38 @@
   }
 
   /**
+   * Hover on essentials strip (fallback when per-tab listeners are not attached yet)
+   */
+  function setupEssentialsHoverDelegation() {
+    const root =
+      document.querySelector('.zen-essentials-container') ||
+      document.getElementById('zen-essentials');
+    if (!root || root.hasAttribute('data-live-gmail-hover-delegate')) return;
+
+    root.setAttribute('data-live-gmail-hover-delegate', 'true');
+    root.addEventListener(
+      'mouseover',
+      (event) => {
+        const tab = event.target.closest('.tabbrowser-tab');
+        if (!tab?.hasAttribute('zen-essential')) return;
+        if (!isGmailEssentialTab(tab)) return;
+        hoveredTab = tab;
+        showPanel(tab);
+      },
+      true
+    );
+  }
+
+  /**
    * Handle tab hover
    */
   function handleTabHover(event) {
     const tab = event.currentTarget;
-    if (!tab.hasAttribute('zen-essential')) return;
-    
-    // Check if this is a Gmail essential tab (by URL pattern in data-url or current URI)
-    const pattern = getGmailUrlPattern();
-    let isGmailTab = false;
-    
-    // Check data-url attribute (works even when tab is closed)
-    const dataUrl = tab.getAttribute('data-url') || '';
-    if (dataUrl.includes(pattern)) {
-      isGmailTab = true;
-    }
-    
-    // If tab is open, also check current URI
-    if (!isGmailTab && tab.linkedBrowser && tab.linkedBrowser.currentURI) {
-      try {
-        const tabUrl = tab.linkedBrowser.currentURI.spec;
-        if (tabUrl && tabUrl.includes(pattern)) {
-          isGmailTab = true;
-        }
-      } catch (e) {}
-    }
-    
-    if (!isGmailTab) {
+    if (!isGmailEssentialTab(tab)) {
       hidePanel();
       return;
     }
-    
+
     hoveredTab = tab;
     showPanel(tab);
   }
@@ -1182,6 +1216,7 @@
       return;
     }
 
+    // Gmail essential hover always opens the panel (loading → results)
     if (!isEssentialHover && !hasCachedData && !hasGmailTab()) {
       debugLog('No Gmail essential hover, tab, or cached data; not showing panel');
       hidePanel();
@@ -1207,7 +1242,11 @@
     panelElement.style.left = `${left}px`;
     panelElement.classList.remove(CONFIG.PANEL_HIDDEN_CLASS);
 
-    updateEmailDisplay();
+    if (isEssentialHover && !hasCachedData) {
+      updatePanelContent();
+    } else {
+      updateEmailDisplay();
+    }
 
     requestScanFromGmailTabs(true, true);
   }
@@ -1255,11 +1294,16 @@
 
     if (!emailsContainer) return;
 
+    const emailsToShow = currentEmails.length > 0 ? currentEmails : cachedEmails;
+
+    if (emailsToShow.length === 0 && scanInProgress) {
+      if (loadingContainer) loadingContainer.style.display = 'block';
+      emailsContainer.innerHTML = '';
+      return;
+    }
+
     if (loadingContainer) loadingContainer.style.display = 'none';
     emailsContainer.innerHTML = '';
-
-    // Use current emails, or fall back to cached emails if no Gmail tab is open
-    const emailsToShow = currentEmails.length > 0 ? currentEmails : cachedEmails;
 
     if (emailsToShow.length === 0) {
       emailsContainer.innerHTML = '<div class="live-gmail-empty">No unread emails</div>';
