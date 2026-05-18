@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        2.2
+// @version        2.2.1
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -821,103 +821,6 @@
   }
 
   /**
-   * Patch ZenPinnedTabManager to prevent unloading of Gmail essential tabs
-   */
-  function patchZenPinnedTabManager() {
-    if (!window.gZenPinnedTabManager) {
-      debugLog('ZenPinnedTabManager not ready, retrying in 1s');
-      setTimeout(patchZenPinnedTabManager, 1000);
-      return;
-    }
-
-    if (window.gZenPinnedTabManager._liveGmailPatched) {
-      return;
-    }
-
-    debugLog('Patching ZenPinnedTabManager.onCloseTabShortcut');
-    
-    // Save original function
-    const originalOnClose = window.gZenPinnedTabManager.onCloseTabShortcut.bind(window.gZenPinnedTabManager);
-
-    // Overwrite with our wrapper
-    window.gZenPinnedTabManager.onCloseTabShortcut = async function(event, selectedTab, options = {}) {
-      try {
-        // Normalize input tabs (logic copied from ZenPinnedTabManager)
-        const tabs = Array.isArray(selectedTab) ? selectedTab : [selectedTab || gBrowser.selectedTab];
-        
-        // Expand split views and filter pinned tabs
-        const allTargetTabs = [
-          ...new Set(
-            tabs
-              .flatMap((tab) => {
-                if (tab && tab.group && tab.group.hasAttribute('split-view-group')) {
-                  // If it's a split view group, get all tabs inside
-                  return Array.from(tab.group.tabs || []);
-                }
-                return tab;
-              })
-              .filter((tab) => tab && tab.pinned)
-          ),
-        ];
-
-        if (allTargetTabs.length === 0) {
-          return await originalOnClose(event, selectedTab, options);
-        }
-
-        const gmailTabs = [];
-        const otherTabs = [];
-
-        for (const tab of allTargetTabs) {
-          if (isGmailEssentialTab(tab) || tab.hasAttribute(CONFIG.SCANNER_TAB_ATTR)) {
-            gmailTabs.push(tab);
-          } else {
-            otherTabs.push(tab);
-          }
-        }
-
-        // 1. Handle non-Gmail tabs normally
-        if (otherTabs.length > 0) {
-          // We pass the specific array of other tabs to avoid re-processing Gmail tabs
-          await originalOnClose(event, otherTabs, options);
-        }
-
-        // 2. Handle Gmail tabs (prevent unload)
-        if (gmailTabs.length > 0) {
-          debugLog('Intercepted close/unload for ' + gmailTabs.length + ' Gmail tabs');
-          
-          if (event) {
-            try {
-              event.stopPropagation();
-              event.preventDefault();
-            } catch(e) {}
-          }
-
-          // If any Gmail tab is selected, switch away from it
-          const selectedGmailTabs = gmailTabs.filter(t => t.selected);
-          if (selectedGmailTabs.length > 0) {
-            if (this._handleTabSwitch) {
-              this._handleTabSwitch(selectedGmailTabs[0]);
-            } else {
-              // Fallback if _handleTabSwitch is not available
-              gBrowser.tabContainer.advanceSelectedTab(1, true);
-            }
-          }
-          
-          // CRITICAL: We do NOT call unload or removeTab for these tabs.
-          // They remain loaded in the background.
-        }
-      } catch (e) {
-        console.error('[Live Gmail] Error in patched onCloseTabShortcut:', e);
-        // Fallback to original if something goes wrong
-        return await originalOnClose(event, selectedTab, options);
-      }
-    };
-
-    window.gZenPinnedTabManager._liveGmailPatched = true;
-    debugLog('ZenPinnedTabManager successfully patched');
-  }
-
-  /**
    * Create the floating panel
    */
   function createPanel() {
@@ -1650,15 +1553,14 @@
 
   const UC_LIVE_GMAIL = {
     init: function() {
-      if (!window.gBrowser || !window.gZenPinnedTabManager) {
-        if (isDebugEnabled()) console.warn('LiveGmail: gBrowser or ZenPinnedTabManager not ready, retrying...');
+      if (!window.gBrowser) {
+        if (isDebugEnabled()) console.warn('LiveGmail: gBrowser not ready, retrying...');
         setTimeout(() => this.init(), 200);
         return;
       }
 
       debugLog('Initializing UC_LIVE_GMAIL...');
 
-      patchZenPinnedTabManager();
       createPanel();
       setupTabMonitoring();
       initDomMode();
