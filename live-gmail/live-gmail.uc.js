@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        2.2.1
+// @version        2.2.2
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -56,6 +56,7 @@
   let lastScanRequestTs = 0;
   let lastLogTs = 0;
   let backgroundScanTimer = null;
+  let scannerCreateInProgress = false;
 
 
   /**
@@ -152,106 +153,168 @@
     }
   }
 
+  const LOAD_BACKGROUND =
+    Ci.nsIWebNavigation.LOAD_FLAGS_BACKGROUND_LOAD;
+
+  function restoreTabSelection(preferredTab) {
+    if (!preferredTab || preferredTab.closing || !gBrowser) return;
+    try {
+      if (gBrowser.selectedTab !== preferredTab) {
+        gBrowser.selectedTab = preferredTab;
+      }
+    } catch (e) {}
+  }
+
   /**
-   * Internal background tab used to scrape Gmail when essentials are unloaded
+   * Dedicated scanner tab (one per window; not container-filtered to avoid duplicates)
    */
   function findScannerTab() {
-    const containerId = getActiveContainerId();
+    if (!gBrowser?.tabs) return null;
     for (const tab of gBrowser.tabs) {
-      if (!tab.hasAttribute(CONFIG.SCANNER_TAB_ATTR)) continue;
-      if (containerId) {
-        const tabContainerId = parseInt(tab.getAttribute('usercontextid') || '0', 10);
-        if (tabContainerId !== containerId) continue;
-      }
-      return tab;
+      if (tab.hasAttribute(CONFIG.SCANNER_TAB_ATTR)) return tab;
     }
     return null;
+  }
+
+  function findLoadedGmailEssentialTab() {
+    if (!gBrowser?.tabs) return null;
+    for (const tab of gBrowser.tabs) {
+      if (!isGmailEssentialTab(tab)) continue;
+      if (isLoadedGmailBrowser(tab.linkedBrowser)) return tab;
+    }
+    return null;
+  }
+
+  function findAnyLoadedGmailTab() {
+    if (!gBrowser?.tabs) return null;
+    for (const tab of gBrowser.tabs) {
+      if (tab.hasAttribute(CONFIG.SCANNER_TAB_ATTR)) continue;
+      if (isLoadedGmailBrowser(tab.linkedBrowser)) return tab;
+    }
+    return null;
+  }
+
+  function scanBrowser(browser) {
+    if (!browser?.messageManager) return false;
+    loadFrameScript(browser);
+    try {
+      browser.messageManager.sendAsyncMessage('LiveGmail:RequestScan', {});
+      debugLog('Sent RequestScan');
+      return true;
+    } catch (e) {
+      console.warn('[Live Gmail] Could not send RequestScan:', e);
+      return false;
+    }
+  }
+
+  function scheduleScanWhenTabReady(tab, delayMs = 1500) {
+    const browser = tab?.linkedBrowser;
+    if (!browser) return;
+
+    const runScan = () => {
+      if (!isLoadedGmailBrowser(browser)) return;
+      scanBrowser(browser);
+    };
+
+    if (isLoadedGmailBrowser(browser)) {
+      setTimeout(runScan, delayMs);
+      return;
+    }
+
+    browser.addEventListener('load', () => setTimeout(runScan, delayMs), { once: true });
+  }
+
+  function createScannerTabInBackground() {
+    const previousTab = gBrowser.selectedTab;
+    const url = getGmailInboxUrl();
+    const addTabArgs = {
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+      relatedToCurrent: false,
+      inBackground: true,
+      skipAnimation: true
+    };
+    const containerId = getActiveContainerId();
+    if (containerId) {
+      addTabArgs.userContextId = containerId;
+    }
+
+    const tab = gBrowser.addTab(url, addTabArgs);
+    tab.setAttribute(CONFIG.SCANNER_TAB_ATTR, 'true');
+
+    restoreTabSelection(previousTab);
+    setTimeout(() => restoreTabSelection(previousTab), 0);
+    setTimeout(() => restoreTabSelection(previousTab), 100);
+
+    debugLog('Created background scanner tab');
+    return tab;
   }
 
   function loadGmailInTab(tab, url = getGmailInboxUrl()) {
     const browser = tab?.linkedBrowser;
     if (!browser) return;
+    const previousTab = gBrowser.selectedTab;
     try {
       browser.loadURI(url, {
-        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
+        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+        loadFlags: LOAD_BACKGROUND
       });
     } catch (e) {
       debugLog('loadGmailInTab failed', e);
     }
+    restoreTabSelection(previousTab);
+    setTimeout(() => restoreTabSelection(previousTab), 0);
   }
 
-  /**
-   * Ensures a loaded Gmail tab exists for DOM scanning (creates a background tab if needed)
-   */
   function ensureGmailScannerTab() {
     if (!gBrowser) return null;
 
-    let tab = findScannerTab();
-    if (!tab) {
-      const url = getGmailInboxUrl();
-      const addTabArgs = {
-        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-        relatedToCurrent: false
-      };
-      const containerId = getActiveContainerId();
-      if (containerId) {
-        addTabArgs.userContextId = containerId;
-      }
+    const existing = findScannerTab();
+    if (existing) return existing;
 
-      const previousTab = gBrowser.selectedTab;
-      tab = gBrowser.addTab(url, addTabArgs);
-      tab.setAttribute(CONFIG.SCANNER_TAB_ATTR, 'true');
+    if (scannerCreateInProgress) return findScannerTab();
 
-      if (previousTab && previousTab !== tab && !previousTab.closing) {
-        gBrowser.selectedTab = previousTab;
-      }
-
-      debugLog('Created background scanner tab');
+    scannerCreateInProgress = true;
+    try {
+      return createScannerTabInBackground();
+    } finally {
+      scannerCreateInProgress = false;
     }
-
-    if (isTabDiscardedOrUnloaded(tab)) {
-      loadGmailInTab(tab);
-    }
-
-    return tab;
   }
 
   /**
-   * Load Gmail in the scanner tab (or any open tab) and request a scan when ready
+   * Single entry point: scan without stealing focus; reuse one scanner tab
    */
   function wakeGmailForScan() {
     if (!gBrowser) return;
 
-    if (hasGmailTab()) {
-      requestScanFromGmailTabs(true);
+    const essential = findLoadedGmailEssentialTab();
+    if (essential?.linkedBrowser) {
+      scanBrowser(essential.linkedBrowser);
       return;
     }
 
-    const tab = ensureGmailScannerTab();
+    const scanner = findScannerTab();
+    if (scanner && isLoadedGmailBrowser(scanner.linkedBrowser)) {
+      scanBrowser(scanner.linkedBrowser);
+      return;
+    }
+
+    const openGmail = findAnyLoadedGmailTab();
+    if (openGmail?.linkedBrowser) {
+      scanBrowser(openGmail.linkedBrowser);
+      return;
+    }
+
+    const tab = scanner || ensureGmailScannerTab();
     if (!tab?.linkedBrowser) return;
 
-    const runScan = () => {
-      const browser = tab.linkedBrowser;
-      if (!isLoadedGmailBrowser(browser)) return;
-      loadFrameScript(browser);
-      try {
-        browser.messageManager.sendAsyncMessage('LiveGmail:RequestScan', {});
-        debugLog('Sent RequestScan to scanner tab');
-      } catch (e) {
-        console.warn('[Live Gmail] Could not send RequestScan to scanner:', e);
-      }
-    };
-
     if (isLoadedGmailBrowser(tab.linkedBrowser)) {
-      runScan();
+      scanBrowser(tab.linkedBrowser);
       return;
     }
 
-    const browser = tab.linkedBrowser;
-    const onLoad = () => {
-      setTimeout(runScan, 1500);
-    };
-    browser.addEventListener('load', onLoad, { once: true });
+    loadGmailInTab(tab);
+    scheduleScanWhenTabReady(tab);
   }
 
   function setupBackgroundScanning() {
@@ -707,8 +770,8 @@
    */
   function requestScanFromGmailTabs(force = false) {
     try {
-      if (!gBrowser || !gBrowser.tabs) {
-        debugLog('No gBrowser.tabs available');
+      if (!gBrowser) {
+        debugLog('No gBrowser available');
         return;
       }
 
@@ -718,40 +781,7 @@
       }
       lastScanRequestTs = now;
 
-      const gmailUrlPattern = getGmailUrlPattern();
-      let foundGmailTabs = 0;
-
-      for (const tab of gBrowser.tabs) {
-        const browser = tab.linkedBrowser;
-        if (!browser || !isLoadedGmailBrowser(browser)) continue;
-
-        let tabUrl = '';
-        try {
-          tabUrl = browser.currentURI.spec;
-        } catch (e) {
-          continue;
-        }
-
-        if (tabUrl && tabUrl.includes(gmailUrlPattern)) {
-          foundGmailTabs++;
-          debugLog('Found Gmail tab:', tabUrl);
-
-          loadFrameScript(browser);
-
-          try {
-            browser.messageManager.sendAsyncMessage('LiveGmail:RequestScan', {});
-            debugLog('Sent RequestScan to tab');
-          } catch (e) {
-            console.warn('[Live Gmail] Could not send RequestScan:', e);
-          }
-        }
-      }
-
-      debugLog('Found', foundGmailTabs, 'loaded Gmail tabs');
-
-      if (foundGmailTabs === 0) {
-        wakeGmailForScan();
-      }
+      wakeGmailForScan();
     } catch (e) {
       console.warn('[Live Gmail] Error requesting scan:', e);
     }
@@ -1166,7 +1196,6 @@
 
     updateEmailDisplay();
 
-    wakeGmailForScan();
     requestScanFromGmailTabs(true);
   }
 
