@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        2.2.2
+// @version        2.2.3
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -282,30 +282,43 @@
   }
 
   /**
-   * Single entry point: scan without stealing focus; reuse one scanner tab
+   * Scan any already-loaded Gmail tab (essential or scanner).
+   * Does NOT create new tabs — call wakeGmailForScan() when a tab may need to be created.
    */
-  function wakeGmailForScan() {
-    if (!gBrowser) return;
+  function scanLoadedGmailTabs() {
+    if (!gBrowser) return false;
 
     const essential = findLoadedGmailEssentialTab();
     if (essential?.linkedBrowser) {
       scanBrowser(essential.linkedBrowser);
-      return;
+      return true;
     }
 
     const scanner = findScannerTab();
     if (scanner && isLoadedGmailBrowser(scanner.linkedBrowser)) {
       scanBrowser(scanner.linkedBrowser);
-      return;
+      return true;
     }
 
     const openGmail = findAnyLoadedGmailTab();
     if (openGmail?.linkedBrowser) {
       scanBrowser(openGmail.linkedBrowser);
-      return;
+      return true;
     }
 
-    const tab = scanner || ensureGmailScannerTab();
+    return false;
+  }
+
+  /**
+   * Scan + create scanner tab if none is loaded.
+   * Only call this on user interaction (hover), not on timers or startup.
+   */
+  function wakeGmailForScan() {
+    if (!gBrowser) return;
+
+    if (scanLoadedGmailTabs()) return;
+
+    const tab = ensureGmailScannerTab();
     if (!tab?.linkedBrowser) return;
 
     if (isLoadedGmailBrowser(tab.linkedBrowser)) {
@@ -327,7 +340,7 @@
     if (!isPeriodicScanEnabled() || intervalMs <= 0) return;
 
     backgroundScanTimer = setInterval(() => {
-      wakeGmailForScan();
+      scanLoadedGmailTabs();
     }, intervalMs);
 
     debugLog('Background scan interval:', intervalMs, 'ms');
@@ -768,20 +781,23 @@
    * Request a scan from all loaded Gmail tabs (and wake a scanner tab if none are loaded)
    * @param {boolean} [force=false] - bypass hover throttle
    */
-  function requestScanFromGmailTabs(force = false) {
+  /**
+   * @param {boolean} [force=false] bypass the 4s throttle
+   * @param {boolean} [allowCreate=false] create scanner tab if no Gmail tab is loaded (hover only)
+   */
+  function requestScanFromGmailTabs(force = false, allowCreate = false) {
     try {
-      if (!gBrowser) {
-        debugLog('No gBrowser available');
-        return;
-      }
+      if (!gBrowser) return;
 
       const now = Date.now();
-      if (!force && now - lastScanRequestTs < 4000) {
-        return;
-      }
+      if (!force && now - lastScanRequestTs < 4000) return;
       lastScanRequestTs = now;
 
-      wakeGmailForScan();
+      if (allowCreate) {
+        wakeGmailForScan();
+      } else {
+        scanLoadedGmailTabs();
+      }
     } catch (e) {
       console.warn('[Live Gmail] Error requesting scan:', e);
     }
@@ -844,9 +860,6 @@
     debugLog('Initializing DOM mode');
     setupMessageListeners();
     setupBackgroundScanning();
-    if (isPeriodicScanEnabled() && getScanIntervalMs() > 0) {
-      requestScanFromGmailTabs(true);
-    }
     return true;
   }
 
@@ -1196,7 +1209,7 @@
 
     updateEmailDisplay();
 
-    requestScanFromGmailTabs(true);
+    requestScanFromGmailTabs(true, true);
   }
 
   /**
@@ -1609,7 +1622,7 @@
       }
     },
     hidePanel,
-    scan: () => requestScanFromGmailTabs(true),
+    scan: () => requestScanFromGmailTabs(true, true),
     wake: wakeGmailForScan,
     emails: () => currentEmails,
     reInit: () => UC_LIVE_GMAIL.init()
