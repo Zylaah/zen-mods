@@ -58,6 +58,7 @@
   let lastLogTs = 0;
   let backgroundScanTimer = null;
   let scanInProgress = false;
+  let hideTimer = null;
 
 
   /**
@@ -987,7 +988,7 @@
       if (hoveredTab) panelElement.classList.remove(CONFIG.PANEL_HIDDEN_CLASS);
     });
 
-    panelElement.addEventListener('mouseleave', hidePanel);
+    panelElement.addEventListener('mouseleave', scheduleHide);
   }
 
   /**
@@ -1164,11 +1165,7 @@
    * Handle tab leave
    */
   function handleTabLeave() {
-    setTimeout(() => {
-      if (!panelElement || !panelElement.matches(':hover')) {
-        hidePanel();
-      }
-    }, 100);
+    scheduleHide();
   }
 
   /**
@@ -1247,9 +1244,25 @@
   }
 
   /**
+   * Schedule panel hide after a short delay, cancelling if the cursor returns
+   * to either the tab or the panel in time. This prevents flicker when the
+   * cursor briefly crosses the panel boundary on entry from the right.
+   */
+  function scheduleHide() {
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      hideTimer = null;
+      const tabHovered = hoveredTab && hoveredTab.matches(':hover');
+      const panelHovered = panelElement && panelElement.matches(':hover');
+      if (!tabHovered && !panelHovered) hidePanel();
+    }, 150);
+  }
+
+  /**
    * Hide panel
    */
   function hidePanel() {
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
     if (panelElement) panelElement.classList.add(CONFIG.PANEL_HIDDEN_CLASS);
     hoveredTab = null;
   }
