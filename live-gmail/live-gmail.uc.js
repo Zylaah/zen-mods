@@ -17,7 +17,6 @@
     DEBUG_PREF: 'live-gmail.debug',
     BACKGROUND_SCAN_PREF: 'live-gmail.background-scan',
     SCAN_INTERVAL_PREF: 'live-gmail.scan-interval-sec',
-    CACHE_PREF: 'live-gmail.cache',
     DEFAULT_GMAIL_URL: 'mail.google.com',
     DEFAULT_SCAN_INTERVAL_SEC: 90,
     MAX_EMAILS: 20,
@@ -281,12 +280,18 @@
   }
 
   /**
-   * Persist cachedEmails to about:config so they survive tab unloads and restarts
+   * Returns the path to the cache file in the Firefox profile directory
+   */
+  function getCacheFilePath() {
+    const profileDir = Services.dirsvc.get('ProfD', Ci.nsIFile).path;
+    return PathUtils.join(profileDir, 'live-gmail-cache.json');
+  }
+
+  /**
+   * Persist cachedEmails to a file in the profile directory
    */
   function saveCacheToPrefs() {
     try {
-      if (typeof Services === 'undefined' || !Services.prefs) return;
-      // Store only display fields — url/rowIndex/threadId are stale after a reload anyway
       const slim = cachedEmails.slice(0, CONFIG.MAX_EMAILS).map(e => ({
         id: e.id,
         from: e.from,
@@ -295,23 +300,23 @@
         date: e.date,
         isUnread: e.isUnread
       }));
-      Services.prefs.setStringPref(CONFIG.CACHE_PREF, JSON.stringify(slim));
+      IOUtils.writeUTF8(getCacheFilePath(), JSON.stringify(slim)).catch(() => {});
     } catch (e) {}
   }
 
   /**
-   * Restore cachedEmails from about:config on startup
+   * Restore cachedEmails from the profile cache file on startup
    */
   function loadCacheFromPrefs() {
     try {
-      if (typeof Services === 'undefined' || !Services.prefs) return;
-      const json = Services.prefs.getStringPref(CONFIG.CACHE_PREF, '');
-      if (!json) return;
-      const parsed = JSON.parse(json);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        cachedEmails = parsed;
-        debugLog('Restored', parsed.length, 'emails from prefs cache');
-      }
+      IOUtils.readUTF8(getCacheFilePath()).then(json => {
+        const parsed = JSON.parse(json);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          cachedEmails = parsed;
+          debugLog('Restored', parsed.length, 'emails from file cache');
+          updateEmailDisplay();
+        }
+      }).catch(() => {});
     } catch (e) {}
   }
 
