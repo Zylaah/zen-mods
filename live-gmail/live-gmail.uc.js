@@ -910,11 +910,13 @@
 
     panelElement = document.createElementNS(XUL_NS, 'panel');
     panelElement.id = CONFIG.PANEL_ID;
+    panelElement.setAttribute('type', 'arrow');
+    panelElement.setAttribute('nonnativepopover', 'true');
+    panelElement.setAttribute('orient', 'vertical');
+    panelElement.setAttribute('side', 'left');
     panelElement.setAttribute('noautohide', 'true');
     panelElement.setAttribute('level', 'top');
 
-    updatePanelTheme();
-    
     // Header
     const header = document.createElement('div');
     header.className = 'live-gmail-header';
@@ -989,60 +991,11 @@
     panelElement.appendChild(wrapper);
     document.documentElement.appendChild(panelElement);
     
-    watchThemeChanges();
-    
     panelElement.addEventListener('mouseenter', () => {
       if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
     });
 
     panelElement.addEventListener('mouseleave', scheduleHide);
-  }
-
-  /**
-   * Update panel theme
-   */
-  function updatePanelTheme() {
-    if (!panelElement) return;
-    
-    let isDark = false;
-    
-    try {
-      if (typeof Services !== 'undefined' && Services.prefs) {
-        const zenScheme = Services.prefs.getIntPref('zen.view.window.scheme', 2);
-        if (zenScheme === 0) isDark = true;
-        else if (zenScheme === 1) isDark = false;
-        else isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-          }
-        } catch (e) {
-      isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-    }
-    
-    if (isDark) {
-      panelElement.setAttribute('data-theme', 'dark');
-        } else {
-      panelElement.removeAttribute('data-theme');
-    }
-  }
-
-  /**
-   * Watch for theme changes
-   */
-  function watchThemeChanges() {
-    if (window.matchMedia) {
-      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updatePanelTheme);
-    }
-    
-    try {
-      if (typeof Services !== 'undefined' && Services.prefs) {
-        Services.prefs.addObserver('zen.view.window.scheme', updatePanelTheme, false);
-      }
-    } catch (e) {}
-    
-    const observer = new MutationObserver(updatePanelTheme);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['zen-should-be-dark-mode', 'data-theme']
-    });
   }
 
   /**
