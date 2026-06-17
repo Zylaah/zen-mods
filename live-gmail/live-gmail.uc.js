@@ -176,6 +176,7 @@
   function isLoadedGmailBrowser(browser) {
     if (!browser) return false;
     try {
+      if (browser.browsingContext?.discarded) return false;
       const spec = browser.currentURI?.spec || '';
       return spec.includes(getGmailUrlPattern());
     } catch (e) {
@@ -206,10 +207,18 @@
     } catch (e) {}
   }
 
+  function isTabPendingOrDiscarded(tab) {
+    if (!tab) return true;
+    if (tab.hasAttribute('pending')) return true;
+    if (tab.hasAttribute('discarded')) return true;
+    return false;
+  }
+
   function findLoadedGmailEssentialTab() {
     if (!gBrowser?.tabs) return null;
     for (const tab of gBrowser.tabs) {
       if (!isGmailEssentialTab(tab)) continue;
+      if (isTabPendingOrDiscarded(tab)) continue;
       if (isLoadedGmailBrowser(tab.linkedBrowser)) return tab;
     }
     return null;
@@ -218,6 +227,7 @@
   function findAnyLoadedGmailTab() {
     if (!gBrowser?.tabs) return null;
     for (const tab of gBrowser.tabs) {
+      if (isTabPendingOrDiscarded(tab)) continue;
       if (isLoadedGmailBrowser(tab.linkedBrowser)) return tab;
     }
     return null;
