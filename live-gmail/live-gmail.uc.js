@@ -9,6 +9,7 @@
 (function() {
   'use strict';
 
+  const XUL_NS = 'http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul';
 
   // Configuration
   const CONFIG = {
@@ -21,7 +22,6 @@
     DEFAULT_SCAN_INTERVAL_SEC: 90,
     MAX_EMAILS: 20,
     PANEL_ID: 'live-gmail-panel',
-    PANEL_HIDDEN_CLASS: 'live-gmail-hidden',
     SCANNER_TAB_ATTR: 'data-live-gmail-scanner'
   };
 
@@ -903,15 +903,16 @@
   }
 
   /**
-   * Create the floating panel
+   * Create the floating panel as a native XUL popup
    */
   function createPanel() {
     if (panelElement) return;
 
-    panelElement = document.createElement('div');
+    panelElement = document.createElementNS(XUL_NS, 'panel');
     panelElement.id = CONFIG.PANEL_ID;
-    panelElement.className = CONFIG.PANEL_HIDDEN_CLASS;
-    
+    panelElement.setAttribute('noautohide', 'true');
+    panelElement.setAttribute('level', 'top');
+
     updatePanelTheme();
     
     // Header
@@ -985,7 +986,7 @@
     watchThemeChanges();
     
     panelElement.addEventListener('mouseenter', () => {
-      if (hoveredTab) panelElement.classList.remove(CONFIG.PANEL_HIDDEN_CLASS);
+      if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
     });
 
     panelElement.addEventListener('mouseleave', scheduleHide);
@@ -1217,22 +1218,13 @@
 
     if (!panelElement) createPanel();
 
-    const tabRect = tab ? tab.getBoundingClientRect() : { bottom: 100, right: 100, left: 100, top: 100 };
-    let top = tabRect.bottom - 3;
-    let left = tabRect.right - 3;
+    // Cancel any pending hide before opening
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
 
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const panelRect = panelElement.getBoundingClientRect();
-    
-    if (left + panelRect.width > viewportWidth) left = tabRect.left - panelRect.width - 2;
-    if (top + panelRect.height > viewportHeight) top = tabRect.top - panelRect.height - 2;
-    if (left < 0) left = 10;
-    if (top < 0) top = 10;
-
-    panelElement.style.top = `${top}px`;
-    panelElement.style.left = `${left}px`;
-    panelElement.classList.remove(CONFIG.PANEL_HIDDEN_CLASS);
+    // openPopup() repositions and shows — only call when not already open to avoid jitter
+    if (panelElement.state === 'closed') {
+      panelElement.openPopup(tab || document.documentElement, 'end_before', 4, 0);
+    }
 
     if (isEssentialHover && !hasCachedData) {
       updatePanelContent();
@@ -1253,7 +1245,10 @@
     hideTimer = setTimeout(() => {
       hideTimer = null;
       const tabHovered = hoveredTab && hoveredTab.matches(':hover');
-      const panelHovered = panelElement && panelElement.matches(':hover');
+      const panelHovered = panelElement && (
+        panelElement.matches(':hover') ||
+        panelElement.state === 'showing'
+      );
       if (!tabHovered && !panelHovered) hidePanel();
     }, 150);
   }
@@ -1263,7 +1258,7 @@
    */
   function hidePanel() {
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-    if (panelElement) panelElement.classList.add(CONFIG.PANEL_HIDDEN_CLASS);
+    if (panelElement) panelElement.hidePopup();
     hoveredTab = null;
   }
 
@@ -1670,9 +1665,7 @@
   window.liveGmailDebug = {
     showPanel: () => {
       if (panelElement) {
-        panelElement.classList.remove(CONFIG.PANEL_HIDDEN_CLASS);
-        panelElement.style.top = '100px';
-        panelElement.style.left = '100px';
+        panelElement.openPopup(document.documentElement, 'overlap', 100, 100);
       }
     },
     hidePanel,

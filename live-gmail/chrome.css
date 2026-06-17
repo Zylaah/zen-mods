@@ -5,8 +5,7 @@
    ============================================ */
 
 #live-gmail-panel {
-  position: fixed;
-  z-index: 10000;
+  -moz-appearance: none !important;
   background: #ffffff;
   border: 1px solid #d1d1d1;
   border-radius: 8px;
@@ -20,12 +19,7 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   font-size: 11px;
   color: #0c0c0d;
-  transition: opacity 0.15s ease-in-out;
-}
-
-#live-gmail-panel.live-gmail-hidden {
-  opacity: 0;
-  pointer-events: none;
+  padding: 0;
 }
 
 /* Header */
