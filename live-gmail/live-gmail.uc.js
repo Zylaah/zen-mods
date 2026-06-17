@@ -16,6 +16,7 @@
     DEBUG_PREF: 'live-gmail.debug',
     BACKGROUND_SCAN_PREF: 'live-gmail.background-scan',
     SCAN_INTERVAL_PREF: 'live-gmail.scan-interval-sec',
+    CACHE_PREF: 'live-gmail.cache',
     DEFAULT_GMAIL_URL: 'mail.google.com',
     DEFAULT_SCAN_INTERVAL_SEC: 90,
     MAX_EMAILS: 20,
@@ -56,7 +57,6 @@
   let lastScanRequestTs = 0;
   let lastLogTs = 0;
   let backgroundScanTimer = null;
-  let scannerCreateInProgress = false;
   let scanInProgress = false;
 
 
@@ -205,17 +205,6 @@
     } catch (e) {}
   }
 
-  /**
-   * Dedicated scanner tab (one per window; not container-filtered to avoid duplicates)
-   */
-  function findScannerTab() {
-    if (!gBrowser?.tabs) return null;
-    for (const tab of gBrowser.tabs) {
-      if (tab.hasAttribute(CONFIG.SCANNER_TAB_ATTR)) return tab;
-    }
-    return null;
-  }
-
   function findLoadedGmailEssentialTab() {
     if (!gBrowser?.tabs) return null;
     for (const tab of gBrowser.tabs) {
@@ -228,7 +217,6 @@
   function findAnyLoadedGmailTab() {
     if (!gBrowser?.tabs) return null;
     for (const tab of gBrowser.tabs) {
-      if (tab.hasAttribute(CONFIG.SCANNER_TAB_ATTR)) continue;
       if (isLoadedGmailBrowser(tab.linkedBrowser)) return tab;
     }
     return null;
@@ -264,31 +252,6 @@
     browser.addEventListener('load', () => setTimeout(runScan, delayMs), { once: true });
   }
 
-  function createScannerTabInBackground() {
-    const previousTab = gBrowser.selectedTab;
-    const url = getGmailInboxUrl();
-    const addTabArgs = {
-      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-      relatedToCurrent: false,
-      inBackground: true,
-      skipAnimation: true
-    };
-    const containerId = getActiveContainerId();
-    if (containerId) {
-      addTabArgs.userContextId = containerId;
-    }
-
-    const tab = gBrowser.addTab(url, addTabArgs);
-    tab.setAttribute(CONFIG.SCANNER_TAB_ATTR, 'true');
-
-    restoreTabSelection(previousTab);
-    setTimeout(() => restoreTabSelection(previousTab), 0);
-    setTimeout(() => restoreTabSelection(previousTab), 100);
-
-    debugLog('Created background scanner tab');
-    return tab;
-  }
-
   function loadGmailInTab(tab, url = getGmailInboxUrl()) {
     const browser = tab?.linkedBrowser;
     if (!browser) return;
@@ -305,25 +268,62 @@
     setTimeout(() => restoreTabSelection(previousTab), 0);
   }
 
-  function ensureGmailScannerTab() {
-    if (!gBrowser) return null;
-
-    const existing = findScannerTab();
-    if (existing) return existing;
-
-    if (scannerCreateInProgress) return findScannerTab();
-
-    scannerCreateInProgress = true;
+  /**
+   * Persist cachedEmails to about:config so they survive tab unloads and restarts
+   */
+  function saveCacheToPrefs() {
     try {
-      return createScannerTabInBackground();
-    } finally {
-      scannerCreateInProgress = false;
+      if (typeof Services === 'undefined' || !Services.prefs) return;
+      const json = JSON.stringify(cachedEmails.slice(0, CONFIG.MAX_EMAILS));
+      Services.prefs.setStringPref(CONFIG.CACHE_PREF, json);
+    } catch (e) {}
+  }
+
+  /**
+   * Restore cachedEmails from about:config on startup
+   */
+  function loadCacheFromPrefs() {
+    try {
+      if (typeof Services === 'undefined' || !Services.prefs) return;
+      const json = Services.prefs.getStringPref(CONFIG.CACHE_PREF, '');
+      if (!json) return;
+      const parsed = JSON.parse(json);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        cachedEmails = parsed;
+        debugLog('Restored', parsed.length, 'emails from prefs cache');
+      }
+    } catch (e) {}
+  }
+
+  /**
+   * Find the Gmail essential tab in the active container (loaded or discarded)
+   */
+  function findGmailEssentialTab() {
+    const loaded = findLoadedGmailEssentialTab();
+    if (loaded) return loaded;
+
+    if (!gBrowser?.tabs) return null;
+    for (const tab of gBrowser.tabs) {
+      if (isGmailEssentialTab(tab)) return tab;
+    }
+    return null;
+  }
+
+  /**
+   * Close any leftover scanner tabs created by older versions of this mod
+   */
+  function cleanupScannerTabs() {
+    if (!gBrowser?.tabs) return;
+    for (const tab of Array.from(gBrowser.tabs)) {
+      if (tab.hasAttribute(CONFIG.SCANNER_TAB_ATTR)) {
+        try { gBrowser.removeTab(tab, { animate: false }); } catch (e) {}
+      }
     }
   }
 
   /**
-   * Scan any already-loaded Gmail tab (essential or scanner).
-   * Does NOT create new tabs — call wakeGmailForScan() when a tab may need to be created.
+   * Scan any already-loaded Gmail tab.
+   * Does NOT create or reload tabs — call wakeGmailForScan() when a reload may be needed.
    */
   function scanLoadedGmailTabs() {
     if (!gBrowser) return false;
@@ -331,12 +331,6 @@
     const essential = findLoadedGmailEssentialTab();
     if (essential?.linkedBrowser) {
       scanBrowser(essential.linkedBrowser);
-      return true;
-    }
-
-    const scanner = findScannerTab();
-    if (scanner && isLoadedGmailBrowser(scanner.linkedBrowser)) {
-      scanBrowser(scanner.linkedBrowser);
       return true;
     }
 
@@ -350,7 +344,7 @@
   }
 
   /**
-   * Scan + create scanner tab if none is loaded.
+   * Scan + silently reload the Gmail essential tab if nothing is loaded.
    * Only call this on user interaction (hover), not on timers or startup.
    */
   function wakeGmailForScan() {
@@ -360,16 +354,16 @@
 
     if (scanLoadedGmailTabs()) return;
 
-    const tab = ensureGmailScannerTab();
-    if (!tab?.linkedBrowser) return;
-
-    if (isLoadedGmailBrowser(tab.linkedBrowser)) {
-      scanBrowser(tab.linkedBrowser);
+    // No loaded Gmail tab — silently reload the essential tab in the background.
+    // This avoids creating a visible scanner tab in the strip.
+    const essential = findGmailEssentialTab();
+    if (!essential?.linkedBrowser) {
+      scanInProgress = false;
       return;
     }
 
-    loadGmailInTab(tab);
-    scheduleScanWhenTabReady(tab);
+    loadGmailInTab(essential);
+    scheduleScanWhenTabReady(essential);
   }
 
   function setupBackgroundScanning() {
@@ -878,9 +872,10 @@
     // Update current emails
     currentEmails = nextEmails;
     
-    // Update cache if we have data (lightweight in-memory cache)
+    // Update cache if we have data, and persist it so it survives tab unloads
     if (nextEmails.length > 0) {
       cachedEmails = nextEmails.slice();
+      saveCacheToPrefs();
     }
     
     // Clean up clickedEmailIds: if an email is no longer in the unread list, remove it from tracking
@@ -1647,6 +1642,8 @@
 
       debugLog('Initializing UC_LIVE_GMAIL...');
 
+      loadCacheFromPrefs();
+      cleanupScannerTabs();
       createPanel();
       setupTabMonitoring();
       initDomMode();
