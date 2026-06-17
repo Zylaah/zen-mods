@@ -242,6 +242,7 @@
 
     const runScan = () => {
       if (!isLoadedGmailBrowser(browser)) return;
+      if (scanInProgress) return;
       scanBrowser(browser);
     };
 
@@ -275,8 +276,16 @@
   function saveCacheToPrefs() {
     try {
       if (typeof Services === 'undefined' || !Services.prefs) return;
-      const json = JSON.stringify(cachedEmails.slice(0, CONFIG.MAX_EMAILS));
-      Services.prefs.setStringPref(CONFIG.CACHE_PREF, json);
+      // Store only display fields — url/rowIndex/threadId are stale after a reload anyway
+      const slim = cachedEmails.slice(0, CONFIG.MAX_EMAILS).map(e => ({
+        id: e.id,
+        from: e.from,
+        subject: e.subject,
+        snippet: (e.snippet || '').substring(0, 60),
+        date: e.date,
+        isUnread: e.isUnread
+      }));
+      Services.prefs.setStringPref(CONFIG.CACHE_PREF, JSON.stringify(slim));
     } catch (e) {}
   }
 
@@ -1069,7 +1078,7 @@
       gmailTabs.set(tab, tabUrl);
     }
 
-    requestScanFromGmailTabs();
+    if (!scanInProgress) requestScanFromGmailTabs();
   }
 
   /**
