@@ -269,7 +269,7 @@
     if (!browser) return;
     const previousTab = gBrowser.selectedTab;
     try {
-      browser.loadURI(url, {
+      browser.fixupAndLoadURIString(url, {
         triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
         loadFlags: LOAD_BACKGROUND
       });
