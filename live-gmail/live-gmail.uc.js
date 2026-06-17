@@ -978,9 +978,15 @@
     content.appendChild(loading);
     content.appendChild(emails);
     content.appendChild(error);
-    
-    panelElement.appendChild(header);
-    panelElement.appendChild(content);
+
+    // Wrap all HTML content in a single div so layout is handled by the HTML
+    // engine, completely independent of XUL's box model on the <panel> host.
+    const wrapper = document.createElement('div');
+    wrapper.className = 'live-gmail-wrapper';
+    wrapper.appendChild(header);
+    wrapper.appendChild(content);
+
+    panelElement.appendChild(wrapper);
     document.documentElement.appendChild(panelElement);
     
     watchThemeChanges();
