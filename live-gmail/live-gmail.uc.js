@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        2.2.4
+// @version        3.0.0
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -58,6 +58,7 @@
   let backgroundScanTimer = null;
   let scanInProgress = false;
   let hideTimer = null;
+  let lastAuthoritativeScanTs = 0;
 
 
   /**
@@ -656,7 +657,18 @@
       frameDebugLog('rows=', rows.length, 'unread=', unreadCount, 'threads=', threads.length);
     }
     
-    return { threads, timestamp: Date.now(), meta: { rows: rows.length, unread: unreadCount } };
+    return {
+      threads,
+      timestamp: Date.now(),
+      meta: {
+        rows: rows.length,
+        unread: unreadCount,
+        inboxReady: rows.length > 0 || (
+          !!content.document.querySelector('div[role="main"]') &&
+          !content.document.querySelector('[aria-busy="true"], [role="progressbar"]')
+        )
+      }
+    };
   }
   
   /**
@@ -870,6 +882,16 @@
   function handleFrameScriptData(payload) {
     if (!payload || !Array.isArray(payload.threads)) return;
 
+    const rows = payload.meta?.rows ?? 0;
+    const inboxReady = payload.meta?.inboxReady === true;
+    const isAuthoritative = rows > 0 || inboxReady;
+
+    if (!isAuthoritative) {
+      debugLog('Ignoring premature scan (inbox not ready, rows=0)');
+      updateEmailDisplay();
+      return;
+    }
+
     // Throttle noisy logs
     const now = Date.now();
     if (payload.meta && now - lastLogTs > 10000) {
@@ -894,14 +916,10 @@
     // Filter out emails that were clicked (they may not be marked as read yet in Gmail)
     const nextEmails = allEmails.filter(email => !clickedEmailIds.has(email.id));
 
-    // Update current emails
+    lastAuthoritativeScanTs = Date.now();
     currentEmails = nextEmails;
-    
-    // Update cache if we have data, and persist it so it survives tab unloads
-    if (nextEmails.length > 0) {
-      cachedEmails = nextEmails.slice();
-      saveCacheToPrefs();
-    }
+    cachedEmails = nextEmails.slice();
+    saveCacheToPrefs();
     
     // Clean up clickedEmailIds: if an email is no longer in the unread list, remove it from tracking
     const currentIds = new Set(allEmails.map(e => e.id));
@@ -1281,13 +1299,15 @@
 
     if (!emailsContainer) return;
 
-    const emailsToShow = currentEmails.length > 0 ? currentEmails : cachedEmails;
-
-    if (emailsToShow.length === 0 && scanInProgress) {
+    if (scanInProgress) {
       if (loadingContainer) loadingContainer.style.display = 'block';
       emailsContainer.innerHTML = '';
       return;
     }
+
+    const emailsToShow = lastAuthoritativeScanTs > 0
+      ? currentEmails
+      : cachedEmails;
 
     if (loadingContainer) loadingContainer.style.display = 'none';
     emailsContainer.innerHTML = '';
