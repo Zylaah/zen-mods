@@ -1182,7 +1182,8 @@
 
     // openPopup() repositions and shows — only call when not already open to avoid jitter
     if (panelElement.state === 'closed') {
-      panelElement.openPopup(tab || document.documentElement, 'end_before', 4, 0);
+      const tabHeight = tab ? tab.getBoundingClientRect().height : 0;
+      panelElement.openPopup(tab || document.documentElement, 'end_before', 4, tabHeight);
     }
 
     if (isEssentialHover && !hasCachedData) {
