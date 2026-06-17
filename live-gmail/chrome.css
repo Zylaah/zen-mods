@@ -6,6 +6,9 @@
 
 #live-gmail-panel {
   -moz-appearance: none !important;
+}
+
+#live-gmail-panel::part(content) {
   display: flex !important;
   flex-direction: column !important;
   background: #ffffff;
@@ -165,7 +168,7 @@
    DARK MODE (via data-theme="dark" attribute set by JS)
    ============================================ */
 
-#live-gmail-panel[data-theme="dark"] {
+#live-gmail-panel[data-theme="dark"]::part(content) {
   background: #1b1b1b !important;
   border-color: #3a3a3a !important;
   color: #f9f9fa !important;
