@@ -6,6 +6,8 @@
 
 #live-gmail-panel {
   -moz-appearance: none !important;
+  display: flex !important;
+  flex-direction: column !important;
   background: #ffffff;
   border: 1px solid #d1d1d1;
   border-radius: 8px;
@@ -13,8 +15,6 @@
   min-width: 230px;
   max-width: 270px;
   max-height: 360px;
-  display: flex;
-  flex-direction: column;
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   font-size: 11px;
