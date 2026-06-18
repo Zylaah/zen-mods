@@ -959,6 +959,11 @@
     if (!isAuthoritative) {
       debugLog('Ignoring premature scan (inbox not ready, rows=0)');
       updateEmailDisplay();
+      if (scanInProgress) {
+        setTimeout(() => {
+          if (scanInProgress) scanLoadedGmailTabs();
+        }, 1500);
+      }
       return;
     }
 
@@ -1338,40 +1343,38 @@
    */
   function showPanel(tab) {
     const isEssentialHover = tab && isGmailEssentialTab(tab);
-    const hasCachedData = cachedEmails.length > 0 || currentEmails.length > 0;
 
     if (tab && tab.hasAttribute('zen-essential') && !isEssentialHover) {
       hidePanel();
       return;
     }
 
-    // Gmail essential hover always opens the panel (loading → results)
-    if (!isEssentialHover && !hasCachedData && !hasGmailTab()) {
-      debugLog('No Gmail essential hover, tab, or cached data; not showing panel');
-      hidePanel();
-      return;
+    // Gmail essential hover always opens the panel
+    if (!isEssentialHover) {
+      const hasCachedData = cachedEmails.length > 0 || currentEmails.length > 0;
+      if (!hasCachedData && !hasGmailTab()) {
+        debugLog('No Gmail essential hover, tab, or cached data; not showing panel');
+        hidePanel();
+        return;
+      }
     }
 
     if (!panelElement) createPanel();
 
     updatePanelTheme();
 
-    // Cancel any pending hide before opening
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
 
-    // openPopup() repositions and shows — only call when not already open to avoid jitter
-    if (panelElement.state === 'closed') {
-      const tabHeight = tab ? tab.getBoundingClientRect().height : 0;
-      panelElement.openPopup(tab || document.documentElement, 'end_before', 4, tabHeight);
-    }
+    const tabHeight = tab ? tab.getBoundingClientRect().height : 0;
+    panelElement.openPopup(tab || document.documentElement, 'end_before', 4, tabHeight);
 
-    if (isEssentialHover && !hasCachedData) {
-      updatePanelContent();
+    updateEmailDisplay();
+
+    if (isEssentialHover) {
+      requestScanFromGmailTabs(true, true);
     } else {
-      updateEmailDisplay();
+      requestScanFromGmailTabs(true, false);
     }
-
-    requestScanFromGmailTabs(true, true);
   }
 
   /**
