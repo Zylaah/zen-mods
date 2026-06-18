@@ -57,6 +57,7 @@
 }
 
 .live-gmail-compose-btn {
+  display: none;
   appearance: none;
   -moz-appearance: none;
   position: absolute;

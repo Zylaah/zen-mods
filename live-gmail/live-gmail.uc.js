@@ -1379,26 +1379,33 @@
 
     const emailsContainer = panelElement.querySelector('.live-gmail-emails');
     const loadingContainer = panelElement.querySelector('.live-gmail-loading');
+    const composeBtn = panelElement.querySelector('.live-gmail-compose-btn');
 
     if (!emailsContainer) return;
 
-    if (scanInProgress) {
-      if (loadingContainer) loadingContainer.style.display = 'block';
-      emailsContainer.innerHTML = '';
-      return;
-    }
-
-    const emailsToShow = lastAuthoritativeScanTs > 0
+    // Always prefer showing cached data over a blank loading spinner
+    const emailsToShow = currentEmails.length > 0
       ? currentEmails
       : cachedEmails;
+
+    // Only show the loading indicator when scanning AND there is nothing to display yet
+    if (scanInProgress && emailsToShow.length === 0) {
+      if (loadingContainer) loadingContainer.style.display = 'block';
+      emailsContainer.innerHTML = '';
+      if (composeBtn) composeBtn.style.display = 'none';
+      return;
+    }
 
     if (loadingContainer) loadingContainer.style.display = 'none';
     emailsContainer.innerHTML = '';
 
     if (emailsToShow.length === 0) {
       emailsContainer.innerHTML = '<div class="live-gmail-empty">No unread emails</div>';
+      if (composeBtn) composeBtn.style.display = 'none';
       return;
     }
+
+    if (composeBtn) composeBtn.style.display = '';
 
     emailsToShow.forEach(email => {
       const el = document.createElement('div');
