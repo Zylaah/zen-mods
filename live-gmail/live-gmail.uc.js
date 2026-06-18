@@ -59,6 +59,9 @@
   let scanInProgress = false;
   let hideTimer = null;
   let lastAuthoritativeScanTs = 0;
+  let cachedFrameScriptUrl = null;
+  let lastPanelHoverTs = 0;
+  let idleScanTick = 0;
 
 
   /**
@@ -480,6 +483,15 @@
     if (!isPeriodicScanEnabled() || intervalMs <= 0) return;
 
     backgroundScanTimer = setInterval(() => {
+      // When the panel hasn't been hovered in 10+ minutes, run at 1/3 the normal
+      // frequency — skip 2 out of every 3 ticks — to reduce background CPU on
+      // machines where the user isn't actively using the panel.
+      if (lastPanelHoverTs > 0 && (Date.now() - lastPanelHoverTs) > 10 * 60 * 1000) {
+        idleScanTick++;
+        if (idleScanTick % 3 !== 0) return;
+      } else {
+        idleScanTick = 0;
+      }
       scanLoadedGmailTabs();
     }, intervalMs);
 
@@ -500,12 +512,13 @@
   'use strict';
   
   const MAX_EMAILS = 20;
-  const SCAN_DEBOUNCE_MS = 300;
+  const SCAN_DEBOUNCE_MS = 500;
   let scanTimeout = null;
   let observer = null;
   let lastScanResult = null;
   let lastDebugLog = 0;
   const DEBUG_INTERVAL_MS = 5000;
+  let cachedRowSelector = null;
   
   // Debug logging function (controlled by parent via message)
   let DEBUG_ENABLED = false;
@@ -578,14 +591,6 @@
     const boldElements = row.querySelectorAll('b, strong');
     if (boldElements.length > 0) return true;
 
-    const senderSpan = row.querySelector('span[email], span.yP, span.zF, span.bA4 span, td.yX span');
-    if (senderSpan) {
-      try {
-        const fontWeight = content.getComputedStyle(senderSpan).fontWeight;
-        if (fontWeight === 'bold' || parseInt(fontWeight, 10) >= 600) return true;
-      } catch(e) {}
-    }
-
     return false;
   }
   
@@ -652,9 +657,18 @@
   }
   
   /**
-   * Find email rows in the inbox
+   * Find email rows in the inbox.
+   * Caches the first selector that returns results so subsequent scans pay
+   * only one querySelectorAll instead of up to seven.
    */
   function findEmailRows() {
+    if (cachedRowSelector) {
+      const rows = content.document.querySelectorAll(cachedRowSelector);
+      if (rows.length > 0) return Array.from(rows);
+      // Cached selector no longer works (e.g. Gmail navigated away); fall through.
+      cachedRowSelector = null;
+    }
+
     const rowSelectors = [
       'tr.zA',
       'tr[role="row"]',
@@ -667,7 +681,10 @@
     
     for (const selector of rowSelectors) {
       const rows = content.document.querySelectorAll(selector);
-      if (rows.length > 0) return Array.from(rows);
+      if (rows.length > 0) {
+        cachedRowSelector = selector;
+        return Array.from(rows);
+      }
     }
     
     const links = content.document.querySelectorAll('a[href*="#inbox/"], a[href*="#all/"]');
@@ -781,7 +798,29 @@
       return;
     }
     
-    observer = new content.MutationObserver(() => debouncedScan());
+    observer = new content.MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList') {
+          debouncedScan();
+          return;
+        }
+        if (mutation.type === 'attributes') {
+          // Only react to class changes on row-level elements, not deeply nested ones.
+          // Gmail fires hundreds of attribute mutations per second on icons, buttons,
+          // and hover highlights — filtering here prevents the debounce from being
+          // perpetually reset by irrelevant noise.
+          const el = mutation.target;
+          if (
+            el.tagName === 'TR' ||
+            el.getAttribute('role') === 'row' ||
+            el.classList.contains('zA')
+          ) {
+            debouncedScan();
+            return;
+          }
+        }
+      }
+    });
     observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
   }
   
@@ -882,8 +921,10 @@
     }
     
     try {
-      const scriptDataUrl = 'data:application/javascript;charset=utf-8,' + encodeURIComponent(GMAIL_FRAME_SCRIPT);
-      browser.messageManager.loadFrameScript(scriptDataUrl, true);
+      if (!cachedFrameScriptUrl) {
+        cachedFrameScriptUrl = 'data:application/javascript;charset=utf-8,' + encodeURIComponent(GMAIL_FRAME_SCRIPT);
+      }
+      browser.messageManager.loadFrameScript(cachedFrameScriptUrl, true);
       
       // Send debug state to frame script immediately
       try {
@@ -1203,7 +1244,16 @@
 
     setupEssentialsHoverDelegation();
 
-    const observer = new MutationObserver(updateGmailTabs);
+    // Debounce for MutationObserver only — rapid tab attribute changes (favicon,
+    // loading spinner, title) would otherwise rebuild gmailTabs on every tick.
+    // Explicit tab events (TabOpen, TabClose, TabAttrModified) remain immediate.
+    let updateGmailTabsTimer = null;
+    const debouncedUpdateGmailTabs = () => {
+      if (updateGmailTabsTimer) clearTimeout(updateGmailTabsTimer);
+      updateGmailTabsTimer = setTimeout(updateGmailTabs, 150);
+    };
+
+    const observer = new MutationObserver(debouncedUpdateGmailTabs);
 
     const essentials = document.getElementById('zen-essentials');
     if (essentials) {
@@ -1391,6 +1441,10 @@
     }
 
     hoveredTab = tab;
+    if (isEssentialHover) {
+      lastPanelHoverTs = Date.now();
+      idleScanTick = 0;
+    }
 
     if (!panelElement) createPanel();
     updatePanelTheme();
