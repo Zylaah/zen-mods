@@ -1399,7 +1399,10 @@
     const tabHeight = tab ? tab.getBoundingClientRect().height : 0;
     panelElement.openPopup(tab || document.documentElement, 'end_before', 4, tabHeight);
     updateEmailDisplay();
-    requestScanFromGmailTabs(true, isEssentialHover);
+
+    // Defer the scan so the popup fully opens before any tab manipulation
+    // (loadGmailInTab changes tab attributes which can dismiss a just-opened popup)
+    setTimeout(() => requestScanFromGmailTabs(true, isEssentialHover), 80);
   }
 
   /**
