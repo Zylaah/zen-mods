@@ -1388,11 +1388,15 @@
       ? currentEmails
       : cachedEmails;
 
+    const setComposeVisible = (visible) => {
+      if (composeBtn) composeBtn.style.display = visible ? '' : 'none';
+    };
+
     // Only show the loading indicator when scanning AND there is nothing to display yet
     if (scanInProgress && emailsToShow.length === 0) {
       if (loadingContainer) loadingContainer.style.display = 'block';
       emailsContainer.innerHTML = '';
-      if (composeBtn) composeBtn.style.display = 'none';
+      setComposeVisible(false);
       return;
     }
 
@@ -1401,11 +1405,11 @@
 
     if (emailsToShow.length === 0) {
       emailsContainer.innerHTML = '<div class="live-gmail-empty">No unread emails</div>';
-      if (composeBtn) composeBtn.style.display = 'none';
+      setComposeVisible(false);
       return;
     }
 
-    if (composeBtn) composeBtn.style.display = '';
+    setComposeVisible(true);
 
     emailsToShow.forEach(email => {
       const el = document.createElement('div');

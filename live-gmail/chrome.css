@@ -53,8 +53,8 @@
   overflow-y: auto;
   overflow-x: hidden;
   max-height: 300px;
-  padding-bottom: 44px;
 }
+
 
 .live-gmail-compose-btn {
   display: none;
