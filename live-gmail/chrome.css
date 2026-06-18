@@ -76,7 +76,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: light-dark(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.6));
+  background-color: light-dark(rgba(255, 255, 255, 0.6), rgba(110, 110, 110, 0.6));
   color: light-dark(#0c0c0d, #f9f9fa);
   box-shadow:
     inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.1)),
@@ -90,7 +90,7 @@
 }
 
 .live-gmail-compose-btn:hover {
-  background-color: light-dark(rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.7));
+  background-color: light-dark(rgba(255, 255, 255, 0.7), rgba(110, 110, 110, 0.7));
   box-shadow:
     inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.15)),
     0px 3px 8px 0px rgba(0, 0, 0, 0.2);
@@ -98,7 +98,7 @@
 
 .live-gmail-compose-btn:active {
   box-shadow:
-    inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.08)),
+    inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.4), rgba(110, 110, 110, 0.08)),
     0px 1px 2px 0px rgba(0, 0, 0, 0.15);
 }
 
