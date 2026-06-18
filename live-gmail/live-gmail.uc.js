@@ -1354,7 +1354,10 @@
   function handleTabHover(event) {
     const tab = event.currentTarget;
     if (!isGmailEssentialTab(tab)) {
-      hidePanel();
+      // Use the delayed hide rather than an instant one so the grace period
+      // applies regardless of which side the cursor exits the Gmail tab from.
+      // If the cursor continues on to the panel, its mouseenter cancels this.
+      scheduleHide();
       return;
     }
 
