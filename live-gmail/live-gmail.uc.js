@@ -1466,7 +1466,7 @@
    */
   function scheduleHide() {
     if (hideTimer) clearTimeout(hideTimer);
-    const delayMs = scanInProgress ? 350 : 150;
+    const delayMs = scanInProgress ? 350 : 300;
     hideTimer = setTimeout(() => {
       hideTimer = null;
       const tabHovered = hoveredTab && hoveredTab.matches(':hover');
