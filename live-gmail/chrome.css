@@ -76,7 +76,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: light-dark(rgba(190, 190, 190), rgba(110, 110, 110));
+  background-color: light-dark(rgba(210, 210, 210), rgba(110, 110, 110));
   color: light-dark(#0c0c0d, #f9f9fa);
   box-shadow:
     inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.1)),
