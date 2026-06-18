@@ -324,14 +324,26 @@
     if (!browser) return;
 
     const runScan = () => {
-      if (!isLoadedGmailBrowser(browser)) return;
+      if (!isLoadedGmailBrowser(browser)) return false;
       scanBrowser(browser);
+      return true;
     };
 
     const onReady = () => {
       setTimeout(() => {
-        runScan();
-        ensurePanelVisibleIfHovering();
+        if (!runScan()) {
+          // The load event fired but Gmail URL isn't active yet — the browser was
+          // mid-restore and got a second navigation. Wait for the real load.
+          debugLog('scheduleScanWhenTabReady: Gmail not ready after load, retrying');
+          browser.addEventListener('load', () => {
+            setTimeout(() => {
+              runScan();
+              ensurePanelVisibleIfHovering();
+            }, delayMs);
+          }, { once: true });
+        } else {
+          ensurePanelVisibleIfHovering();
+        }
       }, delayMs);
     };
 
@@ -469,7 +481,17 @@
       return;
     }
 
-    loadGmailInTab(essential);
+    // If the browser is already navigating (e.g. session restore is in progress),
+    // don't interrupt it — just attach the ready-listener and let the restore finish.
+    const isAlreadyLoading = (() => {
+      try {
+        return essential.linkedBrowser?.webProgress?.isLoadingDocument === true;
+      } catch (e) { return false; }
+    })();
+
+    if (!isAlreadyLoading) {
+      loadGmailInTab(essential);
+    }
     scheduleScanWhenTabReady(essential);
   }
 
