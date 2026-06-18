@@ -57,34 +57,44 @@
 }
 
 .live-gmail-compose-btn {
+  appearance: none;
+  -moz-appearance: none;
   position: absolute;
   right: 12px;
   bottom: 12px;
   z-index: 1;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  margin: 0;
   border: none;
   border-radius: 50%;
-  background: #1a73e8;
-  color: #ffffff;
-  font-size: 24px;
-  line-height: 1;
-  font-weight: 400;
+  box-sizing: border-box;
+  background: light-dark(#1a73e8, #8ab4f8);
+  color: light-dark(#ffffff, #1a1a2e);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 8px light-dark(rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.45));
-  transition: background-color 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 2px 6px light-dark(rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0.5));
+  transition: background-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.live-gmail-compose-btn > svg {
+  display: block;
+  flex-shrink: 0;
 }
 
 .live-gmail-compose-btn:hover {
-  background: #1765cc;
-  transform: scale(1.05);
+  background: light-dark(#1557b0, #aecbfa);
+  box-shadow: 0 3px 10px light-dark(rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.6));
+  transform: scale(1.08);
 }
 
 .live-gmail-compose-btn:active {
-  transform: scale(0.98);
+  transform: scale(0.96);
 }
 
 /* Loading State */
