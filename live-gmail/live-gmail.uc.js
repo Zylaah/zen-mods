@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        3.0.0
+// @version        3.0.1
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -146,6 +146,76 @@
 
   function getGmailInboxUrl() {
     return `https://${getGmailUrlPattern()}/mail/u/0/#inbox`;
+  }
+
+  function getGmailComposeUrl() {
+    return `https://${getGmailUrlPattern()}/mail/u/0/#inbox?compose=new`;
+  }
+
+  /**
+   * Resolve the Gmail essential tab to use for navigation (hovered, existing, or new)
+   */
+  function resolveGmailTargetTab() {
+    if (hoveredTab && isGmailEssentialTab(hoveredTab)) {
+      return hoveredTab;
+    }
+
+    const existing = findGmailEssentialTab();
+    if (existing) return existing;
+
+    if (!gBrowser) return null;
+
+    const pattern = getGmailUrlPattern();
+    const gmailUrl = `https://${pattern}/`;
+    const activeWorkspace = window.gZenWorkspaces?.getActiveWorkspaceFromCache?.();
+    const activeContainerId = activeWorkspace?.containerTabId || 0;
+
+    try {
+      const addTabArgs = {
+        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
+      };
+      if (activeContainerId) {
+        addTabArgs.userContextId = activeContainerId;
+      }
+
+      const tab = gBrowser.addTab(gmailUrl, addTabArgs);
+      if (tab && !tab.hasAttribute('zen-essential')) {
+        if (window.gZenPinnedTabManager?.addToEssentials) {
+          window.gZenPinnedTabManager.addToEssentials(tab);
+        } else {
+          tab.setAttribute('zen-essential', 'true');
+        }
+      }
+      return tab;
+    } catch (err) {
+      console.warn('[Live Gmail] Could not create Gmail tab:', err);
+      return null;
+    }
+  }
+
+  /**
+   * Switch to the Gmail essential tab and open a new compose draft
+   */
+  function openGmailCompose() {
+    if (!gBrowser) return;
+
+    const targetTab = resolveGmailTargetTab();
+    if (!targetTab?.linkedBrowser) return;
+
+    hidePanel();
+
+    if (gBrowser.selectedTab !== targetTab) {
+      gBrowser.selectedTab = targetTab;
+    }
+
+    try {
+      targetTab.linkedBrowser.fixupAndLoadURIString(getGmailComposeUrl(), {
+        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
+      });
+      debugLog('Opened Gmail compose');
+    } catch (e) {
+      console.warn('[Live Gmail] Could not open Gmail compose:', e);
+    }
   }
 
   /**
@@ -1027,8 +1097,21 @@
     // engine, completely independent of XUL's box model on the <panel> host.
     const wrapper = document.createElement('div');
     wrapper.className = 'live-gmail-wrapper';
+    const composeButton = document.createElement('button');
+    composeButton.type = 'button';
+    composeButton.className = 'live-gmail-compose-btn';
+    composeButton.setAttribute('aria-label', 'New message');
+    composeButton.title = 'New message';
+    composeButton.textContent = '+';
+    composeButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openGmailCompose();
+    });
+
     wrapper.appendChild(header);
     wrapper.appendChild(content);
+    wrapper.appendChild(composeButton);
 
     panelElement.appendChild(wrapper);
     document.documentElement.appendChild(panelElement);
