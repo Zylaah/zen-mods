@@ -1392,11 +1392,6 @@
 
     hoveredTab = tab;
 
-    if (isEssentialHover) {
-      ensurePanelVisibleIfHovering(true);
-      return;
-    }
-
     if (!panelElement) createPanel();
     updatePanelTheme();
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
@@ -1404,7 +1399,7 @@
     const tabHeight = tab ? tab.getBoundingClientRect().height : 0;
     panelElement.openPopup(tab || document.documentElement, 'end_before', 4, tabHeight);
     updateEmailDisplay();
-    requestScanFromGmailTabs(true, false);
+    requestScanFromGmailTabs(true, isEssentialHover);
   }
 
   /**
