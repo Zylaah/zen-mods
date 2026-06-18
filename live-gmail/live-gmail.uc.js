@@ -1121,6 +1121,58 @@
     });
 
     panelElement.addEventListener('mouseleave', scheduleHide);
+
+    updatePanelTheme();
+    watchThemeChanges();
+  }
+
+  /**
+   * Sync panel theme — light-dark() is unreliable on controls inside XUL panels
+   */
+  function updatePanelTheme() {
+    if (!panelElement) return;
+
+    let isDark = false;
+
+    try {
+      const zenDark = document.documentElement.getAttribute('zen-should-be-dark-mode');
+      if (zenDark === 'true') {
+        isDark = true;
+      } else if (zenDark === 'false') {
+        isDark = false;
+      } else if (typeof Services !== 'undefined' && Services.prefs) {
+        const zenScheme = Services.prefs.getIntPref('zen.view.window.scheme', 2);
+        if (zenScheme === 0) isDark = true;
+        else if (zenScheme === 1) isDark = false;
+        else isDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+      }
+    } catch (e) {
+      isDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+    }
+
+    if (isDark) {
+      panelElement.setAttribute('data-theme', 'dark');
+    } else {
+      panelElement.removeAttribute('data-theme');
+    }
+  }
+
+  function watchThemeChanges() {
+    if (window.matchMedia) {
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updatePanelTheme);
+    }
+
+    try {
+      if (typeof Services !== 'undefined' && Services.prefs) {
+        Services.prefs.addObserver('zen.view.window.scheme', updatePanelTheme, false);
+      }
+    } catch (e) {}
+
+    const observer = new MutationObserver(updatePanelTheme);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['zen-should-be-dark-mode', 'data-theme']
+    });
   }
 
   /**
@@ -1301,6 +1353,8 @@
     }
 
     if (!panelElement) createPanel();
+
+    updatePanelTheme();
 
     // Cancel any pending hide before opening
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
