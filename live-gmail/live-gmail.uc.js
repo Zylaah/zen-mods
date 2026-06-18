@@ -322,16 +322,22 @@
 
     const runScan = () => {
       if (!isLoadedGmailBrowser(browser)) return;
-      if (scanInProgress) return;
       scanBrowser(browser);
     };
 
+    const onReady = () => {
+      setTimeout(() => {
+        runScan();
+        ensurePanelVisibleIfHovering();
+      }, delayMs);
+    };
+
     if (isLoadedGmailBrowser(browser)) {
-      setTimeout(runScan, delayMs);
+      onReady();
       return;
     }
 
-    browser.addEventListener('load', () => setTimeout(runScan, delayMs), { once: true });
+    browser.addEventListener('load', onReady, { once: true });
   }
 
   function loadGmailInTab(tab, url = getGmailInboxUrl()) {
@@ -348,6 +354,8 @@
     }
     restoreTabSelection(previousTab);
     setTimeout(() => restoreTabSelection(previousTab), 0);
+    setTimeout(() => ensurePanelVisibleIfHovering(), 0);
+    setTimeout(() => ensurePanelVisibleIfHovering(), 150);
   }
 
   /**
@@ -1007,6 +1015,7 @@
     scanInProgress = false;
     hideError();
     updateEmailDisplay();
+    ensurePanelVisibleIfHovering();
   }
 
   /**
@@ -1339,6 +1348,28 @@
   }
 
   /**
+   * Re-open or reposition the panel while the user is still hovering the essential tab.
+   * @param {boolean} [rescan=false] trigger a fresh Gmail scan
+   */
+  function ensurePanelVisibleIfHovering(rescan = false) {
+    const tab = hoveredTab;
+    if (!tab?.matches(':hover') || !isGmailEssentialTab(tab)) return;
+    if (!panelElement) createPanel();
+
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+
+    updatePanelTheme();
+
+    const tabHeight = tab.getBoundingClientRect().height;
+    panelElement.openPopup(tab, 'end_before', 4, tabHeight);
+    updateEmailDisplay();
+
+    if (rescan) {
+      requestScanFromGmailTabs(true, true);
+    }
+  }
+
+  /**
    * Show panel
    */
   function showPanel(tab) {
@@ -1359,22 +1390,21 @@
       }
     }
 
+    hoveredTab = tab;
+
+    if (isEssentialHover) {
+      ensurePanelVisibleIfHovering(true);
+      return;
+    }
+
     if (!panelElement) createPanel();
-
     updatePanelTheme();
-
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
 
     const tabHeight = tab ? tab.getBoundingClientRect().height : 0;
     panelElement.openPopup(tab || document.documentElement, 'end_before', 4, tabHeight);
-
     updateEmailDisplay();
-
-    if (isEssentialHover) {
-      requestScanFromGmailTabs(true, true);
-    } else {
-      requestScanFromGmailTabs(true, false);
-    }
+    requestScanFromGmailTabs(true, false);
   }
 
   /**
@@ -1384,15 +1414,21 @@
    */
   function scheduleHide() {
     if (hideTimer) clearTimeout(hideTimer);
+    const delayMs = scanInProgress ? 350 : 150;
     hideTimer = setTimeout(() => {
       hideTimer = null;
       const tabHovered = hoveredTab && hoveredTab.matches(':hover');
-      const panelHovered = panelElement && (
-        panelElement.matches(':hover') ||
-        panelElement.state === 'showing'
-      );
-      if (!tabHovered && !panelHovered) hidePanel();
-    }, 150);
+      const panelHovered = panelElement && panelElement.matches(':hover');
+      if (tabHovered || panelHovered) return;
+
+      // Tab reload can briefly drop :hover — re-show if the cursor is still there
+      if (scanInProgress && hoveredTab) {
+        ensurePanelVisibleIfHovering();
+        if (hoveredTab.matches(':hover') || panelElement?.matches(':hover')) return;
+      }
+
+      hidePanel();
+    }, delayMs);
   }
 
   /**
@@ -1409,6 +1445,9 @@
    */
   function handleTabChange() {
     updateGmailTabs();
+    if (hoveredTab) {
+      setTimeout(() => ensurePanelVisibleIfHovering(), 0);
+    }
   }
 
   /**
