@@ -81,7 +81,7 @@
   box-shadow:
     inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.1)),
     0px 2px 3px 0px rgba(0, 0, 0, 0.15);
-  transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .live-gmail-compose-btn > svg {
@@ -94,11 +94,9 @@
   box-shadow:
     inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.15)),
     0px 3px 8px 0px rgba(0, 0, 0, 0.2);
-  transform: scale(1.08);
 }
 
 .live-gmail-compose-btn:active {
-  transform: scale(0.96);
   box-shadow:
     inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.08)),
     0px 1px 2px 0px rgba(0, 0, 0, 0.15);
