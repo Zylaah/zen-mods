@@ -400,22 +400,24 @@
   }
 
   /**
-   * Discard the Gmail essential after a hover-triggered transient scan
+   * Unload the Gmail essential after a hover-triggered transient scan.
+   * Uses Zen's own explicitUnloadTabs which handles essentials/pinned tabs correctly.
    */
-  function unloadGmailEssentialTab(tab) {
+  async function unloadGmailEssentialTab(tab) {
     if (!tab || !gBrowser || tab.closing) return false;
     if (tab.selected || gBrowser.selectedTab === tab) return false;
 
-    const previousTab = gBrowser.selectedTab;
     try {
+      if (typeof gBrowser.explicitUnloadTabs === 'function') {
+        debugLog('Calling explicitUnloadTabs on Gmail essential');
+        const ok = await gBrowser.explicitUnloadTabs([tab]);
+        debugLog('explicitUnloadTabs returned', ok);
+        return ok;
+      }
+      // Fallback for builds without explicitUnloadTabs
       if (typeof gBrowser.discardBrowser === 'function') {
-        // Essentials are pinned tabs — Firefox refuses to discard pinned tabs
-        // unless forceDiscard (2nd arg) is true.
-        const discarded = gBrowser.discardBrowser(tab, true);
-        restoreTabSelection(previousTab);
-        setTimeout(() => restoreTabSelection(previousTab), 0);
-        debugLog('discardBrowser returned', discarded);
-        return discarded !== false;
+        debugLog('Falling back to discardBrowser');
+        return gBrowser.discardBrowser(tab, true) !== false;
       }
     } catch (e) {
       debugLog('unloadGmailEssentialTab failed', e);
@@ -423,17 +425,22 @@
     return false;
   }
 
-  function maybeUnloadTransientScanTab() {
-    if (!shouldUnloadAfterScan || !transientScanTab) return;
+  async function maybeUnloadTransientScanTab() {
+    if (!shouldUnloadAfterScan || !transientScanTab) {
+      debugLog('maybeUnloadTransientScanTab: skipped', { shouldUnloadAfterScan, hasTab: !!transientScanTab });
+      return;
+    }
 
     const tab = transientScanTab;
     if (tab.closing || tab.selected || gBrowser.selectedTab === tab) {
+      debugLog('maybeUnloadTransientScanTab: tab is selected or closing, skipping');
       clearTransientScanState();
       return;
     }
 
-    unloadGmailEssentialTab(tab);
+    debugLog('maybeUnloadTransientScanTab: unloading');
     clearTransientScanState();
+    await unloadGmailEssentialTab(tab);
   }
 
   /**
@@ -532,8 +539,11 @@
   function wakeGmailForScan() {
     if (!gBrowser) return;
 
+    // Don't reset an already-running transient scan
+    if (!shouldUnloadAfterScan) {
+      clearTransientScanState();
+    }
     scanInProgress = true;
-    clearTransientScanState();
 
     if (scanLoadedGmailTabs()) {
       // Tab was already loaded — scan in place, leave it loaded
