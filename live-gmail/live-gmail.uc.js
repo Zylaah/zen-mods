@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        3.0.1
+// @version        3.0.2
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -62,6 +62,9 @@
   let cachedFrameScriptUrl = null;
   let lastPanelHoverTs = 0;
   let idleScanTick = 0;
+  let transientScanTab = null;
+  let shouldUnloadAfterScan = false;
+  let transientScanWatchdog = null;
 
 
   /**
@@ -202,6 +205,8 @@
   function openGmailCompose() {
     if (!gBrowser) return;
 
+    cancelTransientScanUnload();
+
     const targetTab = resolveGmailTargetTab();
     if (!targetTab?.linkedBrowser) return;
 
@@ -336,13 +341,8 @@
           // mid-restore and got a second navigation. Wait for the real load.
           debugLog('scheduleScanWhenTabReady: Gmail not ready after load, retrying');
           browser.addEventListener('load', () => {
-            setTimeout(() => {
-              runScan();
-              ensurePanelVisibleIfHovering();
-            }, delayMs);
+            setTimeout(runScan, delayMs);
           }, { once: true });
-        } else {
-          ensurePanelVisibleIfHovering();
         }
       }, delayMs);
     };
@@ -369,8 +369,69 @@
     }
     restoreTabSelection(previousTab);
     setTimeout(() => restoreTabSelection(previousTab), 0);
-    setTimeout(() => ensurePanelVisibleIfHovering(), 0);
-    setTimeout(() => ensurePanelVisibleIfHovering(), 150);
+  }
+
+  function clearTransientScanState() {
+    shouldUnloadAfterScan = false;
+    transientScanTab = null;
+    if (transientScanWatchdog) {
+      clearTimeout(transientScanWatchdog);
+      transientScanWatchdog = null;
+    }
+  }
+
+  /**
+   * Cancel a pending post-scan unload (user opened Gmail or selected the tab)
+   */
+  function cancelTransientScanUnload() {
+    clearTransientScanState();
+  }
+
+  function startTransientScanWatchdog() {
+    if (transientScanWatchdog) clearTimeout(transientScanWatchdog);
+    transientScanWatchdog = setTimeout(() => {
+      transientScanWatchdog = null;
+      if (!shouldUnloadAfterScan) return;
+      debugLog('Transient scan watchdog — giving up and unloading tab');
+      scanInProgress = false;
+      maybeUnloadTransientScanTab();
+      updateEmailDisplay();
+    }, 45000);
+  }
+
+  /**
+   * Discard the Gmail essential after a hover-triggered transient scan
+   */
+  function unloadGmailEssentialTab(tab) {
+    if (!tab || !gBrowser || tab.closing) return false;
+    if (tab.selected || gBrowser.selectedTab === tab) return false;
+
+    const previousTab = gBrowser.selectedTab;
+    try {
+      if (typeof gBrowser.discardBrowser === 'function') {
+        gBrowser.discardBrowser(tab);
+        restoreTabSelection(previousTab);
+        setTimeout(() => restoreTabSelection(previousTab), 0);
+        debugLog('Discarded Gmail essential after transient scan');
+        return true;
+      }
+    } catch (e) {
+      debugLog('unloadGmailEssentialTab failed', e);
+    }
+    return false;
+  }
+
+  function maybeUnloadTransientScanTab() {
+    if (!shouldUnloadAfterScan || !transientScanTab) return;
+
+    const tab = transientScanTab;
+    if (tab.closing || tab.selected || gBrowser.selectedTab === tab) {
+      clearTransientScanState();
+      return;
+    }
+
+    unloadGmailEssentialTab(tab);
+    clearTransientScanState();
   }
 
   /**
@@ -463,26 +524,30 @@
   }
 
   /**
-   * Scan + silently reload the Gmail essential tab if nothing is loaded.
+   * Scan + transiently load the Gmail essential if needed, then discard after scan.
    * Only call this on user interaction (hover), not on timers or startup.
    */
   function wakeGmailForScan() {
     if (!gBrowser) return;
 
     scanInProgress = true;
+    clearTransientScanState();
 
-    if (scanLoadedGmailTabs()) return;
+    if (scanLoadedGmailTabs()) {
+      // Tab was already loaded — scan in place, leave it loaded
+      return;
+    }
 
-    // No loaded Gmail tab — silently reload the essential tab in the background.
-    // This avoids creating a visible scanner tab in the strip.
     const essential = findGmailEssentialTab();
     if (!essential?.linkedBrowser) {
       scanInProgress = false;
       return;
     }
 
-    // If the browser is already navigating (e.g. session restore is in progress),
-    // don't interrupt it — just attach the ready-listener and let the restore finish.
+    transientScanTab = essential;
+    shouldUnloadAfterScan = true;
+    startTransientScanWatchdog();
+
     const isAlreadyLoading = (() => {
       try {
         return essential.linkedBrowser?.webProgress?.isLoadingDocument === true;
@@ -1078,7 +1143,10 @@
     scanInProgress = false;
     hideError();
     updateEmailDisplay();
-    ensurePanelVisibleIfHovering();
+
+    if (shouldUnloadAfterScan) {
+      setTimeout(() => maybeUnloadTransientScanTab(), 100);
+    }
   }
 
   /**
@@ -1522,9 +1590,6 @@
    */
   function handleTabChange() {
     updateGmailTabs();
-    if (hoveredTab) {
-      setTimeout(() => ensurePanelVisibleIfHovering(), 0);
-    }
   }
 
   /**
@@ -1612,6 +1677,8 @@
       el.addEventListener('click', async (e) => {
         e.preventDefault();
         e.stopPropagation();
+
+        cancelTransientScanUnload();
         
         let targetTab = hoveredTab;
         

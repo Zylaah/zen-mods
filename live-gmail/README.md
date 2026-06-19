@@ -13,7 +13,7 @@ A Zen Browser mod for Sine that shows your unread Gmail in a quick hover panel o
 - See sender, subject, snippet, and date at a glance
 - Click an item to open the conversation in Gmail
 - Floating **+** button to start a new message in Gmail
-- Keeps working even when the Gmail tab was unloaded
+- Keeps working even when the Gmail tab was unloaded (loads briefly to refresh, then unloads again)
 - Native Zen-style popup look with transparent/mica panel behavior
 
 ## Installation (Sine)
