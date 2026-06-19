@@ -409,11 +409,13 @@
     const previousTab = gBrowser.selectedTab;
     try {
       if (typeof gBrowser.discardBrowser === 'function') {
-        gBrowser.discardBrowser(tab);
+        // Essentials are pinned tabs — Firefox refuses to discard pinned tabs
+        // unless forceDiscard (2nd arg) is true.
+        const discarded = gBrowser.discardBrowser(tab, true);
         restoreTabSelection(previousTab);
         setTimeout(() => restoreTabSelection(previousTab), 0);
-        debugLog('Discarded Gmail essential after transient scan');
-        return true;
+        debugLog('discardBrowser returned', discarded);
+        return discarded !== false;
       }
     } catch (e) {
       debugLog('unloadGmailEssentialTab failed', e);
