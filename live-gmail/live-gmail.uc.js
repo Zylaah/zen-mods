@@ -412,12 +412,13 @@
         debugLog('Calling explicitUnloadTabs on Gmail essential');
         const ok = await gBrowser.explicitUnloadTabs([tab]);
         debugLog('explicitUnloadTabs returned', ok);
+        if (ok) {
+          // Remove visual unload indicators so the essential looks normal
+          // (same appearance as other non-dimmed essentials)
+          tab.removeAttribute('discarded');
+          tab.removeAttribute('pending');
+        }
         return ok;
-      }
-      // Fallback for builds without explicitUnloadTabs
-      if (typeof gBrowser.discardBrowser === 'function') {
-        debugLog('Falling back to discardBrowser');
-        return gBrowser.discardBrowser(tab, true) !== false;
       }
     } catch (e) {
       debugLog('unloadGmailEssentialTab failed', e);
