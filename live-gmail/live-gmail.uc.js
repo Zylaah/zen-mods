@@ -570,25 +570,32 @@
     })();
 
     if (!isAlreadyLoading) {
-      if (essential.hasAttribute('pending')) {
-        // Pending tab is a lazy session-restore stub. fixupAndLoadURIString does nothing
-        // on these; the correct wake path is _insertBrowser which materialises the browser
-        // and triggers SessionStore restore.
+      // A browser whose browsingContext is discarded cannot be navigated via
+      // fixupAndLoadURIString — the call silently does nothing.  This includes
+      // tabs we previously unloaded via explicitUnloadTabs even when we removed
+      // the 'pending'/'discarded' DOM attributes for visual reasons.
+      // The pending DOM attribute is the normal indicator, but after our own
+      // unload it is absent while browsingContext.discarded is still true.
+      const isBrowsingContextDiscarded = (() => {
+        try { return essential.linkedBrowser?.browsingContext?.discarded === true; }
+        catch (e) { return false; }
+      })();
+
+      if (essential.hasAttribute('pending') || isBrowsingContextDiscarded) {
+        // Pending / lazy session-restore stub — materialise via _insertBrowser,
+        // then wait for the tab's load event to scan.
+        // If the stored URL isn't Gmail (edge case: fresh essential with no history),
+        // scheduleScanWhenTabReady's isLoadedGmailBrowser check will fail and we
+        // fall through to loadGmailInTab inside its retry path.
         try {
           gBrowser._insertBrowser(essential);
-          essential.addEventListener('SSTabRestored', () => {
-            if (hoverSessionId !== sessionId) return;
-            setTimeout(() => {
-              if (hoverSessionId === sessionId) scanBrowser(essential.linkedBrowser);
-            }, 500);
-          }, { once: true });
         } catch (e) {
           debugLog('_insertBrowser failed, falling back to loadGmailInTab', e);
           loadGmailInTab(essential);
-          scheduleScanWhenTabReady(essential, sessionId);
         }
+        scheduleScanWhenTabReady(essential, sessionId);
       } else {
-        // Discarded tab — reload and wait for the load event
+        // Loaded browser with a stale / wrong URL — navigate it directly
         loadGmailInTab(essential);
         scheduleScanWhenTabReady(essential, sessionId);
       }
