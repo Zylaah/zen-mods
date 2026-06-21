@@ -339,7 +339,7 @@
     for (const tab of gBrowser.tabs) {
       if (!isGmailEssentialTab(tab)) continue;
       if (isTabPendingOrDiscarded(tab)) continue;
-      if (isLoadedGmailBrowser(tab.linkedBrowser)) return tab;
+      if (isBrowserNavigationComplete(tab.linkedBrowser)) return tab;
     }
     return null;
   }
@@ -348,7 +348,7 @@
     if (!gBrowser?.tabs) return null;
     for (const tab of gBrowser.tabs) {
       if (isTabPendingOrDiscarded(tab)) continue;
-      if (isLoadedGmailBrowser(tab.linkedBrowser)) return tab;
+      if (isBrowserNavigationComplete(tab.linkedBrowser)) return tab;
     }
     return null;
   }
@@ -379,6 +379,7 @@
    */
   function scanBrowserWhenReady(browser, sessionId) {
     if (!browser?.messageManager) return false;
+    if (!isBrowserNavigationComplete(browser)) return false;
     loadFrameScript(browser);
 
     let finished = false;
@@ -443,6 +444,52 @@
 
     poll();
     return true;
+  }
+
+  /**
+   * Materialise a lazy essential, then navigate to inbox in the background.
+   * Session-restore alone does not reliably load Gmail on an unselected essential.
+   */
+  function materializeAndLoadGmailTab(tab, sessionId) {
+    if (!tab?.linkedBrowser) return;
+
+    if (!tab.linkedPanel) {
+      try {
+        gBrowser._insertBrowser(tab);
+        debugLog('materializeAndLoadGmailTab: _insertBrowser');
+      } catch (e) {
+        debugLog('_insertBrowser failed', e);
+        scanInProgress = false;
+        updateEmailDisplay();
+        return;
+      }
+    }
+
+    let attempts = 0;
+    let pollTimer = null;
+
+    const startLoad = () => {
+      debugLog('materializeAndLoadGmailTab: loading inbox in background');
+      loadGmailInTab(tab);
+      waitForGmailAndScan(tab, sessionId);
+    };
+
+    const poll = () => {
+      if (hoverSessionId !== sessionId) return;
+      if (tab.linkedPanel) {
+        startLoad();
+        return;
+      }
+      if (++attempts >= 50) {
+        debugLog('materializeAndLoadGmailTab: timed out waiting for browser');
+        scanInProgress = false;
+        updateEmailDisplay();
+        return;
+      }
+      pollTimer = setTimeout(poll, 100);
+    };
+
+    poll();
   }
 
   /**
@@ -749,20 +796,7 @@
     startTransientScanWatchdog();
 
     if (isLazyOrUnloadedTab(essential)) {
-      // Lazy / pending / post-unload: materialise once and let SessionStore restore
-      // the pinned Gmail URL. Never read webProgress here (lazy getter inserts early)
-      // and never call loadGmailInTab (would fight session restore).
-      if (!essential.linkedPanel) {
-        try {
-          gBrowser._insertBrowser(essential);
-        } catch (e) {
-          debugLog('_insertBrowser failed', e);
-          scanInProgress = false;
-          updateEmailDisplay();
-          return;
-        }
-      }
-      waitForGmailAndScan(essential, sessionId);
+      materializeAndLoadGmailTab(essential, sessionId);
     } else if (!isLoadedGmailBrowser(essential.linkedBrowser)) {
       // Live browser on a non-Gmail page — navigate directly.
       loadGmailInTab(essential);
@@ -1072,7 +1106,8 @@
     if (scanTimeout) content.clearTimeout(scanTimeout);
     scanTimeout = content.setTimeout(() => {
       const result = scanInbox();
-      if (result) {
+      // Never push partial results — chrome waits for a complete inbox.
+      if (result && result.meta.inboxReady) {
         const resultStr = JSON.stringify(result.threads);
         if (resultStr !== lastScanResult) {
           lastScanResult = resultStr;
@@ -1127,7 +1162,7 @@
   addMessageListener('LiveGmail:RequestScan', () => {
     frameDebugLog('Received RequestScan');
     const result = scanInbox();
-    if (result) {
+    if (result && result.meta.inboxReady) {
       lastScanResult = JSON.stringify(result.threads);
       sendAsyncMessage('LiveGmail:UnreadData', result);
     }
@@ -1191,17 +1226,14 @@
     }
   });
   
-  // Initialize
+  // Initialize — observer only; never push data until inboxReady.
   function init() {
     frameDebugLog('Initializing...');
+    const start = () => setupObserver();
     if (content.document.readyState === 'complete') {
-      setupObserver();
-      debouncedScan();
+      start();
     } else {
-      content.addEventListener('load', () => {
-        setupObserver();
-        debouncedScan();
-      });
+      content.addEventListener('load', start, { once: true });
     }
   }
   
