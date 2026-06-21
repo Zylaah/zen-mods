@@ -92,10 +92,24 @@
     const hints = [];
     if (!tab) return hints;
 
-    for (const attr of ['data-url', 'pending', 'zen-origin-url', 'data-original-url']) {
+    for (const attr of ['data-url', 'zen-origin-url', 'data-original-url']) {
       const value = tab.getAttribute(attr);
       if (value) hints.push(value);
     }
+
+    // pending="true" is a flag, not a URL; pending="https://..." holds the restore URI on some builds
+    const pendingVal = tab.getAttribute('pending');
+    if (pendingVal && pendingVal !== 'true') hints.push(pendingVal);
+
+    // SessionStore lazy URL/title — reliable on cold-start pending essentials
+    try {
+      if (typeof SessionStore !== 'undefined') {
+        const lazyUrl = SessionStore.getLazyTabValue(tab, 'url');
+        if (lazyUrl) hints.push(lazyUrl);
+        const lazyTitle = SessionStore.getLazyTabValue(tab, 'title');
+        if (lazyTitle) hints.push(lazyTitle);
+      }
+    } catch (e) {}
 
     try {
       const spec = tab.linkedBrowser?.currentURI?.spec;
@@ -119,6 +133,11 @@
     const hints = getTabUrlHints(tab);
 
     if (hints.some((hint) => hint.includes(pattern))) {
+      return true;
+    }
+
+    const image = (tab.getAttribute('image') || '').toLowerCase();
+    if (image.includes('mail.google') || image.includes('google.com/mail') || image.includes('gmail')) {
       return true;
     }
 
@@ -334,6 +353,14 @@
     return null;
   }
 
+  function isBrowserNavigationComplete(browser) {
+    if (!isLoadedGmailBrowser(browser)) return false;
+    try {
+      if (browser.webProgress?.isLoadingDocument) return false;
+    } catch (e) {}
+    return true;
+  }
+
   function scanBrowser(browser) {
     if (!browser?.messageManager) return false;
     loadFrameScript(browser);
@@ -345,6 +372,77 @@
       console.warn('[Live Gmail] Could not send RequestScan:', e);
       return false;
     }
+  }
+
+  /**
+   * Inject frame script and send RequestScan only after the inbox DOM is ready.
+   */
+  function scanBrowserWhenReady(browser, sessionId) {
+    if (!browser?.messageManager) return false;
+    loadFrameScript(browser);
+
+    let finished = false;
+    let pollTimer = null;
+    let attempts = 0;
+
+    const cleanup = () => {
+      if (pollTimer) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+      Services.mm.removeMessageListener('LiveGmail:ReadyStatus', onReady);
+    };
+
+    const fail = () => {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      debugLog('scanBrowserWhenReady: timed out waiting for inbox');
+      scanInProgress = false;
+      updateEmailDisplay();
+    };
+
+    const sendScan = () => {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      try {
+        browser.messageManager.sendAsyncMessage('LiveGmail:RequestScan', {});
+        debugLog('Sent RequestScan (inbox ready)');
+      } catch (e) {
+        console.warn('[Live Gmail] Could not send RequestScan:', e);
+        scanInProgress = false;
+        updateEmailDisplay();
+      }
+    };
+
+    const onReady = (message) => {
+      if (finished || hoverSessionId !== sessionId) return;
+      if (message.target !== browser.messageManager) return;
+      if (!message.data?.inboxReady) return;
+      debugLog('Inbox ready, rows=', message.data.rows);
+      sendScan();
+    };
+
+    Services.mm.addMessageListener('LiveGmail:ReadyStatus', onReady);
+
+    const poll = () => {
+      if (finished || hoverSessionId !== sessionId) {
+        cleanup();
+        return;
+      }
+      try {
+        browser.messageManager.sendAsyncMessage('LiveGmail:CheckReady', {});
+      } catch (e) {}
+      if (++attempts >= 150) {
+        fail();
+        return;
+      }
+      pollTimer = setTimeout(poll, 400);
+    };
+
+    poll();
+    return true;
   }
 
   /**
@@ -378,10 +476,10 @@
 
     const tryScan = () => {
       if (scanned || hoverSessionId !== sessionId) return;
-      if (!isLoadedGmailBrowser(browser)) return;
+      if (!isBrowserNavigationComplete(browser)) return;
       scanned = true;
       cleanup();
-      scanBrowser(browser);
+      scanBrowserWhenReady(browser, sessionId);
     };
 
     const onTabRestored = () => {
@@ -579,8 +677,26 @@
   }
 
   /**
-   * Scan any already-loaded Gmail tab.
-   * Does NOT create or reload tabs — call wakeGmailForScan() when a reload may be needed.
+   * Scan any already-loaded Gmail tab (hover path — waits for inbox ready).
+   */
+  function scanLoadedGmailTabsWhenReady(sessionId) {
+    if (!gBrowser) return false;
+
+    const essential = findLoadedGmailEssentialTab();
+    if (essential?.linkedBrowser) {
+      return scanBrowserWhenReady(essential.linkedBrowser, sessionId);
+    }
+
+    const openGmail = findAnyLoadedGmailTab();
+    if (openGmail?.linkedBrowser) {
+      return scanBrowserWhenReady(openGmail.linkedBrowser, sessionId);
+    }
+
+    return false;
+  }
+
+  /**
+   * Scan any already-loaded Gmail tab (background timer — tab should already be idle).
    */
   function scanLoadedGmailTabs() {
     if (!gBrowser) return false;
@@ -614,7 +730,9 @@
     scanInProgress = true;
     updateEmailDisplay(); // switch panel to loading spinner immediately
 
-    if (scanLoadedGmailTabs()) {
+    const sessionId = hoverSessionId;
+
+    if (scanLoadedGmailTabsWhenReady(sessionId)) {
       // Tab was already loaded — scan in place, leave it loaded
       return;
     }
@@ -622,14 +740,13 @@
     const essential = findGmailEssentialTab();
     if (!essential?.linkedBrowser) {
       scanInProgress = false;
+      updateEmailDisplay();
       return;
     }
 
     transientScanTab = essential;
     shouldUnloadAfterScan = true;
     startTransientScanWatchdog();
-
-    const sessionId = hoverSessionId;
 
     if (isLazyOrUnloadedTab(essential)) {
       // Lazy / pending / post-unload: materialise once and let SessionStore restore
@@ -651,7 +768,7 @@
       loadGmailInTab(essential);
       waitForGmailAndScan(essential, sessionId);
     } else {
-      scanBrowser(essential.linkedBrowser);
+      scanBrowserWhenReady(essential.linkedBrowser, sessionId);
     }
   }
 
@@ -1017,10 +1134,16 @@
   });
   
   addMessageListener('LiveGmail:CheckReady', () => {
-    // Check if Gmail inbox is ready (has email rows)
-    const rows = findEmailRows();
-    const isReady = rows.length > 0 || content.document.querySelector('div[role="main"]') !== null;
-    sendAsyncMessage('LiveGmail:ReadyStatus', { ready: isReady, rows: rows.length });
+    const result = scanInbox();
+    if (!result) {
+      sendAsyncMessage('LiveGmail:ReadyStatus', { ready: false, inboxReady: false, rows: 0 });
+      return;
+    }
+    sendAsyncMessage('LiveGmail:ReadyStatus', {
+      ready: result.meta.inboxReady,
+      inboxReady: result.meta.inboxReady,
+      rows: result.meta.rows
+    });
   });
   
   addMessageListener('LiveGmail:OpenThread', (message) => {
@@ -1430,6 +1553,16 @@
 
 
   /**
+   * Attach hover listeners to a single essential tab (once).
+   */
+  function attachEssentialHoverListener(tab) {
+    if (!tab || tab.hasAttribute('data-live-gmail-listener')) return;
+    tab.addEventListener('mouseenter', handleTabHover);
+    tab.addEventListener('mouseleave', handleTabLeave);
+    tab.setAttribute('data-live-gmail-listener', 'true');
+  }
+
+  /**
    * Update Gmail tabs list
    */
   function updateGmailTabs() {
@@ -1456,9 +1589,7 @@
       } catch (e) {}
 
       if (!tab.hasAttribute('data-live-gmail-listener')) {
-        tab.addEventListener('mouseenter', handleTabHover);
-        tab.addEventListener('mouseleave', handleTabLeave);
-        tab.setAttribute('data-live-gmail-listener', 'true');
+        attachEssentialHoverListener(tab);
       }
 
       if (!tabMatchesGmailPattern(tab)) continue;
@@ -1466,6 +1597,18 @@
       const hints = getTabUrlHints(tab);
       const tabUrl = hints.find((h) => h.includes(pattern)) || hints[0] || '';
       gmailTabs.set(tab, tabUrl);
+    }
+
+    // Also attach via the essentials DOM — on cold start tabs may appear here
+    // before all session metadata is reflected in gBrowser.tabs iteration.
+    for (const tab of document.querySelectorAll('#zen-essentials .tabbrowser-tab[zen-essential]')) {
+      try {
+        if (window.gZenWorkspaces?.containerSpecificEssentials && activeContainerId) {
+          const tabContainerId = parseInt(tab.getAttribute('usercontextid') || '0', 10);
+          if (tabContainerId !== activeContainerId) continue;
+        }
+      } catch (e) {}
+      attachEssentialHoverListener(tab);
     }
   }
 
@@ -1499,8 +1642,9 @@
       (event) => {
         const tab = event.target.closest('.tabbrowser-tab');
         if (!tab?.hasAttribute('zen-essential')) return;
-        if (!isGmailEssentialTab(tab)) return;
-        showPanel(tab); // showPanel's isNewHover guard prevents double-scan
+        if (!isEssentialInActiveContainer(tab)) return;
+        if (!tabMatchesGmailPattern(tab)) return;
+        showPanel(tab);
       },
       true
     );
@@ -1836,7 +1980,7 @@
                       // Set up listener for ready status
                       if (!readyCheckListener) {
                         readyCheckListener = (message) => {
-                          if (message.name === 'LiveGmail:ReadyStatus' && message.data && message.data.ready) {
+                          if (message.name === 'LiveGmail:ReadyStatus' && message.data?.inboxReady) {
                             gmailReady = true;
                             debugLog('Gmail inbox is ready, rows:', message.data.rows);
                             
