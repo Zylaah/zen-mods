@@ -254,7 +254,13 @@
   function isLoadedGmailBrowser(browser) {
     if (!browser) return false;
     try {
-      if (browser.browsingContext?.discarded) return false;
+      // A lazy browser (created by _createLazyBrowser after discardBrowser) has no
+      // live BrowsingContext — it was destroyed. Its currentURI getter is a stub that
+      // reads from SessionStore and returns the last Gmail URL even though the browser
+      // is not actually loaded. Treating that as "loaded" is a false positive.
+      // tabbrowserjs comment: "browsingContext is expected to not be defined on discarded tabs."
+      if (!browser.browsingContext) return false;
+      if (browser.browsingContext.discarded) return false;
       const spec = browser.currentURI?.spec || '';
       return spec.includes(getGmailUrlPattern());
     } catch (e) {
@@ -570,23 +576,25 @@
     })();
 
     if (!isAlreadyLoading) {
-      // A browser whose browsingContext is discarded cannot be navigated via
-      // fixupAndLoadURIString — the call silently does nothing.  This includes
-      // tabs we previously unloaded via explicitUnloadTabs even when we removed
-      // the 'pending'/'discarded' DOM attributes for visual reasons.
-      // The pending DOM attribute is the normal indicator, but after our own
-      // unload it is absent while browsingContext.discarded is still true.
-      const isBrowsingContextDiscarded = (() => {
-        try { return essential.linkedBrowser?.browsingContext?.discarded === true; }
+      // Decide how to wake the browser.
+      //
+      // _insertBrowser is needed when there is no live BrowsingContext:
+      //   • Startup pending tab  → 'pending' attr set, no linkedPanel, browsingContext absent
+      //   • Post-unload lazy tab → we removed 'pending'/'discarded' attrs for cosmetic
+      //     reasons (matching Zen's own behaviour for the 'discarded' attr) but the
+      //     browser is still a lazy stub created by discardBrowser/_createLazyBrowser.
+      //     In that state browsingContext is null — absent, not discarded.
+      //     tabbrowserjs: "browsingContext is expected to not be defined on discarded tabs."
+      //
+      // fixupAndLoadURIString (loadGmailInTab) is only used when a real BrowsingContext
+      // exists but Gmail isn't the current URL (e.g. user navigated away inside Gmail).
+      const hasLiveBrowsingContext = (() => {
+        try { return !!essential.linkedBrowser?.browsingContext; }
         catch (e) { return false; }
       })();
 
-      if (essential.hasAttribute('pending') || isBrowsingContextDiscarded) {
-        // Pending / lazy session-restore stub — materialise via _insertBrowser,
-        // then wait for the tab's load event to scan.
-        // If the stored URL isn't Gmail (edge case: fresh essential with no history),
-        // scheduleScanWhenTabReady's isLoadedGmailBrowser check will fail and we
-        // fall through to loadGmailInTab inside its retry path.
+      if (!hasLiveBrowsingContext) {
+        // No live context — materialise via _insertBrowser and wait for load.
         try {
           gBrowser._insertBrowser(essential);
         } catch (e) {
@@ -595,7 +603,7 @@
         }
         scheduleScanWhenTabReady(essential, sessionId);
       } else {
-        // Loaded browser with a stale / wrong URL — navigate it directly
+        // Real browser, stale URL — navigate it directly.
         loadGmailInTab(essential);
         scheduleScanWhenTabReady(essential, sessionId);
       }
@@ -1468,7 +1476,9 @@
       return;
     }
 
-    hoveredTab = tab;
+    // Do NOT set hoveredTab here. showPanel computes isNewHover as
+    // (hoveredTab !== tab) before setting hoveredTab itself, so setting it
+    // here first would always produce isNewHover=false and suppress the scan.
     showPanel(tab);
   }
 
