@@ -330,7 +330,7 @@
     }
   }
 
-  function scheduleScanWhenTabReady(tab, sessionId, delayMs = 1500) {
+  function scheduleScanWhenTabReady(tab, sessionId) {
     const browser = tab?.linkedBrowser;
     if (!browser) return;
 
@@ -341,24 +341,24 @@
       return true;
     };
 
-    const onReady = () => {
-      setTimeout(() => {
-        if (!runScan()) {
-          // URL not Gmail yet — browser was mid-restore and got a second navigation.
-          debugLog('scheduleScanWhenTabReady: Gmail not ready after load, waiting for next load');
-          browser.addEventListener('load', () => {
-            setTimeout(runScan, delayMs);
-          }, { once: true });
-        }
-      }, delayMs);
+    // No artificial delay: scan as soon as Gmail's load event fires.
+    // If the inbox DOM isn't rendered yet the frame script returns inboxReady=false,
+    // and its MutationObserver delivers the real data once the inbox appears.
+    // If the first load was about:blank (browser just materialised) rather than Gmail,
+    // we re-register for the next load event instead of giving up.
+    const onLoad = () => {
+      if (!runScan()) {
+        debugLog('scheduleScanWhenTabReady: load was not Gmail, waiting for next load');
+        browser.addEventListener('load', onLoad, { once: true });
+      }
     };
 
     if (isLoadedGmailBrowser(browser)) {
-      onReady();
+      runScan();
       return;
     }
 
-    browser.addEventListener('load', onReady, { once: true });
+    browser.addEventListener('load', onLoad, { once: true });
   }
 
   function loadGmailInTab(tab, url = getGmailInboxUrl()) {
@@ -551,6 +551,7 @@
       clearTransientScanState();
     }
     scanInProgress = true;
+    updateEmailDisplay(); // switch panel to loading spinner immediately
 
     if (scanLoadedGmailTabs()) {
       // Tab was already loaded — scan in place, leave it loaded
