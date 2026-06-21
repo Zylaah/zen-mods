@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        3.0.2
+// @version        3.1.0
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -53,7 +53,6 @@
   let gmailTabs = new Map();
   let clickedEmailIds = new Set();
   let messageListenersRegistered = false;
-  let lastScanRequestTs = 0;
   let lastLogTs = 0;
   let backgroundScanTimer = null;
   let scanInProgress = false;
@@ -65,6 +64,7 @@
   let transientScanTab = null;
   let shouldUnloadAfterScan = false;
   let transientScanWatchdog = null;
+  let hoverSessionId = 0; // incremented on each new hover; async callbacks check this to avoid stale scans
 
 
   /**
@@ -324,11 +324,12 @@
     }
   }
 
-  function scheduleScanWhenTabReady(tab, delayMs = 1500) {
+  function scheduleScanWhenTabReady(tab, sessionId, delayMs = 1500) {
     const browser = tab?.linkedBrowser;
     if (!browser) return;
 
     const runScan = () => {
+      if (hoverSessionId !== sessionId) return false; // hover session expired
       if (!isLoadedGmailBrowser(browser)) return false;
       scanBrowser(browser);
       return true;
@@ -337,9 +338,8 @@
     const onReady = () => {
       setTimeout(() => {
         if (!runScan()) {
-          // The load event fired but Gmail URL isn't active yet — the browser was
-          // mid-restore and got a second navigation. Wait for the real load.
-          debugLog('scheduleScanWhenTabReady: Gmail not ready after load, retrying');
+          // URL not Gmail yet — browser was mid-restore and got a second navigation.
+          debugLog('scheduleScanWhenTabReady: Gmail not ready after load, waiting for next load');
           browser.addEventListener('load', () => {
             setTimeout(runScan, delayMs);
           }, { once: true });
@@ -561,6 +561,8 @@
     shouldUnloadAfterScan = true;
     startTransientScanWatchdog();
 
+    const sessionId = hoverSessionId; // capture so load callbacks can detect stale sessions
+
     const isAlreadyLoading = (() => {
       try {
         return essential.linkedBrowser?.webProgress?.isLoadingDocument === true;
@@ -568,9 +570,31 @@
     })();
 
     if (!isAlreadyLoading) {
-      loadGmailInTab(essential);
+      if (essential.hasAttribute('pending')) {
+        // Pending tab is a lazy session-restore stub. fixupAndLoadURIString does nothing
+        // on these; the correct wake path is _insertBrowser which materialises the browser
+        // and triggers SessionStore restore.
+        try {
+          gBrowser._insertBrowser(essential);
+          essential.addEventListener('SSTabRestored', () => {
+            if (hoverSessionId !== sessionId) return;
+            setTimeout(() => {
+              if (hoverSessionId === sessionId) scanBrowser(essential.linkedBrowser);
+            }, 500);
+          }, { once: true });
+        } catch (e) {
+          debugLog('_insertBrowser failed, falling back to loadGmailInTab', e);
+          loadGmailInTab(essential);
+          scheduleScanWhenTabReady(essential, sessionId);
+        }
+      } else {
+        // Discarded tab — reload and wait for the load event
+        loadGmailInTab(essential);
+        scheduleScanWhenTabReady(essential, sessionId);
+      }
+    } else {
+      scheduleScanWhenTabReady(essential, sessionId);
     }
-    scheduleScanWhenTabReady(essential);
   }
 
   function setupBackgroundScanning() {
@@ -1069,31 +1093,6 @@
     }
   }
 
-  /**
-   * Request a scan from all loaded Gmail tabs (and wake a scanner tab if none are loaded)
-   * @param {boolean} [force=false] - bypass hover throttle
-   */
-  /**
-   * @param {boolean} [force=false] bypass the 4s throttle
-   * @param {boolean} [allowCreate=false] create scanner tab if no Gmail tab is loaded (hover only)
-   */
-  function requestScanFromGmailTabs(force = false, allowCreate = false) {
-    try {
-      if (!gBrowser) return;
-
-      const now = Date.now();
-      if (!force && now - lastScanRequestTs < 4000) return;
-      lastScanRequestTs = now;
-
-      if (allowCreate) {
-        wakeGmailForScan();
-      } else {
-        scanLoadedGmailTabs();
-      }
-    } catch (e) {
-      console.warn('[Live Gmail] Error requesting scan:', e);
-    }
-  }
 
   /**
    * Handle data from frame script
@@ -1106,13 +1105,11 @@
     const isAuthoritative = rows > 0 || inboxReady;
 
     if (!isAuthoritative) {
-      debugLog('Ignoring premature scan (inbox not ready, rows=0)');
+      // Inbox not ready yet (Gmail still loading). Don't retry from here —
+      // the frame script's MutationObserver will push a fresh LiveGmail:UnreadData
+      // message as soon as the inbox rows appear.
+      debugLog('Premature scan (inbox not ready), waiting for MutationObserver update');
       updateEmailDisplay();
-      if (scanInProgress) {
-        setTimeout(() => {
-          if (scanInProgress) scanLoadedGmailTabs();
-        }, 1500);
-      }
       return;
     }
 
@@ -1412,8 +1409,6 @@
       const tabUrl = hints.find((h) => h.includes(pattern)) || hints[0] || '';
       gmailTabs.set(tab, tabUrl);
     }
-
-    if (!scanInProgress) requestScanFromGmailTabs();
   }
 
   /**
@@ -1429,7 +1424,10 @@
   }
 
   /**
-   * Hover on essentials strip (fallback when per-tab listeners are not attached yet)
+   * Fallback hover delegation on the essentials strip, for cases where the
+   * per-tab mouseenter listener in updateGmailTabs was not yet attached.
+   * The showPanel guard (isNewHover) ensures this never double-scans when
+   * handleTabHover already handled the same gesture.
    */
   function setupEssentialsHoverDelegation() {
     const root =
@@ -1444,8 +1442,7 @@
         const tab = event.target.closest('.tabbrowser-tab');
         if (!tab?.hasAttribute('zen-essential')) return;
         if (!isGmailEssentialTab(tab)) return;
-        hoveredTab = tab;
-        showPanel(tab);
+        showPanel(tab); // showPanel's isNewHover guard prevents double-scan
       },
       true
     );
@@ -1504,28 +1501,6 @@
   }
 
   /**
-   * Re-open or reposition the panel while the user is still hovering the essential tab.
-   * @param {boolean} [rescan=false] trigger a fresh Gmail scan
-   */
-  function ensurePanelVisibleIfHovering(rescan = false) {
-    const tab = hoveredTab;
-    if (!tab?.matches(':hover') || !isGmailEssentialTab(tab)) return;
-    if (!panelElement) createPanel();
-
-    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-
-    updatePanelTheme();
-
-    const tabHeight = tab.getBoundingClientRect().height;
-    panelElement.openPopup(tab, 'end_before', 4, tabHeight);
-    updateEmailDisplay();
-
-    if (rescan) {
-      requestScanFromGmailTabs(true, true);
-    }
-  }
-
-  /**
    * Show panel
    */
   function showPanel(tab) {
@@ -1546,7 +1521,13 @@
       }
     }
 
+    // Only start a new scan when the hovered tab actually changes.
+    // This prevents both the per-tab mouseenter listener and the essentials
+    // delegation (mouseover on the container) from both triggering a scan
+    // for the same physical hover gesture.
+    const isNewHover = hoveredTab !== tab;
     hoveredTab = tab;
+
     if (isEssentialHover) {
       lastPanelHoverTs = Date.now();
       idleScanTick = 0;
@@ -1560,31 +1541,35 @@
     panelElement.openPopup(tab || document.documentElement, 'end_before', 4, tabHeight);
     updateEmailDisplay();
 
-    // Defer the scan so the popup fully opens before any tab manipulation
-    // (loadGmailInTab changes tab attributes which can dismiss a just-opened popup)
-    setTimeout(() => requestScanFromGmailTabs(true, isEssentialHover), 80);
+    // Start exactly one scan per new hover session.
+    // Increment hoverSessionId so any in-flight async callbacks from the previous
+    // hover (load-event listeners, SSTabRestored, scheduled scans) become stale
+    // and self-cancel when they check hoverSessionId.
+    if (isEssentialHover && isNewHover) {
+      const sessionId = ++hoverSessionId;
+      // Defer so the popup fully opens before any tab manipulation
+      // (loadGmailInTab changes tab attributes which can briefly dismiss a popup)
+      setTimeout(() => {
+        if (hoverSessionId !== sessionId) return; // hover already changed
+        wakeGmailForScan();
+      }, 80);
+    }
   }
 
   /**
    * Schedule panel hide after a short delay, cancelling if the cursor returns
    * to either the tab or the panel in time. This prevents flicker when the
    * cursor briefly crosses the panel boundary on entry from the right.
+   * Extra grace time while a scan is running because tab attribute changes
+   * during load can momentarily drop the :hover state.
    */
   function scheduleHide() {
     if (hideTimer) clearTimeout(hideTimer);
     const delayMs = scanInProgress ? 350 : 200;
     hideTimer = setTimeout(() => {
       hideTimer = null;
-      const tabHovered = hoveredTab && hoveredTab.matches(':hover');
-      const panelHovered = panelElement && panelElement.matches(':hover');
-      if (tabHovered || panelHovered) return;
-
-      // Tab reload can briefly drop :hover — re-show if the cursor is still there
-      if (scanInProgress && hoveredTab) {
-        ensurePanelVisibleIfHovering();
-        if (hoveredTab.matches(':hover') || panelElement?.matches(':hover')) return;
-      }
-
+      if (hoveredTab?.matches(':hover')) return;
+      if (panelElement?.matches(':hover')) return;
       hidePanel();
     }, delayMs);
   }
@@ -1911,10 +1896,10 @@
         }
         
         updateEmailDisplay();
-        
-        // Immediately ask all Gmail tabs to rescan to avoid stale state
-        requestScanFromGmailTabs();
-        
+
+        // Rescan loaded tabs so the panel stays fresh (no wake needed — user is navigating to Gmail)
+        scanLoadedGmailTabs();
+
         hidePanel();
       });
 
@@ -2020,7 +2005,7 @@
       }
     },
     hidePanel,
-    scan: () => requestScanFromGmailTabs(true, true),
+    scan: () => wakeGmailForScan(),
     wake: wakeGmailForScan,
     emails: () => currentEmails,
     reInit: () => UC_LIVE_GMAIL.init()
