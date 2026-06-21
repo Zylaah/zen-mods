@@ -295,7 +295,24 @@
     if (!tab) return true;
     if (tab.hasAttribute('pending')) return true;
     if (tab.hasAttribute('discarded')) return true;
+    if (!tab.linkedPanel) return true;
     return false;
+  }
+
+  /**
+   * True when the tab has no live document yet (startup pending, post-unload lazy stub).
+   * Do not read webProgress or messageManager on such tabs — lazy getters call _insertBrowser.
+   */
+  function isLazyOrUnloadedTab(tab) {
+    if (!tab) return true;
+    if (tab.hasAttribute('pending')) return true;
+    if (!tab.linkedPanel) return true;
+    try {
+      const bc = tab.linkedBrowser?.browsingContext;
+      return !bc;
+    } catch (e) {
+      return true;
+    }
   }
 
   function findLoadedGmailEssentialTab() {
@@ -330,35 +347,79 @@
     }
   }
 
-  function scheduleScanWhenTabReady(tab, sessionId) {
+  /**
+   * Wait until Gmail is actually loaded in the tab, then scan once.
+   * Uses poll + SSTabRestored + load because background session-restore often
+   * does not deliver a single reliable browser "load" we can depend on alone.
+   */
+  function waitForGmailAndScan(tab, sessionId) {
     const browser = tab?.linkedBrowser;
     if (!browser) return;
 
-    const runScan = () => {
-      if (hoverSessionId !== sessionId) return false; // hover session expired
-      if (!isLoadedGmailBrowser(browser)) return false;
-      scanBrowser(browser);
-      return true;
-    };
+    let scanned = false;
+    let pollTimer = null;
 
-    // No artificial delay: scan as soon as Gmail's load event fires.
-    // If the inbox DOM isn't rendered yet the frame script returns inboxReady=false,
-    // and its MutationObserver delivers the real data once the inbox appears.
-    // If the first load was about:blank (browser just materialised) rather than Gmail,
-    // we re-register for the next load event instead of giving up.
-    const onLoad = () => {
-      if (!runScan()) {
-        debugLog('scheduleScanWhenTabReady: load was not Gmail, waiting for next load');
-        browser.addEventListener('load', onLoad, { once: true });
+    const cleanup = () => {
+      if (pollTimer) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
       }
+      tab.removeEventListener('SSTabRestored', onTabRestored);
+      browser.removeEventListener('load', onBrowserLoad);
     };
 
-    if (isLoadedGmailBrowser(browser)) {
-      runScan();
-      return;
-    }
+    const fail = (reason) => {
+      if (scanned) return;
+      cleanup();
+      debugLog('waitForGmailAndScan:', reason);
+      scanInProgress = false;
+      updateEmailDisplay();
+    };
 
-    browser.addEventListener('load', onLoad, { once: true });
+    const tryScan = () => {
+      if (scanned || hoverSessionId !== sessionId) return;
+      if (!isLoadedGmailBrowser(browser)) return;
+      scanned = true;
+      cleanup();
+      scanBrowser(browser);
+    };
+
+    const onTabRestored = () => {
+      debugLog('waitForGmailAndScan: SSTabRestored');
+      tryScan();
+    };
+
+    const onBrowserLoad = () => {
+      debugLog('waitForGmailAndScan: browser load');
+      tryScan();
+    };
+
+    tab.addEventListener('SSTabRestored', onTabRestored);
+    browser.addEventListener('load', onBrowserLoad);
+
+    let attempts = 0;
+    const poll = () => {
+      if (scanned || hoverSessionId !== sessionId) {
+        cleanup();
+        return;
+      }
+      tryScan();
+      if (scanned) return;
+
+      // Session restore in a background essential can stall; after ~5s, navigate directly.
+      if (attempts === 25 && tab.linkedPanel && !isLoadedGmailBrowser(browser)) {
+        debugLog('waitForGmailAndScan: session restore slow, loading inbox directly');
+        loadGmailInTab(tab);
+      }
+
+      if (++attempts >= 150) {
+        fail('timed out waiting for Gmail');
+        return;
+      }
+      pollTimer = setTimeout(poll, 200);
+    };
+
+    poll();
   }
 
   function loadGmailInTab(tab, url = getGmailInboxUrl()) {
@@ -568,48 +629,29 @@
     shouldUnloadAfterScan = true;
     startTransientScanWatchdog();
 
-    const sessionId = hoverSessionId; // capture so load callbacks can detect stale sessions
+    const sessionId = hoverSessionId;
 
-    const isAlreadyLoading = (() => {
-      try {
-        return essential.linkedBrowser?.webProgress?.isLoadingDocument === true;
-      } catch (e) { return false; }
-    })();
-
-    if (!isAlreadyLoading) {
-      // Decide how to wake the browser.
-      //
-      // _insertBrowser is needed when there is no live BrowsingContext:
-      //   • Startup pending tab  → 'pending' attr set, no linkedPanel, browsingContext absent
-      //   • Post-unload lazy tab → we removed 'pending'/'discarded' attrs for cosmetic
-      //     reasons (matching Zen's own behaviour for the 'discarded' attr) but the
-      //     browser is still a lazy stub created by discardBrowser/_createLazyBrowser.
-      //     In that state browsingContext is null — absent, not discarded.
-      //     tabbrowserjs: "browsingContext is expected to not be defined on discarded tabs."
-      //
-      // fixupAndLoadURIString (loadGmailInTab) is only used when a real BrowsingContext
-      // exists but Gmail isn't the current URL (e.g. user navigated away inside Gmail).
-      const hasLiveBrowsingContext = (() => {
-        try { return !!essential.linkedBrowser?.browsingContext; }
-        catch (e) { return false; }
-      })();
-
-      if (!hasLiveBrowsingContext) {
-        // No live context — materialise via _insertBrowser and wait for load.
+    if (isLazyOrUnloadedTab(essential)) {
+      // Lazy / pending / post-unload: materialise once and let SessionStore restore
+      // the pinned Gmail URL. Never read webProgress here (lazy getter inserts early)
+      // and never call loadGmailInTab (would fight session restore).
+      if (!essential.linkedPanel) {
         try {
           gBrowser._insertBrowser(essential);
         } catch (e) {
-          debugLog('_insertBrowser failed, falling back to loadGmailInTab', e);
-          loadGmailInTab(essential);
+          debugLog('_insertBrowser failed', e);
+          scanInProgress = false;
+          updateEmailDisplay();
+          return;
         }
-        scheduleScanWhenTabReady(essential, sessionId);
-      } else {
-        // Real browser, stale URL — navigate it directly.
-        loadGmailInTab(essential);
-        scheduleScanWhenTabReady(essential, sessionId);
       }
+      waitForGmailAndScan(essential, sessionId);
+    } else if (!isLoadedGmailBrowser(essential.linkedBrowser)) {
+      // Live browser on a non-Gmail page — navigate directly.
+      loadGmailInTab(essential);
+      waitForGmailAndScan(essential, sessionId);
     } else {
-      scheduleScanWhenTabReady(essential, sessionId);
+      scanBrowser(essential.linkedBrowser);
     }
   }
 
