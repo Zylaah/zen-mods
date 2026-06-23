@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        3.3.2
+// @version        3.3.3
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -57,6 +57,7 @@
   let cachedFrameScriptUrl = null;
   let loadScanTimers = new WeakMap();
   let loadScansInFlight = new Set();
+  let activeLoadScanTabs = new WeakSet();
   let activePanelContextKey = null; // `${workspaceUuid}:${containerId}`
   let scanContextKey = null; // context key for an in-flight hover scan
   let panelContexts = new Map(); // contextKey -> { currentEmails, cachedEmails, clickedEmailIds }
@@ -336,10 +337,13 @@
     return currentEmails.length === 0 && cachedEmails.length === 0;
   }
 
+  function finishLoadScanForTab(tab) {
+    if (tab) activeLoadScanTabs.delete(tab);
+  }
+
   function scheduleLoadScan(tab) {
     if (!tab || tab.closing) return;
-    const existing = loadScanTimers.get(tab);
-    if (existing) clearTimeout(existing);
+    if (activeLoadScanTabs.has(tab) || loadScanTimers.has(tab)) return;
     const timer = setTimeout(() => {
       loadScanTimers.delete(tab);
       performLoadScan(tab);
@@ -350,9 +354,13 @@
   function performLoadScan(tab) {
     if (!tab || tab.closing || !isGmailEssentialTab(tab)) return;
     if (isTabPendingOrDiscarded(tab)) return;
+    if (activeLoadScanTabs.has(tab)) return;
 
     const browser = tab.linkedBrowser;
     if (!browser) return;
+
+    activeLoadScanTabs.add(tab);
+    tab.setAttribute('data-live-gmail-was-loaded', 'true');
 
     const contextKey = getPanelContextKey(tab);
     scanContextKey = contextKey;
@@ -383,7 +391,6 @@
         clearTimeout(pollTimer);
         pollTimer = null;
       }
-      tab.removeEventListener('SSTabRestored', onRestored);
       try {
         browser.removeEventListener('load', onLoad);
       } catch (e) {}
@@ -393,6 +400,7 @@
       if (scanStarted) return;
       cleanup();
       debugLog('startLoadScanWhenReady:', reason);
+      finishLoadScanForTab(tab);
       loadScansInFlight.delete(contextKey);
       scanInProgress = false;
       tab.removeAttribute('data-live-gmail-was-loaded');
@@ -425,6 +433,7 @@
       scanStarted = true;
       cleanup();
       if (!scanBrowserWhenReady(browser, tab)) {
+        finishLoadScanForTab(tab);
         loadScansInFlight.delete(contextKey);
         scanInProgress = false;
         tab.removeAttribute('data-live-gmail-was-loaded');
@@ -432,16 +441,11 @@
       }
     };
 
-    const onRestored = () => {
-      debugLog('startLoadScanWhenReady: SSTabRestored');
-      tryScan();
-    };
     const onLoad = () => {
       debugLog('startLoadScanWhenReady: browser load');
       tryScan();
     };
 
-    tab.addEventListener('SSTabRestored', onRestored);
     browser.addEventListener('load', onLoad);
     tryScan();
   }
@@ -531,6 +535,7 @@
       cleanup();
       debugLog('scanBrowserWhenReady: timed out or stale');
       if (tab) {
+        finishLoadScanForTab(tab);
         loadScansInFlight.delete(getPanelContextKey(tab));
         tab.removeAttribute('data-live-gmail-was-loaded');
       }
@@ -548,6 +553,7 @@
       } catch (e) {
         console.warn('[Live Gmail] Could not send RequestScan:', e);
         if (tab) {
+          finishLoadScanForTab(tab);
           loadScansInFlight.delete(getPanelContextKey(tab));
           tab.removeAttribute('data-live-gmail-was-loaded');
         }
@@ -606,9 +612,9 @@
       isLoadedGmailBrowser(tab.linkedBrowser);
 
     if (isLoaded && !wasLoaded) {
-      tab.setAttribute('data-live-gmail-was-loaded', 'true');
       scheduleLoadScan(tab);
     } else if (!isLoaded && wasLoaded) {
+      finishLoadScanForTab(tab);
       tab.removeAttribute('data-live-gmail-was-loaded');
       const contextKey = getPanelContextKey(tab);
       loadScansInFlight.delete(contextKey);
@@ -624,7 +630,6 @@
 
     tab.addEventListener('SSTabRestored', () => {
       debugLog('Gmail essential SSTabRestored');
-      tab.removeAttribute('data-live-gmail-was-loaded');
       scheduleLoadScan(tab);
     });
   }
@@ -1048,7 +1053,6 @@
       }
     });
     observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
-    debouncedScan();
   }
   
   // Message handlers
@@ -1119,7 +1123,7 @@
     }
   });
   
-  // Initialize — observer + one scan per page load; ongoing updates via observer.
+  // Initialize — observer for live updates; chrome sends RequestScan on tab load.
   function init() {
     frameDebugLog('Initializing...');
     const start = () => setupObserver();
@@ -1210,6 +1214,7 @@
     if (sourceTab && !isLiveGmailScanSource(sourceTab)) {
       const staleKey = scanContextKey || getPanelContextKey(sourceTab);
       debugLog('Ignoring scan from unloaded tab');
+      finishLoadScanForTab(sourceTab);
       if (staleKey) loadScansInFlight.delete(staleKey);
       scanInProgress = false;
       updateEmailDisplay();
@@ -1274,6 +1279,7 @@
 
     scanContextKey = null;
     loadScansInFlight.delete(targetKey);
+    finishLoadScanForTab(sourceTab);
 
     if (restoreView && viewKey) {
       activatePanelContext(viewKey);
