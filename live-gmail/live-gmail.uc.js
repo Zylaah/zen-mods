@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        3.1.0
+// @version        3.2.0
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -65,24 +65,102 @@
   let shouldUnloadAfterScan = false;
   let transientScanWatchdog = null;
   let hoverSessionId = 0; // incremented on each new hover; async callbacks check this to avoid stale scans
-
+  let activePanelContextKey = null; // `${workspaceUuid}:${containerId}`
+  let scanContextKey = null; // context key for an in-flight hover scan
+  let panelContexts = new Map(); // contextKey -> { currentEmails, cachedEmails, clickedEmailIds }
+  let diskCacheStore = {}; // persisted cache keyed by contextKey
 
   /**
-   * Whether this essential belongs to the active workspace container
+   * Active Zen workspace uuid (space id)
    */
-  function isEssentialInActiveContainer(tab) {
-    if (!tab?.hasAttribute('zen-essential')) return false;
+  function getActiveWorkspaceId() {
     try {
-      if (window.gZenWorkspaces?.containerSpecificEssentials) {
-        const active = gZenWorkspaces.getActiveWorkspaceFromCache();
-        const activeContainerId = active?.containerTabId || 0;
-        const tabContainerId = parseInt(tab.getAttribute('usercontextid') || '0', 10);
-        if (activeContainerId && tabContainerId !== activeContainerId) {
-          return false;
-        }
-      }
+      return window.gZenWorkspaces?.getActiveWorkspaceFromCache?.()?.uuid || 'default';
     } catch (e) {}
-    return true;
+    return 'default';
+  }
+
+  /**
+   * Panel cache key: one panel state per workspace + container combination.
+   * Essentials are shared across workspaces but each space/container may map to a different Gmail account.
+   */
+  function getPanelContextKey(tab = hoveredTab) {
+    const workspaceId = getActiveWorkspaceId();
+    let containerId = 0;
+
+    if (window.gZenWorkspaces?.containerSpecificEssentials) {
+      if (tab?.hasAttribute?.('zen-essential')) {
+        containerId = parseInt(tab.getAttribute('usercontextid') || '0', 10);
+      } else {
+        const active = window.gZenWorkspaces?.getActiveWorkspaceFromCache?.();
+        containerId = typeof active?.containerTabId === 'number' ? active.containerTabId : 0;
+      }
+    }
+
+    return `${workspaceId}:${containerId}`;
+  }
+
+  function getContextContainerId(contextKey) {
+    return parseInt(String(contextKey).split(':')[1] || '0', 10);
+  }
+
+  /**
+   * Whether an essential belongs to the container portion of a panel context key.
+   */
+  function tabMatchesContainerContext(tab, contextKey) {
+    if (!tab?.hasAttribute('zen-essential')) return false;
+    if (!window.gZenWorkspaces?.containerSpecificEssentials) return true;
+
+    const containerId = getContextContainerId(contextKey);
+    if (!containerId) return true;
+
+    const tabContainerId = parseInt(tab.getAttribute('usercontextid') || '0', 10);
+    return tabContainerId === containerId;
+  }
+
+  function getOrCreatePanelContext(key) {
+    if (!panelContexts.has(key)) {
+      panelContexts.set(key, {
+        currentEmails: [],
+        cachedEmails: Array.isArray(diskCacheStore[key]) ? diskCacheStore[key].slice() : [],
+        clickedEmailIds: new Set()
+      });
+    }
+    return panelContexts.get(key);
+  }
+
+  function persistActiveContextToMemory(key = activePanelContextKey) {
+    if (!key) return;
+    const ctx = getOrCreatePanelContext(key);
+    ctx.currentEmails = currentEmails;
+    ctx.cachedEmails = cachedEmails;
+  }
+
+  /**
+   * Switch the in-memory email state to a workspace/container context.
+   */
+  function activatePanelContext(key) {
+    if (!key) return;
+    if (key === activePanelContextKey) return;
+
+    persistActiveContextToMemory(activePanelContextKey);
+
+    activePanelContextKey = key;
+    const ctx = getOrCreatePanelContext(key);
+    currentEmails = ctx.currentEmails;
+    cachedEmails = ctx.cachedEmails;
+    clickedEmailIds = ctx.clickedEmailIds;
+
+    debugLog('Panel context:', key);
+  }
+
+  function onWorkspaceOrContainerChanged() {
+    hidePanel();
+    hoverSessionId++;
+    scanInProgress = false;
+    scanContextKey = null;
+    clearTransientScanState();
+    activatePanelContext(getPanelContextKey());
   }
 
   /**
@@ -150,23 +228,12 @@
   }
 
   /**
-   * Check if a tab is a Gmail essential tab
+   * Check if a tab is a Gmail essential tab for the given workspace/container context
    */
-  function isGmailEssentialTab(tab) {
+  function isGmailEssentialTab(tab, contextKey = getPanelContextKey(tab)) {
     if (!tab || !tab.hasAttribute('zen-essential')) return false;
-    if (!isEssentialInActiveContainer(tab)) return false;
+    if (!tabMatchesContainerContext(tab, contextKey)) return false;
     return tabMatchesGmailPattern(tab);
-  }
-
-  /**
-   * Active workspace container tab id (0 if none)
-   */
-  function getActiveContainerId() {
-    try {
-      const active = window.gZenWorkspaces?.getActiveWorkspaceFromCache?.();
-      return active?.containerTabId || 0;
-    } catch (e) {}
-    return 0;
   }
 
   function getGmailInboxUrl() {
@@ -180,27 +247,26 @@
   /**
    * Resolve the Gmail essential tab to use for navigation (hovered, existing, or new)
    */
-  function resolveGmailTargetTab() {
-    if (hoveredTab && isGmailEssentialTab(hoveredTab)) {
+  function resolveGmailTargetTab(contextKey = activePanelContextKey || getPanelContextKey()) {
+    if (hoveredTab && isGmailEssentialTab(hoveredTab, contextKey)) {
       return hoveredTab;
     }
 
-    const existing = findGmailEssentialTab();
+    const existing = findGmailEssentialTab(contextKey);
     if (existing) return existing;
 
     if (!gBrowser) return null;
 
     const pattern = getGmailUrlPattern();
     const gmailUrl = `https://${pattern}/`;
-    const activeWorkspace = window.gZenWorkspaces?.getActiveWorkspaceFromCache?.();
-    const activeContainerId = activeWorkspace?.containerTabId || 0;
+    const containerId = getContextContainerId(contextKey);
 
     try {
       const addTabArgs = {
         triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
       };
-      if (activeContainerId) {
-        addTabArgs.userContextId = activeContainerId;
+      if (containerId) {
+        addTabArgs.userContextId = containerId;
       }
 
       const tab = gBrowser.addTab(gmailUrl, addTabArgs);
@@ -344,10 +410,10 @@
     }).catch(() => false);
   }
 
-  function findLoadedGmailEssentialTab() {
+  function findLoadedGmailEssentialTab(contextKey = activePanelContextKey || getPanelContextKey()) {
     if (!gBrowser?.tabs) return null;
     for (const tab of gBrowser.tabs) {
-      if (!isGmailEssentialTab(tab)) continue;
+      if (!isGmailEssentialTab(tab, contextKey)) continue;
       if (isTabPendingOrDiscarded(tab)) continue;
       if (isBrowserNavigationComplete(tab.linkedBrowser)) return tab;
     }
@@ -692,48 +758,67 @@
   }
 
   /**
-   * Persist cachedEmails to a file in the profile directory
+   * Persist all workspace/container caches to the profile file
    */
   function saveCacheToPrefs() {
     try {
-      const slim = cachedEmails.slice(0, CONFIG.MAX_EMAILS).map(e => ({
-        id: e.id,
-        from: e.from,
-        subject: e.subject,
-        snippet: (e.snippet || '').substring(0, 60),
-        date: e.date,
-        isUnread: e.isUnread
-      }));
-      IOUtils.writeUTF8(getCacheFilePath(), JSON.stringify(slim)).catch(() => {});
+      persistActiveContextToMemory(activePanelContextKey);
+
+      for (const [key, ctx] of panelContexts.entries()) {
+        diskCacheStore[key] = ctx.cachedEmails.slice(0, CONFIG.MAX_EMAILS).map(e => ({
+          id: e.id,
+          from: e.from,
+          subject: e.subject,
+          snippet: (e.snippet || '').substring(0, 60),
+          date: e.date,
+          isUnread: e.isUnread
+        }));
+      }
+
+      IOUtils.writeUTF8(getCacheFilePath(), JSON.stringify(diskCacheStore)).catch(() => {});
     } catch (e) {}
   }
 
   /**
-   * Restore cachedEmails from the profile cache file on startup
+   * Restore per-context caches from the profile file on startup
    */
   function loadCacheFromPrefs() {
     try {
       IOUtils.readUTF8(getCacheFilePath()).then(json => {
         const parsed = JSON.parse(json);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          cachedEmails = parsed;
-          debugLog('Restored', parsed.length, 'emails from file cache');
+        if (Array.isArray(parsed)) {
+          // Legacy single-cache format
+          diskCacheStore = { 'default:0': parsed };
+        } else if (parsed && typeof parsed === 'object') {
+          diskCacheStore = parsed;
+        }
+
+        const activeKey = getPanelContextKey();
+        activatePanelContext(activeKey);
+
+        const count = getOrCreatePanelContext(activeKey).cachedEmails.length;
+        if (count > 0) {
+          debugLog('Restored', count, 'emails for context', activeKey);
           updateEmailDisplay();
         }
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => {
+        activatePanelContext(getPanelContextKey());
+      });
+    } catch (e) {
+      activatePanelContext(getPanelContextKey());
+    }
   }
 
   /**
    * Find the Gmail essential tab in the active container (loaded or discarded)
    */
-  function findGmailEssentialTab() {
-    const loaded = findLoadedGmailEssentialTab();
+  function findGmailEssentialTab(contextKey = activePanelContextKey || getPanelContextKey()) {
+    const loaded = findLoadedGmailEssentialTab(contextKey);
     if (loaded) return loaded;
 
     if (!gBrowser?.tabs) return null;
     for (const tab of gBrowser.tabs) {
-      if (isGmailEssentialTab(tab)) return tab;
+      if (isGmailEssentialTab(tab, contextKey)) return tab;
     }
     return null;
   }
@@ -753,10 +838,10 @@
   /**
    * Scan any already-loaded Gmail tab (hover path — waits for inbox ready).
    */
-  function scanLoadedGmailTabsWhenReady(sessionId) {
+  function scanLoadedGmailTabsWhenReady(sessionId, contextKey = activePanelContextKey || getPanelContextKey()) {
     if (!gBrowser) return false;
 
-    const essential = findLoadedGmailEssentialTab();
+    const essential = findLoadedGmailEssentialTab(contextKey);
     if (essential?.linkedBrowser) {
       return scanBrowserWhenReady(essential.linkedBrowser, sessionId);
     }
@@ -772,10 +857,10 @@
   /**
    * Scan any already-loaded Gmail tab (background timer — tab should already be idle).
    */
-  function scanLoadedGmailTabs() {
+  function scanLoadedGmailTabs(contextKey = activePanelContextKey || getPanelContextKey()) {
     if (!gBrowser) return false;
 
-    const essential = findLoadedGmailEssentialTab();
+    const essential = findLoadedGmailEssentialTab(contextKey);
     if (essential?.linkedBrowser) {
       scanBrowser(essential.linkedBrowser);
       return true;
@@ -797,6 +882,9 @@
   function wakeGmailForScan() {
     if (!gBrowser) return;
 
+    const contextKey = activePanelContextKey || getPanelContextKey();
+    scanContextKey = contextKey;
+
     // Don't reset an already-running transient scan
     if (!shouldUnloadAfterScan) {
       clearTransientScanState();
@@ -806,12 +894,12 @@
 
     const sessionId = hoverSessionId;
 
-    if (scanLoadedGmailTabsWhenReady(sessionId)) {
+    if (scanLoadedGmailTabsWhenReady(sessionId, contextKey)) {
       // Tab was already loaded — scan in place, leave it loaded
       return;
     }
 
-    const essential = findGmailEssentialTab();
+    const essential = findGmailEssentialTab(contextKey);
     if (!essential?.linkedBrowser) {
       scanInProgress = false;
       updateEmailDisplay();
@@ -1341,57 +1429,71 @@
     const isAuthoritative = rows > 0 || inboxReady;
 
     if (!isAuthoritative) {
-      // Inbox not ready yet (Gmail still loading). Don't retry from here —
-      // the frame script's MutationObserver will push a fresh LiveGmail:UnreadData
-      // message as soon as the inbox rows appear.
       debugLog('Premature scan (inbox not ready), waiting for MutationObserver update');
-      updateEmailDisplay();
+      if (activePanelContextKey) updateEmailDisplay();
       return;
+    }
+
+    const targetKey = scanContextKey || activePanelContextKey;
+    const viewKey = activePanelContextKey;
+    const restoreView = targetKey && viewKey && targetKey !== viewKey;
+
+    if (targetKey && restoreView) {
+      activatePanelContext(targetKey);
     }
 
     // Throttle noisy logs
     const now = Date.now();
     if (payload.meta && now - lastLogTs > 10000) {
       lastLogTs = now;
-      debugLog('Frame meta rows=', payload.meta.rows, 'unread=', payload.meta.unread);
+      debugLog('Frame meta rows=', payload.meta.rows, 'unread=', payload.meta.unread, 'context=', targetKey);
       debugLog('Received', payload.threads.length, 'threads from frame');
     }
 
-    // Map threads - keep only essential fields for memory efficiency
+    const clickedIds = clickedEmailIds;
     const allEmails = payload.threads.slice(0, CONFIG.MAX_EMAILS).map((thread, idx) => ({
       id: thread.id || thread.threadId || '',
       threadId: thread.threadId || thread.id || '',
       from: thread.from || 'Unknown',
       subject: thread.subject || '(No subject)',
       date: thread.date || '',
-      snippet: (thread.snippet || '').substring(0, 100), // Trim snippet for memory
+      snippet: (thread.snippet || '').substring(0, 100),
       isUnread: thread.isUnread !== false,
       url: thread.url || '',
       rowIndex: thread.rowIndex !== undefined ? thread.rowIndex : idx
     }));
-    
-    // Filter out emails that were clicked (they may not be marked as read yet in Gmail)
-    const nextEmails = allEmails.filter(email => !clickedEmailIds.has(email.id));
+
+    const nextEmails = allEmails.filter(email => !clickedIds.has(email.id));
 
     lastAuthoritativeScanTs = Date.now();
     currentEmails = nextEmails;
     cachedEmails = nextEmails.slice();
+    persistActiveContextToMemory(targetKey);
     saveCacheToPrefs();
-    
-    // Clean up clickedEmailIds: if an email is no longer in the unread list, remove it from tracking
+
     const currentIds = new Set(allEmails.map(e => e.id));
-    for (const clickedId of clickedEmailIds) {
+    for (const clickedId of clickedIds) {
       if (!currentIds.has(clickedId)) {
-        clickedEmailIds.delete(clickedId);
+        clickedIds.delete(clickedId);
       }
     }
 
-    scanInProgress = false;
-    hideError();
-    updateEmailDisplay();
+    scanContextKey = null;
 
-    if (shouldUnloadAfterScan) {
-      setTimeout(() => maybeUnloadTransientScanTab(), 100);
+    if (restoreView && viewKey) {
+      activatePanelContext(viewKey);
+    }
+
+    if (targetKey === viewKey) {
+      scanInProgress = false;
+      hideError();
+      updateEmailDisplay();
+
+      if (shouldUnloadAfterScan) {
+        setTimeout(() => maybeUnloadTransientScanTab(), 100);
+      }
+    } else {
+      scanInProgress = false;
     }
   }
 
@@ -1579,6 +1681,7 @@
     }
 
     setupEssentialsHoverDelegation();
+    setupWorkspaceMonitoring();
 
     // Debounce for MutationObserver only — rapid tab attribute changes (favicon,
     // loading spinner, title) would otherwise rebuild gmailTabs on every tick.
@@ -1608,6 +1711,19 @@
 
 
   /**
+   * React to workspace (space) switches — each space gets its own panel cache.
+   */
+  function setupWorkspaceMonitoring() {
+    window.addEventListener('ZenWorkspacesUIUpdate', onWorkspaceOrContainerChanged);
+
+    try {
+      if (typeof Services !== 'undefined' && Services.prefs) {
+        Services.prefs.addObserver('zen.workspaces.separate-essentials', onWorkspaceOrContainerChanged, false);
+      }
+    } catch (e) {}
+  }
+
+  /**
    * Attach hover listeners to a single essential tab (once).
    */
   function attachEssentialHoverListener(tab) {
@@ -1626,28 +1742,15 @@
     if (!gBrowser || !gBrowser.tabs) return;
 
     const pattern = getGmailUrlPattern();
-
-    const activeWorkspace = window.gZenWorkspaces?.getActiveWorkspaceFromCache?.();
-    const activeContainerId = activeWorkspace?.containerTabId || 0;
+    const contextKey = getPanelContextKey();
 
     for (const tab of gBrowser.tabs) {
       if (!tab.hasAttribute('zen-essential')) continue;
 
-      // Skip essentials from other containers if container-specific essentials is enabled
-      try {
-        if (window.gZenWorkspaces?.containerSpecificEssentials && activeContainerId) {
-          const tabContainerId = parseInt(tab.getAttribute('usercontextid') || 0, 10);
-          if (tabContainerId !== activeContainerId) {
-            continue;
-          }
-        }
-      } catch (e) {}
-
-      if (!tab.hasAttribute('data-live-gmail-listener')) {
-        attachEssentialHoverListener(tab);
-      }
+      attachEssentialHoverListener(tab);
 
       if (!tabMatchesGmailPattern(tab)) continue;
+      if (!tabMatchesContainerContext(tab, contextKey)) continue;
 
       const hints = getTabUrlHints(tab);
       const tabUrl = hints.find((h) => h.includes(pattern)) || hints[0] || '';
@@ -1657,12 +1760,6 @@
     // Also attach via the essentials DOM — on cold start tabs may appear here
     // before all session metadata is reflected in gBrowser.tabs iteration.
     for (const tab of document.querySelectorAll('#zen-essentials .tabbrowser-tab[zen-essential]')) {
-      try {
-        if (window.gZenWorkspaces?.containerSpecificEssentials && activeContainerId) {
-          const tabContainerId = parseInt(tab.getAttribute('usercontextid') || '0', 10);
-          if (tabContainerId !== activeContainerId) continue;
-        }
-      } catch (e) {}
       attachEssentialHoverListener(tab);
     }
   }
@@ -1697,8 +1794,7 @@
       (event) => {
         const tab = event.target.closest('.tabbrowser-tab');
         if (!tab?.hasAttribute('zen-essential')) return;
-        if (!isEssentialInActiveContainer(tab)) return;
-        if (!tabMatchesGmailPattern(tab)) return;
+        if (!isGmailEssentialTab(tab)) return;
         showPanel(tab);
       },
       true
@@ -1763,6 +1859,11 @@
    * Show panel
    */
   function showPanel(tab) {
+    const contextKey = getPanelContextKey(tab);
+    const prevContextKey = activePanelContextKey;
+
+    activatePanelContext(contextKey);
+
     const isEssentialHover = tab && isGmailEssentialTab(tab);
 
     if (tab && tab.hasAttribute('zen-essential') && !isEssentialHover) {
@@ -1784,7 +1885,7 @@
     // This prevents both the per-tab mouseenter listener and the essentials
     // delegation (mouseover on the container) from both triggering a scan
     // for the same physical hover gesture.
-    const isNewHover = hoveredTab !== tab;
+    const isNewHover = hoveredTab !== tab || prevContextKey !== contextKey;
     hoveredTab = tab;
 
     if (isEssentialHover) {
@@ -1838,6 +1939,7 @@
    */
   function hidePanel() {
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    persistActiveContextToMemory(activePanelContextKey);
     if (panelElement) panelElement.hidePopup();
     hoveredTab = null;
   }
@@ -1936,62 +2038,11 @@
         e.stopPropagation();
 
         cancelTransientScanUnload();
-        
-        let targetTab = hoveredTab;
-        
-        // If no hoveredTab (cached email), find or create Gmail essential tab
-        if (!targetTab && gBrowser) {
-          const pattern = getGmailUrlPattern();
-          const gmailUrl = `https://${pattern}/`;
 
-          const activeWorkspace = window.gZenWorkspaces?.getActiveWorkspaceFromCache?.();
-          const activeContainerId = activeWorkspace?.containerTabId || 0;
+        const targetTab = (hoveredTab && isGmailEssentialTab(hoveredTab))
+          ? hoveredTab
+          : resolveGmailTargetTab(activePanelContextKey);
 
-          // Try to find existing Gmail essential tab in the active container (if applicable)
-          for (const tab of gBrowser.tabs) {
-            if (!tab.hasAttribute('zen-essential')) {
-              continue;
-            }
-
-            if (window.gZenWorkspaces?.containerSpecificEssentials && activeContainerId) {
-              const tabContainerId = parseInt(tab.getAttribute('usercontextid') || 0, 10);
-              if (tabContainerId !== activeContainerId) {
-                continue;
-              }
-            }
-
-            const tabUrl = tab.linkedBrowser?.currentURI?.spec || tab.getAttribute('data-url') || '';
-            if (tabUrl.includes(pattern)) {
-              targetTab = tab;
-              break;
-            }
-          }
-
-          // If not found, create new tab (ideally in the active container)
-          if (!targetTab) {
-            try {
-              let addTabArgs = {
-                triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
-              };
-              if (activeContainerId) {
-                addTabArgs.userContextId = activeContainerId;
-              }
-
-              targetTab = gBrowser.addTab(gmailUrl, addTabArgs);
-              if (targetTab && !targetTab.hasAttribute('zen-essential')) {
-                if (window.gZenPinnedTabManager?.addToEssentials) {
-                  window.gZenPinnedTabManager.addToEssentials(targetTab);
-                } else {
-                  targetTab.setAttribute('zen-essential', 'true');
-                }
-              }
-            } catch (err) {
-              console.warn('[Live Gmail] Could not create Gmail tab:', err);
-              return;
-            }
-          }
-        }
-        
         if (!targetTab || !gBrowser) return;
         
         // Select the tab
@@ -2157,7 +2208,7 @@
         updateEmailDisplay();
 
         // Rescan loaded tabs so the panel stays fresh (no wake needed — user is navigating to Gmail)
-        scanLoadedGmailTabs();
+        scanLoadedGmailTabs(activePanelContextKey);
 
         hidePanel();
       });
@@ -2267,6 +2318,8 @@
     scan: () => wakeGmailForScan(),
     wake: wakeGmailForScan,
     emails: () => currentEmails,
+    context: () => activePanelContextKey,
+    contexts: () => [...panelContexts.keys()],
     reInit: () => UC_LIVE_GMAIL.init()
   };
 
