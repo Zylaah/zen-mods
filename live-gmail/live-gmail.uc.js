@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        3.3.1
+// @version        3.3.2
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -115,7 +115,8 @@
       panelContexts.set(key, {
         currentEmails: [],
         cachedEmails: Array.isArray(diskCacheStore[key]) ? diskCacheStore[key].slice() : [],
-        clickedEmailIds: new Set()
+        clickedEmailIds: new Set(),
+        hasScanned: Object.prototype.hasOwnProperty.call(diskCacheStore, key)
       });
     }
     return panelContexts.get(key);
@@ -133,17 +134,39 @@
    */
   function activatePanelContext(key) {
     if (!key) return;
-    if (key === activePanelContextKey) return;
 
-    persistActiveContextToMemory(activePanelContextKey);
+    if (key !== activePanelContextKey) {
+      persistActiveContextToMemory(activePanelContextKey);
+      activePanelContextKey = key;
+      debugLog('Panel context:', key);
+    }
 
-    activePanelContextKey = key;
     const ctx = getOrCreatePanelContext(key);
     currentEmails = ctx.currentEmails;
     cachedEmails = ctx.cachedEmails;
     clickedEmailIds = ctx.clickedEmailIds;
+  }
 
-    debugLog('Panel context:', key);
+  /**
+   * Resolve the tab that owns a frame-script message manager.
+   */
+  function getTabForMessageManager(mm) {
+    if (!mm || !gBrowser?.tabs) return null;
+    for (const tab of gBrowser.tabs) {
+      try {
+        if (tab.linkedBrowser?.messageManager === mm) return tab;
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  /**
+   * Whether a tab is a live scan source (loaded Gmail document).
+   */
+  function isLiveGmailScanSource(tab) {
+    if (!tab?.linkedBrowser) return false;
+    if (isTabPendingOrDiscarded(tab)) return false;
+    return isLoadedGmailBrowser(tab.linkedBrowser);
   }
 
   function onWorkspaceOrContainerChanged() {
@@ -587,6 +610,11 @@
       scheduleLoadScan(tab);
     } else if (!isLoaded && wasLoaded) {
       tab.removeAttribute('data-live-gmail-was-loaded');
+      const contextKey = getPanelContextKey(tab);
+      loadScansInFlight.delete(contextKey);
+      if (activePanelContextKey === contextKey) {
+        scanInProgress = false;
+      }
     }
   }
 
@@ -1158,7 +1186,7 @@
       
       globalMM.addMessageListener('LiveGmail:UnreadData', (message) => {
         try {
-          handleFrameScriptData(message.data);
+          handleFrameScriptData(message.data, message.target);
         } catch (e) {
           console.error('[Live Gmail] Error handling frame script data:', e);
         }
@@ -1175,8 +1203,18 @@
   /**
    * Handle data from frame script
    */
-  function handleFrameScriptData(payload) {
+  function handleFrameScriptData(payload, sourceMM) {
     if (!payload || !Array.isArray(payload.threads)) return;
+
+    const sourceTab = getTabForMessageManager(sourceMM);
+    if (sourceTab && !isLiveGmailScanSource(sourceTab)) {
+      const staleKey = scanContextKey || getPanelContextKey(sourceTab);
+      debugLog('Ignoring scan from unloaded tab');
+      if (staleKey) loadScansInFlight.delete(staleKey);
+      scanInProgress = false;
+      updateEmailDisplay();
+      return;
+    }
 
     const rows = payload.meta?.rows ?? 0;
     const inboxReady = payload.meta?.inboxReady === true;
@@ -1222,6 +1260,8 @@
     lastAuthoritativeScanTs = Date.now();
     currentEmails = nextEmails;
     cachedEmails = nextEmails.slice();
+    const ctx = getOrCreatePanelContext(targetKey);
+    ctx.hasScanned = true;
     persistActiveContextToMemory(targetKey);
     saveCacheToPrefs();
 
@@ -1730,7 +1770,8 @@
     if (emailsToShow.length === 0) {
       const contextEssential = findGmailEssentialTab(activePanelContextKey);
       const isUnloaded = !contextEssential || isTabDiscardedOrUnloaded(contextEssential);
-      const emptyMessage = isUnloaded
+      const hasScanned = getOrCreatePanelContext(activePanelContextKey).hasScanned;
+      const emptyMessage = isUnloaded && !hasScanned
         ? 'Load Gmail to see inbox'
         : 'No unread emails';
       emailsContainer.innerHTML = `<div class="live-gmail-empty">${emptyMessage}</div>`;
