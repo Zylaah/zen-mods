@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        3.2.0
+// @version        3.3.0
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -15,10 +15,7 @@
   const CONFIG = {
     GMAIL_URL_PREF: 'live-gmail.url',
     DEBUG_PREF: 'live-gmail.debug',
-    BACKGROUND_SCAN_PREF: 'live-gmail.background-scan',
-    SCAN_INTERVAL_PREF: 'live-gmail.scan-interval-sec',
     DEFAULT_GMAIL_URL: 'mail.google.com',
-    DEFAULT_SCAN_INTERVAL_SEC: 90,
     MAX_EMAILS: 20,
     PANEL_ID: 'live-gmail-panel',
     SCANNER_TAB_ATTR: 'data-live-gmail-scanner'
@@ -54,17 +51,12 @@
   let clickedEmailIds = new Set();
   let messageListenersRegistered = false;
   let lastLogTs = 0;
-  let backgroundScanTimer = null;
   let scanInProgress = false;
   let hideTimer = null;
   let lastAuthoritativeScanTs = 0;
   let cachedFrameScriptUrl = null;
-  let lastPanelHoverTs = 0;
-  let idleScanTick = 0;
-  let transientScanTab = null;
-  let shouldUnloadAfterScan = false;
-  let transientScanWatchdog = null;
-  let hoverSessionId = 0; // incremented on each new hover; async callbacks check this to avoid stale scans
+  let loadScanTimers = new WeakMap();
+  let loadScansInFlight = new Set();
   let activePanelContextKey = null; // `${workspaceUuid}:${containerId}`
   let scanContextKey = null; // context key for an in-flight hover scan
   let panelContexts = new Map(); // contextKey -> { currentEmails, cachedEmails, clickedEmailIds }
@@ -156,10 +148,9 @@
 
   function onWorkspaceOrContainerChanged() {
     hidePanel();
-    hoverSessionId++;
     scanInProgress = false;
     scanContextKey = null;
-    clearTransientScanState();
+    loadScansInFlight.clear();
     activatePanelContext(getPanelContextKey());
   }
 
@@ -290,8 +281,6 @@
   function openGmailCompose() {
     if (!gBrowser) return;
 
-    cancelTransientScanUnload();
-
     const targetTab = resolveGmailTargetTab();
     if (!targetTab?.linkedBrowser) return;
 
@@ -311,29 +300,47 @@
     }
   }
 
-  /**
-   * B: periodic background refresh (independent of D wake-on-hover)
-   */
-  function isPeriodicScanEnabled() {
+  function isPanelOpen() {
     try {
-      if (typeof Services !== 'undefined' && Services.prefs) {
-        return Services.prefs.getBoolPref(CONFIG.BACKGROUND_SCAN_PREF, true);
-      }
-    } catch (e) {}
-    return true;
+      return panelElement?.state === 'open';
+    } catch (e) {
+      return false;
+    }
   }
 
-  function getScanIntervalMs() {
-    try {
-      if (typeof Services !== 'undefined' && Services.prefs) {
-        const sec = Services.prefs.getIntPref(
-          CONFIG.SCAN_INTERVAL_PREF,
-          CONFIG.DEFAULT_SCAN_INTERVAL_SEC
-        );
-        return sec > 0 ? sec * 1000 : 0;
-      }
-    } catch (e) {}
-    return CONFIG.DEFAULT_SCAN_INTERVAL_SEC * 1000;
+  function shouldShowLoadProgress(contextKey) {
+    if (activePanelContextKey !== contextKey || !isPanelOpen()) return false;
+    return currentEmails.length === 0 && cachedEmails.length === 0;
+  }
+
+  function scheduleLoadScan(tab) {
+    if (!tab || tab.closing) return;
+    const existing = loadScanTimers.get(tab);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      loadScanTimers.delete(tab);
+      performLoadScan(tab);
+    }, 400);
+    loadScanTimers.set(tab, timer);
+  }
+
+  function performLoadScan(tab) {
+    if (!tab || tab.closing || !isGmailEssentialTab(tab)) return;
+    if (isTabPendingOrDiscarded(tab)) return;
+
+    const browser = tab.linkedBrowser;
+    if (!browser || !isLoadedGmailBrowser(browser)) return;
+
+    const contextKey = getPanelContextKey(tab);
+    scanContextKey = contextKey;
+    loadScansInFlight.add(contextKey);
+
+    if (shouldShowLoadProgress(contextKey)) {
+      scanInProgress = true;
+      updateEmailDisplay();
+    }
+
+    scanBrowserWhenReady(browser, tab);
   }
 
   /**
@@ -371,18 +378,6 @@
     }
   }
 
-  const LOAD_BACKGROUND =
-    Ci.nsIWebNavigation.LOAD_FLAGS_BACKGROUND_LOAD;
-
-  function restoreTabSelection(preferredTab) {
-    if (!preferredTab || preferredTab.closing || !gBrowser) return;
-    try {
-      if (gBrowser.selectedTab !== preferredTab) {
-        gBrowser.selectedTab = preferredTab;
-      }
-    } catch (e) {}
-  }
-
   function isTabPendingOrDiscarded(tab) {
     if (!tab) return true;
     if (tab.hasAttribute('pending')) return true;
@@ -391,38 +386,10 @@
     return false;
   }
 
-  /**
-   * linkedPanel can linger without a live BrowsingContext after explicitUnloadTabs.
-   * _insertBrowser is a no-op when linkedPanel is set, so discard first.
-   */
-  function discardStaleEssentialTab(tab) {
-    if (!tab?.linkedPanel || !gBrowser) return Promise.resolve(false);
-    try {
-      if (tab.linkedBrowser?.browsingContext) return Promise.resolve(false);
-    } catch (e) {}
-    debugLog('discardStaleEssentialTab: linkedPanel without live document');
-    return gBrowser.explicitUnloadTabs([tab]).then((ok) => {
-      if (ok) {
-        tab.removeAttribute('discarded');
-        tab.removeAttribute('pending');
-      }
-      return ok;
-    }).catch(() => false);
-  }
-
   function findLoadedGmailEssentialTab(contextKey = activePanelContextKey || getPanelContextKey()) {
     if (!gBrowser?.tabs) return null;
     for (const tab of gBrowser.tabs) {
       if (!isGmailEssentialTab(tab, contextKey)) continue;
-      if (isTabPendingOrDiscarded(tab)) continue;
-      if (isBrowserNavigationComplete(tab.linkedBrowser)) return tab;
-    }
-    return null;
-  }
-
-  function findAnyLoadedGmailTab() {
-    if (!gBrowser?.tabs) return null;
-    for (const tab of gBrowser.tabs) {
       if (isTabPendingOrDiscarded(tab)) continue;
       if (isBrowserNavigationComplete(tab.linkedBrowser)) return tab;
     }
@@ -437,30 +404,15 @@
     return true;
   }
 
-  function scanBrowser(browser) {
+  function scanBrowserWhenReady(browser, tab) {
     if (!browser?.messageManager) return false;
-    loadFrameScript(browser);
-    try {
-      browser.messageManager.sendAsyncMessage('LiveGmail:RequestScan', {});
-      debugLog('Sent RequestScan');
-      return true;
-    } catch (e) {
-      console.warn('[Live Gmail] Could not send RequestScan:', e);
-      return false;
-    }
-  }
-
-  /**
-   * Inject frame script and send RequestScan only after the inbox DOM is ready.
-   */
-  function scanBrowserWhenReady(browser, sessionId) {
-    if (!browser?.messageManager) return false;
-    if (!isBrowserNavigationComplete(browser)) return false;
-    loadFrameScript(browser);
 
     let finished = false;
     let pollTimer = null;
     let attempts = 0;
+
+    const isStale = () =>
+      !tab || tab.closing || isTabPendingOrDiscarded(tab) || !browser.messageManager;
 
     const cleanup = () => {
       if (pollTimer) {
@@ -470,11 +422,12 @@
       Services.mm.removeMessageListener('LiveGmail:ReadyStatus', onReady);
     };
 
-    const fail = () => {
+    const finishWithError = () => {
       if (finished) return;
       finished = true;
       cleanup();
-      debugLog('scanBrowserWhenReady: timed out waiting for inbox');
+      debugLog('scanBrowserWhenReady: timed out or stale');
+      if (tab) loadScansInFlight.delete(getPanelContextKey(tab));
       scanInProgress = false;
       updateEmailDisplay();
     };
@@ -488,13 +441,14 @@
         debugLog('Sent RequestScan (inbox ready)');
       } catch (e) {
         console.warn('[Live Gmail] Could not send RequestScan:', e);
+        if (tab) loadScansInFlight.delete(getPanelContextKey(tab));
         scanInProgress = false;
         updateEmailDisplay();
       }
     };
 
     const onReady = (message) => {
-      if (finished || hoverSessionId !== sessionId) return;
+      if (finished || isStale()) return;
       if (message.target !== browser.messageManager) return;
       if (!message.data?.inboxReady) return;
       debugLog('Inbox ready, rows=', message.data.rows);
@@ -504,249 +458,74 @@
     Services.mm.addMessageListener('LiveGmail:ReadyStatus', onReady);
 
     const poll = () => {
-      if (finished || hoverSessionId !== sessionId) {
-        cleanup();
-        if (!finished) {
-          scanInProgress = false;
-          updateEmailDisplay();
-        }
+      if (finished) return;
+      if (isStale()) {
+        finishWithError();
         return;
       }
       try {
         browser.messageManager.sendAsyncMessage('LiveGmail:CheckReady', {});
       } catch (e) {}
       if (++attempts >= 150) {
-        fail();
+        finishWithError();
         return;
       }
       pollTimer = setTimeout(poll, 400);
     };
 
+    if (!isBrowserNavigationComplete(browser)) {
+      return false;
+    }
+
+    loadFrameScript(browser);
     poll();
     return true;
   }
 
   /**
-   * Materialise a lazy essential, then navigate to inbox in the background.
-   * Session-restore alone does not reliably load Gmail on an unselected essential.
+   * Request a load scan on an already-loaded Gmail essential (e.g. after opening an email).
    */
-  function materializeAndLoadGmailTab(tab, sessionId) {
-    if (!tab?.linkedBrowser) return;
-
-    let started = false;
-    let attempts = 0;
-    let pollTimer = null;
-
-    const startLoad = () => {
-      if (started || hoverSessionId !== sessionId) return;
-      started = true;
-      debugLog('materializeAndLoadGmailTab: loading inbox in background');
-      loadGmailInTab(tab);
-      waitForGmailAndScan(tab, sessionId);
-    };
-
-    const pollForBrowser = () => {
-      if (hoverSessionId !== sessionId) return;
-      if (tab.linkedPanel && tab.linkedBrowser?.browsingContext) {
-        startLoad();
-        return;
-      }
-      if (++attempts >= 50) {
-        debugLog('materializeAndLoadGmailTab: timed out waiting for browser');
-        scanInProgress = false;
-        updateEmailDisplay();
-        return;
-      }
-      pollTimer = setTimeout(pollForBrowser, 100);
-    };
-
-    const insertBrowser = () => {
-      if (!tab.linkedPanel) {
-        try {
-          gBrowser._insertBrowser(tab);
-          debugLog('materializeAndLoadGmailTab: _insertBrowser');
-        } catch (e) {
-          debugLog('_insertBrowser failed', e);
-          scanInProgress = false;
-          updateEmailDisplay();
-          return;
-        }
-      }
-      pollForBrowser();
-    };
-
-    discardStaleEssentialTab(tab).then(() => insertBrowser());
+  function scanLoadedGmailEssential(contextKey = activePanelContextKey || getPanelContextKey()) {
+    const essential = findLoadedGmailEssentialTab(contextKey);
+    if (!essential?.linkedBrowser) return false;
+    performLoadScan(essential);
+    return true;
   }
 
-  /**
-   * Wait until Gmail is actually loaded in the tab, then scan once.
-   * Uses poll + SSTabRestored + load because background session-restore often
-   * does not deliver a single reliable browser "load" we can depend on alone.
-   */
-  function waitForGmailAndScan(tab, sessionId) {
-    const browser = tab?.linkedBrowser;
-    if (!browser) return;
+  function checkGmailEssentialLoadState(tab) {
+    if (!isGmailEssentialTab(tab)) return;
 
-    let scanned = false;
-    let pollTimer = null;
+    const wasLoaded = tab.getAttribute('data-live-gmail-was-loaded') === 'true';
+    const isLoaded =
+      !isTabPendingOrDiscarded(tab) &&
+      tab.linkedBrowser &&
+      isLoadedGmailBrowser(tab.linkedBrowser);
 
-    const cleanup = () => {
-      if (pollTimer) {
-        clearTimeout(pollTimer);
-        pollTimer = null;
-      }
-      tab.removeEventListener('SSTabRestored', onTabRestored);
-      browser.removeEventListener('load', onBrowserLoad);
-    };
-
-    const fail = (reason) => {
-      if (scanned) return;
-      cleanup();
-      debugLog('waitForGmailAndScan:', reason);
-      scanInProgress = false;
-      updateEmailDisplay();
-    };
-
-    const tryScan = () => {
-      if (scanned || hoverSessionId !== sessionId) return;
-      if (!isBrowserNavigationComplete(browser)) return;
-      scanned = true;
-      cleanup();
-      scanBrowserWhenReady(browser, sessionId);
-    };
-
-    const abortWait = () => {
-      if (scanned) return;
-      cleanup();
-      scanInProgress = false;
-      updateEmailDisplay();
-    };
-
-    const onTabRestored = () => {
-      debugLog('waitForGmailAndScan: SSTabRestored');
-      tryScan();
-    };
-
-    const onBrowserLoad = () => {
-      debugLog('waitForGmailAndScan: browser load');
-      tryScan();
-    };
-
-    tab.addEventListener('SSTabRestored', onTabRestored);
-    browser.addEventListener('load', onBrowserLoad);
-
-    let attempts = 0;
-    const poll = () => {
-      if (hoverSessionId !== sessionId) {
-        abortWait();
-        return;
-      }
-      if (scanned) return;
-      tryScan();
-      if (scanned) return;
-
-      if (attempts === 25 && tab.linkedPanel && !isBrowserNavigationComplete(browser)) {
-        debugLog('waitForGmailAndScan: navigation slow, loading inbox directly');
-        loadGmailInTab(tab);
-      }
-
-      if (++attempts >= 150) {
-        fail('timed out waiting for Gmail');
-        return;
-      }
-      pollTimer = setTimeout(poll, 200);
-    };
-
-    poll();
-  }
-
-  function loadGmailInTab(tab, url = getGmailInboxUrl()) {
-    const browser = tab?.linkedBrowser;
-    if (!browser) return;
-    const previousTab = gBrowser.selectedTab;
-    try {
-      browser.fixupAndLoadURIString(url, {
-        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-        loadFlags: LOAD_BACKGROUND
-      });
-    } catch (e) {
-      debugLog('loadGmailInTab failed', e);
-    }
-    restoreTabSelection(previousTab);
-    setTimeout(() => restoreTabSelection(previousTab), 0);
-  }
-
-  function clearTransientScanState() {
-    shouldUnloadAfterScan = false;
-    transientScanTab = null;
-    if (transientScanWatchdog) {
-      clearTimeout(transientScanWatchdog);
-      transientScanWatchdog = null;
+    if (isLoaded && !wasLoaded) {
+      tab.setAttribute('data-live-gmail-was-loaded', 'true');
+      scheduleLoadScan(tab);
+    } else if (!isLoaded && wasLoaded) {
+      tab.removeAttribute('data-live-gmail-was-loaded');
     }
   }
 
-  /**
-   * Cancel a pending post-scan unload (user opened Gmail or selected the tab)
-   */
-  function cancelTransientScanUnload() {
-    clearTransientScanState();
+  function attachGmailEssentialLoadListeners(tab) {
+    if (tab.hasAttribute('data-live-gmail-load-mon')) return;
+    tab.setAttribute('data-live-gmail-load-mon', 'true');
+
+    tab.addEventListener('SSTabRestored', () => {
+      debugLog('Gmail essential SSTabRestored');
+      checkGmailEssentialLoadState(tab);
+    });
   }
 
-  function startTransientScanWatchdog() {
-    if (transientScanWatchdog) clearTimeout(transientScanWatchdog);
-    transientScanWatchdog = setTimeout(() => {
-      transientScanWatchdog = null;
-      if (!shouldUnloadAfterScan) return;
-      debugLog('Transient scan watchdog — giving up and unloading tab');
-      scanInProgress = false;
-      maybeUnloadTransientScanTab();
-      updateEmailDisplay();
-    }, 45000);
-  }
-
-  /**
-   * Unload the Gmail essential after a hover-triggered transient scan.
-   * Uses Zen's own explicitUnloadTabs which handles essentials/pinned tabs correctly.
-   */
-  async function unloadGmailEssentialTab(tab) {
-    if (!tab || !gBrowser || tab.closing) return false;
-    if (tab.selected || gBrowser.selectedTab === tab) return false;
-
-    try {
-      if (typeof gBrowser.explicitUnloadTabs === 'function') {
-        debugLog('Calling explicitUnloadTabs on Gmail essential');
-        const ok = await gBrowser.explicitUnloadTabs([tab]);
-        debugLog('explicitUnloadTabs returned', ok);
-        if (ok) {
-          // Remove visual unload indicators so the essential looks normal
-          // (same appearance as other non-dimmed essentials)
-          tab.removeAttribute('discarded');
-          tab.removeAttribute('pending');
-        }
-        return ok;
-      }
-    } catch (e) {
-      debugLog('unloadGmailEssentialTab failed', e);
+  function scanAllLoadedGmailEssentials() {
+    if (!gBrowser?.tabs) return;
+    for (const tab of gBrowser.tabs) {
+      if (!isGmailEssentialTab(tab)) continue;
+      attachGmailEssentialLoadListeners(tab);
+      checkGmailEssentialLoadState(tab);
     }
-    return false;
-  }
-
-  async function maybeUnloadTransientScanTab() {
-    if (!shouldUnloadAfterScan || !transientScanTab) {
-      debugLog('maybeUnloadTransientScanTab: skipped', { shouldUnloadAfterScan, hasTab: !!transientScanTab });
-      return;
-    }
-
-    const tab = transientScanTab;
-    if (tab.closing || tab.selected || gBrowser.selectedTab === tab) {
-      debugLog('maybeUnloadTransientScanTab: tab is selected or closing, skipping');
-      clearTransientScanState();
-      return;
-    }
-
-    debugLog('maybeUnloadTransientScanTab: unloading');
-    clearTransientScanState();
-    await unloadGmailEssentialTab(tab);
   }
 
   /**
@@ -835,118 +614,10 @@
     }
   }
 
-  /**
-   * Scan any already-loaded Gmail tab (hover path — waits for inbox ready).
-   */
-  function scanLoadedGmailTabsWhenReady(sessionId, contextKey = activePanelContextKey || getPanelContextKey()) {
-    if (!gBrowser) return false;
-
-    const essential = findLoadedGmailEssentialTab(contextKey);
-    if (essential?.linkedBrowser) {
-      return scanBrowserWhenReady(essential.linkedBrowser, sessionId);
-    }
-
-    const openGmail = findAnyLoadedGmailTab();
-    if (openGmail?.linkedBrowser) {
-      return scanBrowserWhenReady(openGmail.linkedBrowser, sessionId);
-    }
-
-    return false;
-  }
-
-  /**
-   * Scan any already-loaded Gmail tab (background timer — tab should already be idle).
-   */
-  function scanLoadedGmailTabs(contextKey = activePanelContextKey || getPanelContextKey()) {
-    if (!gBrowser) return false;
-
-    const essential = findLoadedGmailEssentialTab(contextKey);
-    if (essential?.linkedBrowser) {
-      scanBrowser(essential.linkedBrowser);
-      return true;
-    }
-
-    const openGmail = findAnyLoadedGmailTab();
-    if (openGmail?.linkedBrowser) {
-      scanBrowser(openGmail.linkedBrowser);
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Scan + transiently load the Gmail essential if needed, then discard after scan.
-   * Only call this on user interaction (hover), not on timers or startup.
-   */
-  function wakeGmailForScan() {
-    if (!gBrowser) return;
-
-    const contextKey = activePanelContextKey || getPanelContextKey();
-    scanContextKey = contextKey;
-
-    // Don't reset an already-running transient scan
-    if (!shouldUnloadAfterScan) {
-      clearTransientScanState();
-    }
-    scanInProgress = true;
-    updateEmailDisplay(); // switch panel to loading spinner immediately
-
-    const sessionId = hoverSessionId;
-
-    if (scanLoadedGmailTabsWhenReady(sessionId, contextKey)) {
-      // Tab was already loaded — scan in place, leave it loaded
-      return;
-    }
-
-    const essential = findGmailEssentialTab(contextKey);
-    if (!essential?.linkedBrowser) {
-      scanInProgress = false;
-      updateEmailDisplay();
-      return;
-    }
-
-    transientScanTab = essential;
-    shouldUnloadAfterScan = true;
-    startTransientScanWatchdog();
-
-    if (isBrowserNavigationComplete(essential.linkedBrowser)) {
-      scanBrowserWhenReady(essential.linkedBrowser, sessionId);
-    } else {
-      materializeAndLoadGmailTab(essential, sessionId);
-    }
-  }
-
-  function setupBackgroundScanning() {
-    if (backgroundScanTimer) {
-      clearInterval(backgroundScanTimer);
-      backgroundScanTimer = null;
-    }
-
-    const intervalMs = getScanIntervalMs();
-    if (!isPeriodicScanEnabled() || intervalMs <= 0) return;
-
-    backgroundScanTimer = setInterval(() => {
-      // When the panel hasn't been hovered in 10+ minutes, run at 1/3 the normal
-      // frequency — skip 2 out of every 3 ticks — to reduce background CPU on
-      // machines where the user isn't actively using the panel.
-      if (lastPanelHoverTs > 0 && (Date.now() - lastPanelHoverTs) > 10 * 60 * 1000) {
-        idleScanTick++;
-        if (idleScanTick % 3 !== 0) return;
-      } else {
-        idleScanTick = 0;
-      }
-      scanLoadedGmailTabs();
-    }, intervalMs);
-
-    debugLog('Background scan interval:', intervalMs, 'ms');
-  }
-
-
   // ============================================
   // Frame Script for Gmail DOM Parsing
   // ============================================
-  
+
   /**
    * The content script that runs in Gmail tabs to parse the inbox DOM.
    * This is injected via messageManager.loadFrameScript as a data: URL.
@@ -1267,6 +938,7 @@
       }
     });
     observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    debouncedScan();
   }
   
   // Message handlers
@@ -1337,7 +1009,7 @@
     }
   });
   
-  // Initialize — observer only; never push data until inboxReady.
+  // Initialize — observer + one scan per page load; ongoing updates via observer.
   function init() {
     frameDebugLog('Initializing...');
     const start = () => setupObserver();
@@ -1479,6 +1151,7 @@
     }
 
     scanContextKey = null;
+    loadScansInFlight.delete(targetKey);
 
     if (restoreView && viewKey) {
       activatePanelContext(viewKey);
@@ -1488,10 +1161,6 @@
       scanInProgress = false;
       hideError();
       updateEmailDisplay();
-
-      if (shouldUnloadAfterScan) {
-        setTimeout(() => maybeUnloadTransientScanTab(), 100);
-      }
     } else {
       scanInProgress = false;
     }
@@ -1503,7 +1172,7 @@
   function initDomMode() {
     debugLog('Initializing DOM mode');
     setupMessageListeners();
-    setupBackgroundScanning();
+    scanAllLoadedGmailEssentials();
     return true;
   }
 
@@ -1749,6 +1418,11 @@
 
       attachEssentialHoverListener(tab);
 
+      if (tabMatchesGmailPattern(tab)) {
+        attachGmailEssentialLoadListeners(tab);
+        checkGmailEssentialLoadState(tab);
+      }
+
       if (!tabMatchesGmailPattern(tab)) continue;
       if (!tabMatchesContainerContext(tab, contextKey)) continue;
 
@@ -1779,8 +1453,6 @@
   /**
    * Fallback hover delegation on the essentials strip, for cases where the
    * per-tab mouseenter listener in updateGmailTabs was not yet attached.
-   * The showPanel guard (isNewHover) ensures this never double-scans when
-   * handleTabHover already handled the same gesture.
    */
   function setupEssentialsHoverDelegation() {
     const root =
@@ -1814,9 +1486,7 @@
       return;
     }
 
-    // Do NOT set hoveredTab here. showPanel computes isNewHover as
-    // (hoveredTab !== tab) before setting hoveredTab itself, so setting it
-    // here first would always produce isNewHover=false and suppress the scan.
+    // Do NOT set hoveredTab here — showPanel sets it after computing context.
     showPanel(tab);
   }
 
@@ -1860,7 +1530,6 @@
    */
   function showPanel(tab) {
     const contextKey = getPanelContextKey(tab);
-    const prevContextKey = activePanelContextKey;
 
     activatePanelContext(contextKey);
 
@@ -1881,17 +1550,7 @@
       }
     }
 
-    // Only start a new scan when the hovered tab actually changes.
-    // This prevents both the per-tab mouseenter listener and the essentials
-    // delegation (mouseover on the container) from both triggering a scan
-    // for the same physical hover gesture.
-    const isNewHover = hoveredTab !== tab || prevContextKey !== contextKey;
     hoveredTab = tab;
-
-    if (isEssentialHover) {
-      lastPanelHoverTs = Date.now();
-      idleScanTick = 0;
-    }
 
     if (!panelElement) createPanel();
     updatePanelTheme();
@@ -1900,28 +1559,13 @@
     const tabHeight = tab ? tab.getBoundingClientRect().height : 0;
     panelElement.openPopup(tab || document.documentElement, 'end_before', 4, tabHeight);
     updateEmailDisplay();
-
-    // Start exactly one scan per new hover session.
-    // Increment hoverSessionId so any in-flight async callbacks from the previous
-    // hover (load-event listeners, SSTabRestored, scheduled scans) become stale
-    // and self-cancel when they check hoverSessionId.
-    if (isEssentialHover && isNewHover) {
-      const sessionId = ++hoverSessionId;
-      // Defer so the popup fully opens before any tab manipulation
-      // (loadGmailInTab changes tab attributes which can briefly dismiss a popup)
-      setTimeout(() => {
-        if (hoverSessionId !== sessionId) return; // hover already changed
-        wakeGmailForScan();
-      }, 80);
-    }
   }
 
   /**
    * Schedule panel hide after a short delay, cancelling if the cursor returns
    * to either the tab or the panel in time. This prevents flicker when the
    * cursor briefly crosses the panel boundary on entry from the right.
-   * Extra grace time while a scan is running because tab attribute changes
-   * during load can momentarily drop the :hover state.
+   * Extra grace time while a load scan is in progress.
    */
   function scheduleHide() {
     if (hideTimer) clearTimeout(hideTimer);
@@ -1989,8 +1633,9 @@
       if (composeBtn) composeBtn.style.display = visible ? '' : 'none';
     };
 
-    // Only show the loading indicator when scanning AND there is nothing to display yet
-    if (scanInProgress && emailsToShow.length === 0) {
+    // Show loading while a load scan is in flight and there is nothing to display yet
+    const awaitingFirstScan = loadScansInFlight.has(activePanelContextKey);
+    if ((scanInProgress || awaitingFirstScan) && emailsToShow.length === 0) {
       if (loadingContainer) loadingContainer.style.display = 'block';
       emailsContainer.innerHTML = '';
       setComposeVisible(false);
@@ -2001,7 +1646,12 @@
     emailsContainer.innerHTML = '';
 
     if (emailsToShow.length === 0) {
-      emailsContainer.innerHTML = '<div class="live-gmail-empty">No unread emails</div>';
+      const contextEssential = findGmailEssentialTab(activePanelContextKey);
+      const isUnloaded = !contextEssential || isTabDiscardedOrUnloaded(contextEssential);
+      const emptyMessage = isUnloaded
+        ? 'Load Gmail to see inbox'
+        : 'No unread emails';
+      emailsContainer.innerHTML = `<div class="live-gmail-empty">${emptyMessage}</div>`;
       setComposeVisible(false);
       return;
     }
@@ -2036,8 +1686,6 @@
       el.addEventListener('click', async (e) => {
         e.preventDefault();
         e.stopPropagation();
-
-        cancelTransientScanUnload();
 
         const targetTab = (hoveredTab && isGmailEssentialTab(hoveredTab))
           ? hoveredTab
@@ -2208,7 +1856,7 @@
         updateEmailDisplay();
 
         // Rescan loaded tabs so the panel stays fresh (no wake needed — user is navigating to Gmail)
-        scanLoadedGmailTabs(activePanelContextKey);
+        scanLoadedGmailEssential(activePanelContextKey);
 
         hidePanel();
       });
@@ -2315,8 +1963,8 @@
       }
     },
     hidePanel,
-    scan: () => wakeGmailForScan(),
-    wake: wakeGmailForScan,
+    scan: () => scanLoadedGmailEssential(),
+    rescan: () => scanAllLoadedGmailEssentials(),
     emails: () => currentEmails,
     context: () => activePanelContextKey,
     contexts: () => [...panelContexts.keys()],
