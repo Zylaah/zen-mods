@@ -44,7 +44,20 @@
   color: light-dark(#0c0c0d, #f9f9fa);
   display: flex;
   align-items: center;
-  flex-grow: 1;
+  flex: 1;
+  min-width: 0;
+}
+
+.live-gmail-cache-age {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 400;
+  color: light-dark(rgba(12, 12, 13, 0.55), rgba(249, 249, 250, 0.55));
+  white-space: nowrap;
+}
+
+.live-gmail-cache-age[hidden] {
+  display: none;
 }
 
 /* Content Area */

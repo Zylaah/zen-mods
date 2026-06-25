@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        3.3.3
+// @version        3.4.0
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -53,7 +53,6 @@
   let lastLogTs = 0;
   let scanInProgress = false;
   let hideTimer = null;
-  let lastAuthoritativeScanTs = 0;
   let cachedFrameScriptUrl = null;
   let loadScanTimers = new WeakMap();
   let loadScansInFlight = new Set();
@@ -111,13 +110,30 @@
     return tabContainerId === containerId;
   }
 
+  function normalizeDiskCacheEntry(entry) {
+    if (Array.isArray(entry)) {
+      return { emails: entry, lastScanTs: 0 };
+    }
+    if (entry && Array.isArray(entry.emails)) {
+      return {
+        emails: entry.emails,
+        lastScanTs: typeof entry.lastScanTs === 'number' ? entry.lastScanTs : 0
+      };
+    }
+    return { emails: [], lastScanTs: 0 };
+  }
+
   function getOrCreatePanelContext(key) {
     if (!panelContexts.has(key)) {
+      const entry = Object.prototype.hasOwnProperty.call(diskCacheStore, key)
+        ? normalizeDiskCacheEntry(diskCacheStore[key])
+        : { emails: [], lastScanTs: 0 };
       panelContexts.set(key, {
         currentEmails: [],
-        cachedEmails: Array.isArray(diskCacheStore[key]) ? diskCacheStore[key].slice() : [],
+        cachedEmails: entry.emails.slice(),
         clickedEmailIds: new Set(),
-        hasScanned: Object.prototype.hasOwnProperty.call(diskCacheStore, key)
+        hasScanned: Object.prototype.hasOwnProperty.call(diskCacheStore, key),
+        lastScanTs: entry.lastScanTs
       });
     }
     return panelContexts.get(key);
@@ -659,14 +675,17 @@
       persistActiveContextToMemory(activePanelContextKey);
 
       for (const [key, ctx] of panelContexts.entries()) {
-        diskCacheStore[key] = ctx.cachedEmails.slice(0, CONFIG.MAX_EMAILS).map(e => ({
-          id: e.id,
-          from: e.from,
-          subject: e.subject,
-          snippet: (e.snippet || '').substring(0, 60),
-          date: e.date,
-          isUnread: e.isUnread
-        }));
+        diskCacheStore[key] = {
+          emails: ctx.cachedEmails.slice(0, CONFIG.MAX_EMAILS).map(e => ({
+            id: e.id,
+            from: e.from,
+            subject: e.subject,
+            snippet: (e.snippet || '').substring(0, 60),
+            date: e.date,
+            isUnread: e.isUnread
+          })),
+          lastScanTs: ctx.lastScanTs || 0
+        };
       }
 
       IOUtils.writeUTF8(getCacheFilePath(), JSON.stringify(diskCacheStore)).catch(() => {});
@@ -1262,11 +1281,11 @@
 
     const nextEmails = allEmails.filter(email => !clickedIds.has(email.id));
 
-    lastAuthoritativeScanTs = Date.now();
     currentEmails = nextEmails;
     cachedEmails = nextEmails.slice();
     const ctx = getOrCreatePanelContext(targetKey);
     ctx.hasScanned = true;
+    ctx.lastScanTs = Date.now();
     persistActiveContextToMemory(targetKey);
     saveCacheToPrefs();
 
@@ -1363,6 +1382,11 @@
     title.appendChild(gmailLogo);
     title.appendChild(document.createTextNode('Unread'));
     header.appendChild(title);
+
+    const cacheAge = document.createElement('span');
+    cacheAge.className = 'live-gmail-cache-age';
+    cacheAge.setAttribute('aria-live', 'polite');
+    header.appendChild(cacheAge);
     
     // Content
     const content = document.createElement('div');
@@ -1741,6 +1765,65 @@
   }
 
   /**
+   * Format a cache timestamp for the panel header.
+   */
+  function formatCacheAge(timestamp) {
+    if (!timestamp) return '';
+
+    const diffMs = Math.max(0, Date.now() - timestamp);
+    const sec = Math.floor(diffMs / 1000);
+
+    if (sec < 60) return 'Updated just now';
+
+    const min = Math.floor(sec / 60);
+    if (min < 60) return min === 1 ? 'Updated 1 min ago' : `Updated ${min} min ago`;
+
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return hr === 1 ? 'Updated 1 hr ago' : `Updated ${hr} hr ago`;
+
+    const days = Math.floor(hr / 24);
+    if (days < 7) return days === 1 ? 'Updated 1 day ago' : `Updated ${days} days ago`;
+
+    return 'Updated ' + new Date(timestamp).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric'
+    });
+  }
+
+  /**
+   * Show cache age in the header when the essential tab is unloaded.
+   */
+  function updateCacheAgeLabel() {
+    const ageEl = panelElement?.querySelector('.live-gmail-cache-age');
+    if (!ageEl) return;
+
+    const contextKey = activePanelContextKey;
+    if (!contextKey) {
+      ageEl.textContent = '';
+      ageEl.hidden = true;
+      return;
+    }
+
+    const essential = findGmailEssentialTab(contextKey);
+    const isUnloaded = essential && isTabDiscardedOrUnloaded(essential);
+    if (!isUnloaded) {
+      ageEl.textContent = '';
+      ageEl.hidden = true;
+      return;
+    }
+
+    const ctx = getOrCreatePanelContext(contextKey);
+    if (!ctx.hasScanned || !ctx.lastScanTs) {
+      ageEl.textContent = '';
+      ageEl.hidden = true;
+      return;
+    }
+
+    ageEl.textContent = formatCacheAge(ctx.lastScanTs);
+    ageEl.hidden = false;
+  }
+
+  /**
    * Update email display
    */
   function updateEmailDisplay() {
@@ -1751,6 +1834,10 @@
     const composeBtn = panelElement.querySelector('.live-gmail-compose-btn');
 
     if (!emailsContainer) return;
+
+    const finishDisplay = () => {
+      updateCacheAgeLabel();
+    };
 
     // Always prefer showing cached data over a blank loading spinner
     const emailsToShow = currentEmails.length > 0
@@ -1767,6 +1854,7 @@
       if (loadingContainer) loadingContainer.style.display = 'block';
       emailsContainer.innerHTML = '';
       setComposeVisible(false);
+      finishDisplay();
       return;
     }
 
@@ -1782,6 +1870,7 @@
         : 'No unread emails';
       emailsContainer.innerHTML = `<div class="live-gmail-empty">${emptyMessage}</div>`;
       setComposeVisible(false);
+      finishDisplay();
       return;
     }
 
@@ -1992,6 +2081,8 @@
 
       emailsContainer.appendChild(el);
     });
+
+    finishDisplay();
   }
 
   /**
