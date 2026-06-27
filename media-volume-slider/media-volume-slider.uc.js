@@ -2,12 +2,12 @@
 // @name           Media Volume Slider
 // @description    Hover volume slider on the sidebar media mute button
 // @author         Zylaah
-// @version        1.0.2
+// @version        1.0.3
 // @namespace      https://github.com/Zylaah/zen-mods
 // ==/UserScript==
 
 /* eslint-env es6, browser */
-/* global Services, gBrowser */
+/* global Services, gBrowser, Ci */
 
 (function () {
   "use strict";
@@ -23,6 +23,7 @@
   const TOOLBAR_OPEN_ATTR = "zen-volume-slider-open";
   const INIT_RETRY_MS = 100;
   const INIT_RETRY_MAX = 60;
+  const PREF_LAST_VOLUME = "mod.media-volume-slider.last-volume";
 
   let frameScriptUrl = null;
   let messageListenersReady = false;
@@ -38,6 +39,9 @@
   let toolbarObserver = null;
   let layoutObserver = null;
 
+  /** @type {WeakSet<object>} */
+  const bootstrappedBrowsers = new WeakSet();
+
   const log = (...args) => console.log(LOG_PREFIX, ...args);
 
   function safe(fn) {
@@ -46,6 +50,32 @@
     } catch (_) {
       return undefined;
     }
+  }
+
+  function ensureVolumePrefDefault() {
+    safe(() => {
+      if (Services.prefs.getPrefType(PREF_LAST_VOLUME) === Ci.nsIPrefBranch.PREF_INVALID) {
+        Services.prefs.getDefaultBranch("").setIntPref(PREF_LAST_VOLUME, 100);
+      }
+    });
+  }
+
+  function getStoredVolume() {
+    return (
+      safe(() => {
+        ensureVolumePrefDefault();
+        return Math.max(0, Math.min(100, Services.prefs.getIntPref(PREF_LAST_VOLUME, 100)));
+      }) ?? 100
+    );
+  }
+
+  function saveStoredVolume(volume) {
+    const value = Math.max(0, Math.min(100, Math.round(volume)));
+    if (value <= 0) return;
+    safe(() => {
+      ensureVolumePrefDefault();
+      Services.prefs.setIntPref(PREF_LAST_VOLUME, value);
+    });
   }
 
   const VOLUME_FRAME_SCRIPT = `
@@ -98,6 +128,18 @@
     const volume = writeVolume(msg.data?.volume ?? 100);
     sendAsyncMessage("ZenMediaVolumeSlider:State", { volume });
   });
+
+  addMessageListener("ZenMediaVolumeSlider:Init", (msg) => {
+    const target = Math.max(0, Math.min(100, msg.data?.volume ?? 100));
+    if (target <= 0) return;
+    const el = pickMedia();
+    if (!el) return;
+    el.muted = false;
+    el.volume = target / 100;
+    sendAsyncMessage("ZenMediaVolumeSlider:State", {
+      volume: Math.round(el.volume * 100),
+    });
+  });
 })();
 `;
 
@@ -145,6 +187,7 @@
       if (!tab || !current || tab.linkedBrowser !== current) return;
       if (!sliderEl) return;
       const volume = Math.max(0, Math.min(100, message.data?.volume ?? 0));
+      if (volume > 0) saveStoredVolume(volume);
       sliderEl.value = String(volume);
     });
     messageListenersReady = true;
@@ -156,6 +199,16 @@
     browser.messageManager.sendAsyncMessage("ZenMediaVolumeSlider:Get", {});
   }
 
+  function bootstrapContentVolume(browser) {
+    if (!browser?.messageManager || browser.audioMuted) return;
+    if (bootstrappedBrowsers.has(browser)) return;
+    bootstrappedBrowsers.add(browser);
+    ensureFrameScript(browser);
+    browser.messageManager.sendAsyncMessage("ZenMediaVolumeSlider:Init", {
+      volume: getStoredVolume(),
+    });
+  }
+
   function applyVolume(percent) {
     const browser = getMediaBrowser();
     const tab = getMediaTab();
@@ -163,6 +216,8 @@
 
     const value = Math.max(0, Math.min(100, Math.round(percent)));
     ensureFrameScript(browser);
+
+    if (value > 0) saveStoredVolume(value);
 
     if (value === 0) {
       if (!browser.audioMuted) tab.toggleMuteAudio();
@@ -312,6 +367,8 @@
       return !!muteButton;
     }
 
+    ensureVolumePrefDefault();
+
     anchorEl = document.createElement("div");
     anchorEl.setAttribute("zen-volume-anchor", "true");
 
@@ -331,7 +388,7 @@
     sliderEl.min = "0";
     sliderEl.max = "100";
     sliderEl.step = "1";
-    sliderEl.value = "100";
+    sliderEl.value = String(getStoredVolume());
     sliderEl.setAttribute("aria-label", "Volume");
 
     popupEl.appendChild(sliderEl);
@@ -344,6 +401,9 @@
       toolbarObserver = new MutationObserver(() => {
         if (toolbar.hasAttribute("hidden") || toolbar.hasAttribute("media-sharing")) {
           closePopup();
+        } else {
+          const browser = getMediaBrowser();
+          if (browser) bootstrapContentVolume(browser);
         }
         syncSliderFromToolbarMute();
       });
@@ -351,6 +411,11 @@
         attributes: true,
         attributeFilter: ["hidden", "media-sharing", "muted"],
       });
+    }
+
+    const browser = getMediaBrowser();
+    if (browser && toolbar && !toolbar.hasAttribute("hidden")) {
+      bootstrapContentVolume(browser);
     }
 
     const bumpLayout = () => {
