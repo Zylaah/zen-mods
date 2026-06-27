@@ -4,12 +4,12 @@
 }
 
 #zen-media-controls-toolbar[zen-volume-slider-open] .show-on-hover {
-  max-height: 50px !important;
-  padding: 5px !important;
-  margin-bottom: 0 !important;
-  opacity: 1 !important;
+  max-height: 50px;
+  padding: 5px;
+  margin-bottom: 0;
+  opacity: 1;
   transform: translateY(0) !important;
-  pointer-events: auto !important;
+  pointer-events: auto;
 }
 
 #zen-media-controls-toolbar[zen-volume-slider-open] #zen-media-info-vbox label[overflow] {
@@ -22,32 +22,8 @@
 
 #navigator-toolbox[zen-volume-slider-open] #zen-media-main-vbox > *:not(#zen-media-controls-hbox),
 #navigator-toolbox[zen-volume-slider-open] #zen-media-controls-hbox > *:not(#zen-media-focus-button) {
-  overflow: visible !important;
-  max-height: 100% !important;
-}
-
-#navigator-toolbox[zen-volume-slider-open] #zen-media-controls-toolbar {
-  width: 100% !important;
-}
-
-#navigator-toolbox[zen-volume-slider-open] #zen-media-focus-button {
-  transform: translateX(0) !important;
-}
-
-#navigator-toolbox[zen-volume-slider-open] #zen-media-focus-button::after {
-  clip-path: inset(0 0 0 0) !important;
-}
-
-#zen-media-volume-slider-hover-layer {
-  position: fixed;
-  z-index: 9999;
-  pointer-events: auto;
-  background: transparent;
-}
-
-#zen-media-volume-slider-hover-layer[hidden] {
-  display: none;
-  pointer-events: none;
+  overflow: visible;
+  max-height: 100%;
 }
 
 #zen-media-volume-slider-popup {
@@ -60,7 +36,7 @@
   visibility: hidden;
   pointer-events: none;
   z-index: 10000;
-  padding: 8px 10px 10px;
+  padding: 8px 10px 14px;
   border-radius: var(--border-radius-medium, 10px);
   background-color: var(--zen-sidebar-notification-bg, light-dark(#fff, #1c1c1e));
   box-shadow: var(--zen-sidebar-notification-shadow, 0 2px 8px rgba(0, 0, 0, 0.25));
@@ -75,6 +51,15 @@
   visibility: visible;
   pointer-events: auto;
   transform: translate(-50%, -100%);
+}
+
+#zen-media-volume-slider-popup[open]::after {
+  content: "";
+  position: absolute;
+  left: -8px;
+  right: -8px;
+  top: 100%;
+  height: 12px;
 }
 
 #zen-media-volume-slider {

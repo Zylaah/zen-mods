@@ -2,12 +2,12 @@
 // @name           Media Volume Slider
 // @description    Hover volume slider on the sidebar media mute button
 // @author         Zylaah
-// @version        1.0.3
+// @version        1.0.2
 // @namespace      https://github.com/Zylaah/zen-mods
 // ==/UserScript==
 
 /* eslint-env es6, browser */
-/* global Services, gBrowser, Ci */
+/* global Services, gBrowser */
 
 (function () {
   "use strict";
@@ -17,12 +17,10 @@
 
   const LOG_PREFIX = "[MediaVolumeSlider]";
   const POPUP_ID = "zen-media-volume-slider-popup";
-  const HOVER_LAYER_ID = "zen-media-volume-slider-hover-layer";
   const SLIDER_ID = "zen-media-volume-slider";
-  const HIDE_DELAY_MS = 320;
-  const POPUP_GAP_PX = 2;
+  const HIDE_DELAY_MS = 280;
+  const POPUP_GAP_PX = 6;
   const TOOLBAR_OPEN_ATTR = "zen-volume-slider-open";
-  const PREF_LAST_VOLUME = "mod.media-volume-slider.last-volume";
   const INIT_RETRY_MS = 100;
   const INIT_RETRY_MAX = 60;
 
@@ -33,20 +31,12 @@
   let hideTimer = null;
   let popupOpen = false;
   let dragging = false;
-  let toolboxPopupMenuLocked = false;
-  let toolbarWasMuted = false;
   let muteButton = null;
   let anchorEl = null;
   let popupEl = null;
-  let hoverLayerEl = null;
   let sliderEl = null;
   let toolbarObserver = null;
   let layoutObserver = null;
-
-  /** @type {WeakMap<object, number>} */
-  const browserLastVolume = new WeakMap();
-  /** @type {WeakSet<object>} */
-  const bootstrappedBrowsers = new WeakSet();
 
   const log = (...args) => console.log(LOG_PREFIX, ...args);
 
@@ -58,48 +48,10 @@
     }
   }
 
-  function ensureVolumePrefDefault() {
-    safe(() => {
-      if (Services.prefs.getPrefType(PREF_LAST_VOLUME) === Ci.nsIPrefBranch.PREF_INVALID) {
-        Services.prefs.getDefaultBranch("").setIntPref(PREF_LAST_VOLUME, 100);
-      }
-    });
-  }
-
-  function getStoredVolume() {
-    return safe(() => {
-      ensureVolumePrefDefault();
-      return Math.max(0, Math.min(100, Services.prefs.getIntPref(PREF_LAST_VOLUME, 100)));
-    }) ?? 100;
-  }
-
-  function saveStoredVolume(volume) {
-    const value = Math.max(0, Math.min(100, Math.round(volume)));
-    if (value <= 0) return;
-    safe(() => {
-      ensureVolumePrefDefault();
-      Services.prefs.setIntPref(PREF_LAST_VOLUME, value);
-    });
-  }
-
-  function rememberBrowserVolume(browser, volume) {
-    const value = Math.max(0, Math.min(100, Math.round(volume)));
-    if (value > 0) {
-      browserLastVolume.set(browser, value);
-      saveStoredVolume(value);
-    }
-  }
-
-  function getRememberedVolume(browser) {
-    return browserLastVolume.get(browser) ?? getStoredVolume();
-  }
-
   const VOLUME_FRAME_SCRIPT = `
 (function () {
   if (content.__zenMediaVolumeSlider) return;
   content.__zenMediaVolumeSlider = true;
-
-  let lastUnmutedVolume = 100;
 
   function pickMedia() {
     const nodes = content.document.querySelectorAll("video, audio");
@@ -119,30 +71,23 @@
 
   function readVolume() {
     const el = pickMedia();
-    if (!el) return lastUnmutedVolume;
+    if (!el) return 100;
     if (el.muted || el.volume === 0) return 0;
-    lastUnmutedVolume = Math.round(el.volume * 100);
-    return lastUnmutedVolume;
+    return Math.round(el.volume * 100);
   }
 
-  function writeVolume(percent, restoreFrom) {
+  function writeVolume(percent) {
     const el = pickMedia();
     if (!el) return readVolume();
     const v = Math.max(0, Math.min(100, percent)) / 100;
     if (v === 0) {
-      if (el.volume > 0 && !el.muted) {
-        lastUnmutedVolume = Math.round(el.volume * 100);
-      } else if (restoreFrom > 0) {
-        lastUnmutedVolume = restoreFrom;
-      }
       el.muted = true;
       el.volume = 0;
-      return 0;
+    } else {
+      el.muted = false;
+      el.volume = v;
     }
-    el.muted = false;
-    el.volume = v;
-    lastUnmutedVolume = Math.round(el.volume * 100);
-    return lastUnmutedVolume;
+    return Math.round(el.volume * 100);
   }
 
   addMessageListener("ZenMediaVolumeSlider:Get", () => {
@@ -150,33 +95,8 @@
   });
 
   addMessageListener("ZenMediaVolumeSlider:Set", (msg) => {
-    const restoreFrom = msg.data?.restoreFrom ?? 0;
-    const volume = writeVolume(msg.data?.volume ?? 100, restoreFrom);
+    const volume = writeVolume(msg.data?.volume ?? 100);
     sendAsyncMessage("ZenMediaVolumeSlider:State", { volume });
-  });
-
-  addMessageListener("ZenMediaVolumeSlider:Init", (msg) => {
-    const target = Math.max(0, Math.min(100, msg.data?.volume ?? 100));
-    if (target <= 0) return;
-    lastUnmutedVolume = target;
-    const el = pickMedia();
-    if (!el) return;
-    if (el.muted || el.volume === 0) {
-      el.muted = false;
-      el.volume = target / 100;
-    }
-    sendAsyncMessage("ZenMediaVolumeSlider:State", { volume: readVolume() });
-  });
-
-  addMessageListener("ZenMediaVolumeSlider:Unmute", (msg) => {
-    const target = Math.max(1, Math.min(100, msg.data?.volume ?? lastUnmutedVolume));
-    lastUnmutedVolume = target;
-    const el = pickMedia();
-    if (el) {
-      el.muted = false;
-      el.volume = target / 100;
-    }
-    sendAsyncMessage("ZenMediaVolumeSlider:State", { volume: target });
   });
 })();
 `;
@@ -224,17 +144,7 @@
       const current = getMediaBrowser();
       if (!tab || !current || tab.linkedBrowser !== current) return;
       if (!sliderEl) return;
-
-      let volume = Math.max(0, Math.min(100, message.data?.volume ?? 0));
-      if (volume === 0 && !current.audioMuted) {
-        const restored = getRememberedVolume(current);
-        if (restored > 0) {
-          applyVolume(restored, { skipRemember: true });
-          return;
-        }
-      }
-
-      if (volume > 0) rememberBrowserVolume(current, volume);
+      const volume = Math.max(0, Math.min(100, message.data?.volume ?? 0));
       sliderEl.value = String(volume);
     });
     messageListenersReady = true;
@@ -246,17 +156,7 @@
     browser.messageManager.sendAsyncMessage("ZenMediaVolumeSlider:Get", {});
   }
 
-  function bootstrapContentVolume(browser) {
-    if (!browser?.messageManager || browser.audioMuted) return;
-    if (bootstrappedBrowsers.has(browser)) return;
-    bootstrappedBrowsers.add(browser);
-    ensureFrameScript(browser);
-    browser.messageManager.sendAsyncMessage("ZenMediaVolumeSlider:Init", {
-      volume: getStoredVolume(),
-    });
-  }
-
-  function applyVolume(percent, options = {}) {
+  function applyVolume(percent) {
     const browser = getMediaBrowser();
     const tab = getMediaTab();
     if (!browser || !tab) return;
@@ -264,16 +164,7 @@
     const value = Math.max(0, Math.min(100, Math.round(percent)));
     ensureFrameScript(browser);
 
-    if (!options.skipRemember && value > 0) {
-      rememberBrowserVolume(browser, value);
-    }
-
     if (value === 0) {
-      const remembered =
-        Number(sliderEl?.value) > 0
-          ? Number(sliderEl.value)
-          : getRememberedVolume(browser);
-      if (remembered > 0) rememberBrowserVolume(browser, remembered);
       if (!browser.audioMuted) tab.toggleMuteAudio();
     } else if (browser.audioMuted) {
       tab.toggleMuteAudio();
@@ -281,23 +172,7 @@
 
     browser.messageManager.sendAsyncMessage("ZenMediaVolumeSlider:Set", {
       volume: value,
-      restoreFrom: getRememberedVolume(browser),
     });
-    safe(() => window.gZenMediaController?.updateMuteState());
-  }
-
-  function restoreVolumeAfterUnmute() {
-    const browser = getMediaBrowser();
-    if (!browser || browser.audioMuted) return;
-
-    const volume = getRememberedVolume(browser);
-    if (volume <= 0) return;
-
-    ensureFrameScript(browser);
-    browser.messageManager.sendAsyncMessage("ZenMediaVolumeSlider:Unmute", {
-      volume,
-    });
-    if (sliderEl && !dragging) sliderEl.value = String(volume);
     safe(() => window.gZenMediaController?.updateMuteState());
   }
 
@@ -315,21 +190,12 @@
   function setToolbarExpanded(expanded) {
     const toolbar = getMediaToolbar();
     const toolbox = document.getElementById("navigator-toolbox");
-
     if (expanded) {
       toolbar?.setAttribute(TOOLBAR_OPEN_ATTR, "true");
       toolbox?.setAttribute(TOOLBAR_OPEN_ATTR, "true");
-      if (toolbox && !toolboxPopupMenuLocked) {
-        toolbox.setAttribute("has-popup-menu", "true");
-        toolboxPopupMenuLocked = true;
-      }
     } else {
       toolbar?.removeAttribute(TOOLBAR_OPEN_ATTR);
       toolbox?.removeAttribute(TOOLBAR_OPEN_ATTR);
-      if (toolbox && toolboxPopupMenuLocked) {
-        toolbox.removeAttribute("has-popup-menu");
-        toolboxPopupMenuLocked = false;
-      }
     }
   }
 
@@ -342,37 +208,11 @@
     s.top = `${rect.top - POPUP_GAP_PX}px`;
   }
 
-  function syncHoverLayer() {
-    if (!hoverLayerEl || !popupOpen || !muteButton || !popupEl) {
-      hoverLayerEl?.setAttribute("hidden", "true");
-      return;
-    }
-
-    syncPopupPosition();
-    const muteRect = muteButton.getBoundingClientRect();
-    const popupRect = popupEl.getBoundingClientRect();
-    if (muteRect.width === 0 && popupRect.width === 0) return;
-
-    const pad = 16;
-    const top = Math.min(muteRect.top, popupRect.top) - pad;
-    const left = Math.min(muteRect.left, popupRect.left) - pad;
-    const right = Math.max(muteRect.right, popupRect.right) + pad;
-    const bottom = Math.max(muteRect.bottom, popupRect.bottom) + pad;
-
-    const layer = hoverLayerEl.style;
-    layer.top = `${top}px`;
-    layer.left = `${left}px`;
-    layer.width = `${right - left}px`;
-    layer.height = `${bottom - top}px`;
-    hoverLayerEl.removeAttribute("hidden");
-  }
-
   function closePopup() {
     clearHideTimer();
     popupOpen = false;
     dragging = false;
     popupEl?.removeAttribute("open");
-    hoverLayerEl?.setAttribute("hidden", "true");
     setToolbarExpanded(false);
   }
 
@@ -387,10 +227,10 @@
     }
 
     clearHideTimer();
+    syncPopupPosition();
     popupOpen = true;
     popupEl?.setAttribute("open", "true");
     setToolbarExpanded(true);
-    syncHoverLayer();
 
     const browser = getMediaBrowser();
     if (!browser) return;
@@ -413,23 +253,29 @@
   }
 
   function bindPopupEvents() {
-    if (!muteButton || !anchorEl || !popupEl || !sliderEl || !hoverLayerEl) return;
+    if (!muteButton || !anchorEl || !popupEl || !sliderEl) return;
 
-    anchorEl.addEventListener("mouseenter", () => {
+    const hoverZone = anchorEl;
+
+    hoverZone.addEventListener("mouseenter", () => {
       openPopup();
     });
 
-    hoverLayerEl.addEventListener("mouseenter", () => {
+    hoverZone.addEventListener("mouseleave", scheduleHide);
+
+    popupEl.addEventListener("mouseenter", () => {
       clearHideTimer();
+      syncPopupPosition();
+      popupOpen = true;
+      popupEl.setAttribute("open", "true");
       setToolbarExpanded(true);
     });
 
-    hoverLayerEl.addEventListener("mouseleave", scheduleHide);
+    popupEl.addEventListener("mouseleave", scheduleHide);
 
     sliderEl.addEventListener("pointerdown", () => {
       dragging = true;
       clearHideTimer();
-      setToolbarExpanded(true);
     });
 
     sliderEl.addEventListener("pointerup", () => {
@@ -453,35 +299,11 @@
     if (!sliderEl || dragging) return;
     const browser = getMediaBrowser();
     if (!browser) return;
-
     if (browser.audioMuted) {
       sliderEl.value = "0";
       return;
     }
-
-    if (popupOpen) {
-      requestContentVolume(browser);
-    }
-  }
-
-  function onToolbarMuteChanged(toolbar) {
-    const isMuted = toolbar.hasAttribute("muted");
-
-    if (!toolbarWasMuted && isMuted) {
-      const browser = getMediaBrowser();
-      if (browser && Number(sliderEl?.value) > 0) {
-        rememberBrowserVolume(browser, Number(sliderEl.value));
-      } else if (browser) {
-        requestContentVolume(browser);
-      }
-    }
-
-    if (toolbarWasMuted && !isMuted) {
-      restoreVolumeAfterUnmute();
-    }
-
-    toolbarWasMuted = isMuted;
-    syncSliderFromToolbarMute();
+    if (popupOpen) requestContentVolume(browser);
   }
 
   function buildUi() {
@@ -490,8 +312,6 @@
       return !!muteButton;
     }
 
-    ensureVolumePrefDefault();
-
     anchorEl = document.createElement("div");
     anchorEl.setAttribute("zen-volume-anchor", "true");
 
@@ -499,10 +319,6 @@
     if (!parent) return false;
     parent.insertBefore(anchorEl, muteButton);
     anchorEl.appendChild(muteButton);
-
-    hoverLayerEl = document.createElement("div");
-    hoverLayerEl.id = HOVER_LAYER_ID;
-    hoverLayerEl.setAttribute("hidden", "true");
 
     popupEl = document.createElement("div");
     popupEl.id = POPUP_ID;
@@ -515,55 +331,30 @@
     sliderEl.min = "0";
     sliderEl.max = "100";
     sliderEl.step = "1";
-    sliderEl.value = String(getStoredVolume());
+    sliderEl.value = "100";
     sliderEl.setAttribute("aria-label", "Volume");
 
     popupEl.appendChild(sliderEl);
-    document.documentElement.appendChild(hoverLayerEl);
     document.documentElement.appendChild(popupEl);
 
     bindPopupEvents();
 
     const toolbar = getMediaToolbar();
-    if (toolbar) {
-      toolbarWasMuted = toolbar.hasAttribute("muted");
-
-      muteButton.addEventListener("pointerdown", () => {
-        const browser = getMediaBrowser();
-        if (!browser || browser.audioMuted) return;
-        if (Number(sliderEl?.value) > 0) {
-          rememberBrowserVolume(browser, Number(sliderEl.value));
-          return;
+    if (toolbar && !toolbarObserver) {
+      toolbarObserver = new MutationObserver(() => {
+        if (toolbar.hasAttribute("hidden") || toolbar.hasAttribute("media-sharing")) {
+          closePopup();
         }
-        requestContentVolume(browser);
+        syncSliderFromToolbarMute();
       });
-
-      if (!toolbarObserver) {
-        toolbarObserver = new MutationObserver(() => {
-          if (toolbar.hasAttribute("hidden") || toolbar.hasAttribute("media-sharing")) {
-            closePopup();
-            return;
-          }
-
-          const browser = getMediaBrowser();
-          if (browser) bootstrapContentVolume(browser);
-
-          onToolbarMuteChanged(toolbar);
-        });
-        toolbarObserver.observe(toolbar, {
-          attributes: true,
-          attributeFilter: ["hidden", "media-sharing", "muted"],
-        });
-      }
-
-      if (!toolbar.hasAttribute("hidden")) {
-        const browser = getMediaBrowser();
-        if (browser) bootstrapContentVolume(browser);
-      }
+      toolbarObserver.observe(toolbar, {
+        attributes: true,
+        attributeFilter: ["hidden", "media-sharing", "muted"],
+      });
     }
 
     const bumpLayout = () => {
-      if (popupOpen) syncHoverLayer();
+      if (popupOpen) syncPopupPosition();
     };
     window.addEventListener("resize", bumpLayout);
     if (toolbar) {
