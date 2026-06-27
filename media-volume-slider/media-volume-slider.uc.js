@@ -2,7 +2,7 @@
 // @name           Media Volume Slider
 // @description    Hover volume slider on the sidebar media mute button
 // @author         Zylaah
-// @version        1.0.1
+// @version        1.0.2
 // @namespace      https://github.com/Zylaah/zen-mods
 // ==/UserScript==
 
@@ -20,6 +20,7 @@
   const SLIDER_ID = "zen-media-volume-slider";
   const HIDE_DELAY_MS = 280;
   const POPUP_GAP_PX = 6;
+  const TOOLBAR_OPEN_ATTR = "zen-volume-slider-open";
   const INIT_RETRY_MS = 100;
   const INIT_RETRY_MAX = 60;
 
@@ -182,6 +183,22 @@
     }
   }
 
+  function getMediaToolbar() {
+    return document.getElementById("zen-media-controls-toolbar");
+  }
+
+  function setToolbarExpanded(expanded) {
+    const toolbar = getMediaToolbar();
+    const toolbox = document.getElementById("navigator-toolbox");
+    if (expanded) {
+      toolbar?.setAttribute(TOOLBAR_OPEN_ATTR, "true");
+      toolbox?.setAttribute(TOOLBAR_OPEN_ATTR, "true");
+    } else {
+      toolbar?.removeAttribute(TOOLBAR_OPEN_ATTR);
+      toolbox?.removeAttribute(TOOLBAR_OPEN_ATTR);
+    }
+  }
+
   function syncPopupPosition() {
     if (!popupEl || !muteButton) return;
     const rect = muteButton.getBoundingClientRect();
@@ -196,10 +213,11 @@
     popupOpen = false;
     dragging = false;
     popupEl?.removeAttribute("open");
+    setToolbarExpanded(false);
   }
 
   function openPopup() {
-    const toolbar = document.getElementById("zen-media-controls-toolbar");
+    const toolbar = getMediaToolbar();
     if (
       !toolbar ||
       toolbar.hasAttribute("hidden") ||
@@ -212,6 +230,7 @@
     syncPopupPosition();
     popupOpen = true;
     popupEl?.setAttribute("open", "true");
+    setToolbarExpanded(true);
 
     const browser = getMediaBrowser();
     if (!browser) return;
@@ -249,6 +268,7 @@
       syncPopupPosition();
       popupOpen = true;
       popupEl.setAttribute("open", "true");
+      setToolbarExpanded(true);
     });
 
     popupEl.addEventListener("mouseleave", scheduleHide);
@@ -319,7 +339,7 @@
 
     bindPopupEvents();
 
-    const toolbar = document.getElementById("zen-media-controls-toolbar");
+    const toolbar = getMediaToolbar();
     if (toolbar && !toolbarObserver) {
       toolbarObserver = new MutationObserver(() => {
         if (toolbar.hasAttribute("hidden") || toolbar.hasAttribute("media-sharing")) {
