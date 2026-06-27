@@ -1,0 +1,21 @@
+{
+  "version": "1.0.0",
+  "id": "media-volume-slider",
+  "name": "Media Volume Slider",
+  "description": "Hover volume slider on the sidebar media mute button",
+  "scripts": {
+    "media-volume-slider.uc.js": {
+      "include": ["chrome://browser/content/browser.xhtml"]
+    }
+  },
+  "style": {
+    "chrome": "chrome.css"
+  },
+  "homepage": "https://github.com/Zylaah/zen-mods/tree/main/media-volume-slider",
+  "readme": "https://raw.githubusercontent.com/Zylaah/zen-mods/refs/heads/main/media-volume-slider/README.md",
+  "author": "Zylaah",
+  "tags": ["Zen Browser", "media", "volume", "sidebar"],
+  "createdAt": "2026-06-27",
+  "updatedAt": "2026-06-27",
+  "fork": ["zen"]
+}
