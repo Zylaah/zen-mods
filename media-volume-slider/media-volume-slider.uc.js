@@ -2,7 +2,7 @@
 // @name           Media Volume Slider
 // @description    Hover volume slider on the sidebar media mute button
 // @author         Zylaah
-// @version        1.0.0
+// @version        1.0.1
 // @namespace      https://github.com/Zylaah/zen-mods
 // ==/UserScript==
 
@@ -19,6 +19,7 @@
   const POPUP_ID = "zen-media-volume-slider-popup";
   const SLIDER_ID = "zen-media-volume-slider";
   const HIDE_DELAY_MS = 280;
+  const POPUP_GAP_PX = 6;
   const INIT_RETRY_MS = 100;
   const INIT_RETRY_MAX = 60;
 
@@ -34,6 +35,7 @@
   let popupEl = null;
   let sliderEl = null;
   let toolbarObserver = null;
+  let layoutObserver = null;
 
   const log = (...args) => console.log(LOG_PREFIX, ...args);
 
@@ -180,6 +182,15 @@
     }
   }
 
+  function syncPopupPosition() {
+    if (!popupEl || !muteButton) return;
+    const rect = muteButton.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    const s = popupEl.style;
+    s.left = `${rect.left + rect.width / 2}px`;
+    s.top = `${rect.top - POPUP_GAP_PX}px`;
+  }
+
   function closePopup() {
     clearHideTimer();
     popupOpen = false;
@@ -198,6 +209,7 @@
     }
 
     clearHideTimer();
+    syncPopupPosition();
     popupOpen = true;
     popupEl?.setAttribute("open", "true");
 
@@ -234,6 +246,7 @@
 
     popupEl.addEventListener("mouseenter", () => {
       clearHideTimer();
+      syncPopupPosition();
       popupOpen = true;
       popupEl.setAttribute("open", "true");
     });
@@ -281,7 +294,6 @@
 
     anchorEl = document.createElement("div");
     anchorEl.setAttribute("zen-volume-anchor", "true");
-    anchorEl.style.cssText = "position:relative;display:inline-flex;align-items:center;";
 
     const parent = muteButton.parentNode;
     if (!parent) return false;
@@ -303,7 +315,7 @@
     sliderEl.setAttribute("aria-label", "Volume");
 
     popupEl.appendChild(sliderEl);
-    anchorEl.appendChild(popupEl);
+    document.documentElement.appendChild(popupEl);
 
     bindPopupEvents();
 
@@ -318,6 +330,18 @@
       toolbarObserver.observe(toolbar, {
         attributes: true,
         attributeFilter: ["hidden", "media-sharing", "muted"],
+      });
+    }
+
+    const bumpLayout = () => {
+      if (popupOpen) syncPopupPosition();
+    };
+    window.addEventListener("resize", bumpLayout);
+    if (toolbar) {
+      safe(() => {
+        layoutObserver = new ResizeObserver(bumpLayout);
+        layoutObserver.observe(toolbar);
+        layoutObserver.observe(muteButton);
       });
     }
 

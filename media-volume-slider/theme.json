@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "id": "media-volume-slider",
   "name": "Media Volume Slider",
   "description": "Hover volume slider on the sidebar media mute button",
