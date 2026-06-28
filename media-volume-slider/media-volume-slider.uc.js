@@ -2,7 +2,7 @@
 // @name           Media Volume Slider
 // @description    Hover volume slider on the sidebar media mute button
 // @author         Zylaah
-// @version        1.0.4
+// @version        1.0.5
 // @namespace      https://github.com/Zylaah/zen-mods
 // ==/UserScript==
 
@@ -37,9 +37,13 @@
   let sliderEl = null;
   let toolbarObserver = null;
   let layoutObserver = null;
+  let toolbarWasMuted = false;
 
   /** @type {WeakSet<object>} */
   const bootstrappedBrowsers = new WeakSet();
+
+  /** @type {WeakMap<object, number>} */
+  const browserPreMuteVolume = new WeakMap();
 
   const log = (...args) => console.log(LOG_PREFIX, ...args);
 
@@ -77,10 +81,32 @@
     });
   }
 
+  function rememberPreMuteVolume(browser, volume) {
+    const value = Math.max(1, Math.min(100, Math.round(volume)));
+    browserPreMuteVolume.set(browser, value);
+    saveStoredVolume(value);
+  }
+
+  function getPreMuteVolume(browser) {
+    return browserPreMuteVolume.get(browser) ?? getStoredVolume();
+  }
+
+  function capturePreMuteVolume(browser) {
+    if (!browser || browser.audioMuted) return;
+    const fromSlider = Number(sliderEl?.value);
+    rememberPreMuteVolume(
+      browser,
+      fromSlider > 0 ? fromSlider : getStoredVolume()
+    );
+  }
+
   const VOLUME_FRAME_SCRIPT = `
 (function () {
-  if (content.__zenMediaVolumeSlider) return;
-  content.__zenMediaVolumeSlider = true;
+  const FRAME_SCRIPT_VERSION = 2;
+  if (content.__zenMediaVolumeSlider === FRAME_SCRIPT_VERSION) return;
+  content.__zenMediaVolumeSlider = FRAME_SCRIPT_VERSION;
+
+  let lastUnmutedVolume = 100;
 
   function pickMedia() {
     const nodes = content.document.querySelectorAll("video, audio");
@@ -100,9 +126,10 @@
 
   function readVolume() {
     const el = pickMedia();
-    if (!el) return 100;
+    if (!el) return lastUnmutedVolume;
     if (el.muted || el.volume === 0) return 0;
-    return Math.round(el.volume * 100);
+    lastUnmutedVolume = Math.round(el.volume * 100);
+    return lastUnmutedVolume;
   }
 
   function writeVolume(percent) {
@@ -110,11 +137,15 @@
     if (!el) return readVolume();
     const v = Math.max(0, Math.min(100, percent)) / 100;
     if (v === 0) {
+      if (el.volume > 0 && !el.muted) {
+        lastUnmutedVolume = Math.round(el.volume * 100);
+      }
       el.muted = true;
       el.volume = 0;
     } else {
       el.muted = false;
       el.volume = v;
+      lastUnmutedVolume = Math.round(el.volume * 100);
     }
     return Math.round(el.volume * 100);
   }
@@ -131,6 +162,7 @@
   addMessageListener("ZenMediaVolumeSlider:Init", (msg) => {
     const target = Math.max(0, Math.min(100, msg.data?.volume ?? 100));
     if (target <= 0) return;
+    lastUnmutedVolume = target;
     const el = pickMedia();
     if (!el) return;
     el.muted = false;
@@ -138,6 +170,17 @@
     sendAsyncMessage("ZenMediaVolumeSlider:State", {
       volume: Math.round(el.volume * 100),
     });
+  });
+
+  addMessageListener("ZenMediaVolumeSlider:Unmute", (msg) => {
+    const target = Math.max(1, Math.min(100, msg.data?.volume ?? lastUnmutedVolume));
+    lastUnmutedVolume = target;
+    const el = pickMedia();
+    if (el) {
+      el.muted = false;
+      el.volume = target / 100;
+    }
+    sendAsyncMessage("ZenMediaVolumeSlider:State", { volume: target });
   });
 })();
 `;
@@ -186,6 +229,10 @@
       if (!tab || !current || tab.linkedBrowser !== current) return;
       if (!sliderEl) return;
       const volume = Math.max(0, Math.min(100, message.data?.volume ?? 0));
+      if (volume === 0 && !current.audioMuted) {
+        restoreVolumeAfterUnmute();
+        return;
+      }
       if (volume > 0) saveStoredVolume(volume);
       sliderEl.value = String(volume);
     });
@@ -219,6 +266,9 @@
     if (value > 0) saveStoredVolume(value);
 
     if (value === 0) {
+      const current =
+        Number(sliderEl?.value) > 0 ? Number(sliderEl.value) : getPreMuteVolume(browser);
+      rememberPreMuteVolume(browser, current);
       if (!browser.audioMuted) tab.toggleMuteAudio();
     } else if (browser.audioMuted) {
       tab.toggleMuteAudio();
@@ -228,6 +278,18 @@
       volume: value,
     });
     safe(() => window.gZenMediaController?.updateMuteState());
+  }
+
+  function restoreVolumeAfterUnmute() {
+    const browser = getMediaBrowser();
+    if (!browser || browser.audioMuted) return;
+
+    const volume = getPreMuteVolume(browser);
+    ensureFrameScript(browser);
+    browser.messageManager.sendAsyncMessage("ZenMediaVolumeSlider:Unmute", {
+      volume,
+    });
+    if (sliderEl && !dragging) sliderEl.value = String(volume);
   }
 
   function clearHideTimer() {
@@ -338,7 +400,19 @@
       sliderEl.value = "0";
       return;
     }
-    if (popupOpen) requestContentVolume(browser);
+    restoreVolumeAfterUnmute();
+  }
+
+  function onToolbarMuteChanged(toolbar) {
+    const isMuted = toolbar.hasAttribute("muted");
+
+    if (!toolbarWasMuted && isMuted) {
+      sliderEl.value = "0";
+    } else if (toolbarWasMuted && !isMuted) {
+      restoreVolumeAfterUnmute();
+    }
+
+    toolbarWasMuted = isMuted;
   }
 
   function buildUi() {
@@ -376,8 +450,18 @@
 
     bindPopupEvents();
 
+    muteButton.addEventListener(
+      "pointerdown",
+      () => {
+        capturePreMuteVolume(getMediaBrowser());
+      },
+      true
+    );
+
     const toolbar = document.getElementById("zen-media-controls-toolbar");
     if (toolbar && !toolbarObserver) {
+      toolbarWasMuted = toolbar.hasAttribute("muted");
+
       toolbarObserver = new MutationObserver(() => {
         if (toolbar.hasAttribute("hidden") || toolbar.hasAttribute("media-sharing")) {
           closePopup();
@@ -385,7 +469,7 @@
           const browser = getMediaBrowser();
           if (browser) bootstrapContentVolume(browser);
         }
-        syncSliderFromToolbarMute();
+        onToolbarMuteChanged(toolbar);
       });
       toolbarObserver.observe(toolbar, {
         attributes: true,
