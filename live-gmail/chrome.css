@@ -148,6 +148,10 @@
   transition: background-color 0.15s ease;
   position: relative;
   border-bottom: 1px solid light-dark(rgba(0,0,0,0.07), rgba(255,255,255,0.07));
+  min-height: 70px;
+  height: 70px;
+  display: flex;
+  flex-direction: column;
 }
 
 .live-gmail-email-item:last-child {
@@ -177,6 +181,7 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 4px;
+  flex-shrink: 0;
 }
 
 .live-gmail-email-from {
@@ -203,6 +208,7 @@
   font-size: 11px;
   color: light-dark(#0c0c0d, #f9f9fa);
   margin-bottom: 3px;
+  flex-shrink: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -210,15 +216,17 @@
 
 /* Email Snippet */
 .live-gmail-email-snippet {
+  flex: 1;
+  min-height: 0;
   font-size: 10px;
   color: light-dark(#737373, #b1b1b1);
-  line-height: 1.4;
+  line-height: 1.3;
+  padding-top: 2px;
   overflow: hidden;
-  text-overflow: ellipsis;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  max-height: 2.6em;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 
