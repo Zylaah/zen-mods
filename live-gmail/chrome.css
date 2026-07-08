@@ -148,8 +148,8 @@
   transition: background-color 0.15s ease;
   position: relative;
   border-bottom: 1px solid light-dark(rgba(0,0,0,0.07), rgba(255,255,255,0.07));
-  min-height: 80px;
-  height: 80px;
+  min-height: 76px;
+  height: 76px;
   display: flex;
   flex-direction: column;
 }
@@ -180,9 +180,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   flex-shrink: 0;
-  line-height: 1.2;
 }
 
 .live-gmail-email-from {
@@ -208,16 +207,18 @@
   font-weight: 500;
   font-size: 11px;
   color: light-dark(#0c0c0d, #f9f9fa);
-  margin-bottom: 2px;
+  margin-bottom: 3px;
   flex-shrink: 0;
-  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* Email Snippet — wrapper absorbs flex height; inner box must stay auto-height
-   for Firefox to render line-clamp ellipsis (see Mozilla bug 1790882). */
+/* Email Snippet — wrapper takes the flex-imposed height; the inner clamp
+   box is left at its natural (auto) height so Firefox can compute where
+   to insert the line-clamp ellipsis (see Mozilla bug 1790882: Firefox
+   fails to ellipsize -webkit-line-clamp boxes that have an externally
+   imposed/definite height, e.g. via flex or explicit height/max-height). */
 .live-gmail-email-snippet-wrap {
   flex: 1;
   min-height: 0;
@@ -229,14 +230,11 @@
   color: light-dark(#737373, #b1b1b1);
   line-height: 1.3;
   padding-top: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: normal;
-  word-break: break-word;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
+  overflow: hidden;
 }
 
 

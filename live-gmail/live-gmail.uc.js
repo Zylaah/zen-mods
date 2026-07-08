@@ -1892,9 +1892,7 @@
           <span class="live-gmail-email-date">${escapeHtml(date)}</span>
         </div>
         <div class="live-gmail-email-subject">${escapeHtml(subject)}</div>
-        <div class="live-gmail-email-snippet-wrap">
-          <div class="live-gmail-email-snippet">${escapeHtml(snippet)}</div>
-        </div>
+        <div class="live-gmail-email-snippet-wrap"><div class="live-gmail-email-snippet">${escapeHtml(snippet)}</div></div>
       `;
 
       el.addEventListener('click', async (e) => {
