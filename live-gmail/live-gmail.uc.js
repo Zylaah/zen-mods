@@ -678,6 +678,8 @@
         diskCacheStore[key] = {
           emails: ctx.cachedEmails.slice(0, CONFIG.MAX_EMAILS).map(e => ({
             id: e.id,
+            threadId: e.threadId || e.id,
+            url: e.url || '',
             from: e.from,
             subject: e.subject,
             snippet: e.snippet || '',
@@ -789,6 +791,36 @@
   /**
    * Extract thread ID from a Gmail row element
    */
+  /**
+   * Compute a row's thread ID using the same logic as scanInbox(), so it can
+   * be recomputed identically after a tab reload/unload and matched against
+   * a previously cached email that only carries this stable content hash.
+   */
+  function computeRowThreadId(row) {
+    const gmailUrl = extractGmailUrl(row);
+    let threadId = extractThreadId(row);
+
+    if (!threadId && gmailUrl) {
+      const match = gmailUrl.match(/#(?:inbox|all|sent|starred|label)\\/([^/?#]+)/i);
+      if (match && match[1]) threadId = match[1];
+    }
+
+    if (!threadId) {
+      const sender = extractSender(row);
+      const subject = extractSubject(row);
+      const date = extractDate(row);
+      const contentStr = sender + '|' + subject + '|' + date;
+      let hash = 0;
+      for (let i = 0; i < contentStr.length; i++) {
+        hash = ((hash << 5) - hash) + contentStr.charCodeAt(i);
+        hash = hash & hash;
+      }
+      threadId = 'hash-' + Math.abs(hash).toString(36);
+    }
+
+    return threadId;
+  }
+
   function extractThreadId(row) {
     const attrs = ['data-legacy-thread-id', 'data-thread-id', 'data-legacy-message-id', 
                    'data-message-id', 'data-id', 'data-uid', 'data-internalid'];
@@ -959,29 +991,11 @@
       unreadCount++;
       
       const gmailUrl = extractGmailUrl(row);
-      let threadId = extractThreadId(row);
-      
-      if (!threadId && gmailUrl) {
-        const match = gmailUrl.match(/#(?:inbox|all|sent|starred|label)\\/([^/?#]+)/i);
-        if (match && match[1]) threadId = match[1];
-      }
-      
+      const threadId = computeRowThreadId(row);
       const sender = extractSender(row);
       const subject = extractSubject(row);
       const date = extractDate(row);
-      
-      // Generate stable fallback ID based on content (not position)
-      if (!threadId) {
-        // Simple hash of sender + subject + date for stable identification
-        const contentStr = sender + '|' + subject + '|' + date;
-        let hash = 0;
-        for (let i = 0; i < contentStr.length; i++) {
-          hash = ((hash << 5) - hash) + contentStr.charCodeAt(i);
-          hash = hash & hash; // Convert to 32bit integer
-        }
-        threadId = 'hash-' + Math.abs(hash).toString(36);
-      }
-      
+
       threads.push({
         id: threadId,
         threadId: threadId,
@@ -1097,46 +1111,69 @@
     });
   });
   
+  function clickRow(row) {
+    const link = row.querySelector('a[href*="#"], a[role="link"]') || row.querySelector('a');
+    if (link) {
+      link.click();
+    } else {
+      row.click();
+    }
+  }
+
   addMessageListener('LiveGmail:OpenThread', (message) => {
     try {
       const data = message && message.data ? message.data : {};
       const rowIndex = data.rowIndex;
+      const targetThreadId = data.threadId;
       const targetUrl = data.url || '';
       frameDebugLog('OpenThread', data);
-      
-      // Try to click the row by index first (most reliable for Gmail SPA)
+
+      const rows = findEmailRows();
+
+      // Prefer matching by content-derived thread ID: it's recomputed the
+      // same way on every scan, so it still matches after the tab has been
+      // unloaded/reloaded and Gmail's row order or DOM has changed — unlike
+      // rowIndex, which is only valid against the DOM snapshot it came from.
+      if (targetThreadId) {
+        for (const row of rows) {
+          if (computeRowThreadId(row) === targetThreadId) {
+            frameDebugLog('Clicking row matched by threadId', targetThreadId);
+            clickRow(row);
+            return;
+          }
+        }
+      }
+
+      // Fall back to click the row by index (only valid if the DOM matches
+      // the snapshot this rowIndex was computed from, e.g. a live scan).
       if (rowIndex !== undefined && rowIndex !== null) {
-        const rows = findEmailRows();
         let unreadIdx = 0;
         for (const row of rows) {
           if (isUnread(row)) {
             if (unreadIdx === rowIndex) {
               frameDebugLog('Clicking row at index', rowIndex);
-              // Try to find and click a link in the row
-              const link = row.querySelector('a[href*="#"], a[role="link"]') || row.querySelector('a');
-              if (link) {
-                link.click();
-                return;
-              }
-              // Fallback: click the row itself
-              row.click();
+              clickRow(row);
               return;
             }
             unreadIdx++;
           }
         }
       }
-      
-      // Fallback: navigate via URL (only if it's a real Gmail URL, not a fallback)
+
+      // Last resort: navigate via URL (only if it's a real Gmail URL, not a
+      // synthetic fallback id/hash that was never a valid permalink).
       if (targetUrl && !targetUrl.includes('idx-') && !targetUrl.includes('row-') && !targetUrl.includes('hash-')) {
         if (/^https?:/i.test(targetUrl)) {
           content.location.href = targetUrl;
         } else if (targetUrl.startsWith('#')) {
           content.location.hash = targetUrl;
-      } else {
+        } else {
           content.location.href = 'https://mail.google.com/mail/u/0/' + targetUrl;
         }
+        return;
       }
+
+      content.console.warn('[Live Gmail Frame] OpenThread: no matching row found and no usable URL fallback', data);
     } catch (e) {
       content.console.warn('[Live Gmail Frame] OpenThread failed:', e);
     }
