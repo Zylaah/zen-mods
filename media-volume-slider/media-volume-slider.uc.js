@@ -395,6 +395,23 @@
       popupStyleLeft: popupEl?.style.left,
       popupStyleTop: popupEl?.style.top,
     });
+    safe(() => {
+      const cs = window.getComputedStyle(popupEl);
+      log("openPopup() computed style", {
+        opacity: cs.opacity,
+        visibility: cs.visibility,
+        display: cs.display,
+        zIndex: cs.zIndex,
+        position: cs.position,
+        transform: cs.transform,
+        width: cs.width,
+        height: cs.height,
+        popupRect: popupEl.getBoundingClientRect(),
+        hasOpenAttr: popupEl.hasAttribute("open"),
+        parentNode: popupEl.parentNode?.nodeName,
+        connected: popupEl.isConnected,
+      });
+    });
 
     const browser = getMediaBrowser();
     if (!browser) {
