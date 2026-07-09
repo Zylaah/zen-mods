@@ -370,19 +370,11 @@
 
   function openPopup() {
     const toolbar = document.getElementById("zen-media-controls-toolbar");
-    log("openPopup() called", {
-      toolbarFound: !!toolbar,
-      hidden: toolbar?.hasAttribute("hidden"),
-      mediaSharing: toolbar?.hasAttribute("media-sharing"),
-      popupElFound: !!popupEl,
-      sliderElFound: !!sliderEl,
-    });
     if (
       !toolbar ||
       toolbar.hasAttribute("hidden") ||
       toolbar.hasAttribute("media-sharing")
     ) {
-      log("openPopup() aborted: toolbar missing/hidden/sharing");
       return;
     }
 
@@ -390,34 +382,9 @@
     syncPopupPosition();
     popupOpen = true;
     popupEl?.setAttribute("open", "true");
-    log("openPopup() set [open] attribute", {
-      rect: muteButton?.getBoundingClientRect(),
-      popupStyleLeft: popupEl?.style.left,
-      popupStyleTop: popupEl?.style.top,
-    });
-    safe(() => {
-      const cs = window.getComputedStyle(popupEl);
-      log("openPopup() computed style", {
-        opacity: cs.opacity,
-        visibility: cs.visibility,
-        display: cs.display,
-        zIndex: cs.zIndex,
-        position: cs.position,
-        transform: cs.transform,
-        width: cs.width,
-        height: cs.height,
-        popupRect: popupEl.getBoundingClientRect(),
-        hasOpenAttr: popupEl.hasAttribute("open"),
-        parentNode: popupEl.parentNode?.nodeName,
-        connected: popupEl.isConnected,
-      });
-    });
 
     const browser = getMediaBrowser();
-    if (!browser) {
-      log("openPopup(): no media browser found");
-      return;
-    }
+    if (!browser) return;
 
     if (browser.audioMuted) {
       sliderEl.value = "0";
@@ -437,20 +404,11 @@
   }
 
   function bindPopupEvents() {
-    if (!muteButton || !anchorEl || !popupEl || !sliderEl) {
-      log("bindPopupEvents() aborted, missing refs", {
-        muteButton: !!muteButton,
-        anchorEl: !!anchorEl,
-        popupEl: !!popupEl,
-        sliderEl: !!sliderEl,
-      });
-      return;
-    }
+    if (!muteButton || !anchorEl || !popupEl || !sliderEl) return;
 
     const hoverZone = anchorEl;
 
     hoverZone.addEventListener("mouseenter", () => {
-      log("anchorEl mouseenter fired");
       openPopup();
     });
 
@@ -522,13 +480,8 @@
   function buildUi() {
     muteButton = document.getElementById("zen-media-mute-button");
     if (!muteButton || document.getElementById(POPUP_ID)) {
-      log("buildUi() early return", {
-        muteButtonFound: !!muteButton,
-        popupAlreadyExists: !!document.getElementById(POPUP_ID),
-      });
       return !!muteButton;
     }
-    log("buildUi() building fresh popup UI");
 
     ensureVolumePrefDefault();
 

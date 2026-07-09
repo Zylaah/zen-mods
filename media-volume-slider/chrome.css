@@ -1,4 +1,4 @@
-@namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
+@namespace xul url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
 
 [zen-volume-anchor] {
   display: inline-flex;
@@ -6,7 +6,7 @@
 }
 
 /* Artwork background on media toolbar hover */
-#zen-media-controls-toolbar > toolbaritem {
+#zen-media-controls-toolbar > xul|toolbaritem {
   position: relative;
   clip-path: inset(0 round var(--border-radius-medium));
   background-size: cover;
@@ -14,17 +14,17 @@
   background-repeat: no-repeat;
 }
 
-#zen-media-controls-toolbar:hover:not(:has([zen-volume-anchor]:hover)) > toolbaritem.has-artwork {
+#zen-media-controls-toolbar:hover:not(:has([zen-volume-anchor]:hover)) > xul|toolbaritem.has-artwork {
   background-image: var(--zen-media-artwork-bg) !important;
 }
 
-#zen-media-controls-toolbar:hover:not(:has([zen-volume-anchor]:hover)) > toolbaritem.has-artwork::before {
+#zen-media-controls-toolbar:hover:not(:has([zen-volume-anchor]:hover)) > xul|toolbaritem.has-artwork::before {
   background: light-dark(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.9));
   opacity: 1;
   pointer-events: none;
 }
 
-#zen-media-controls-toolbar > toolbaritem::before {
+#zen-media-controls-toolbar > xul|toolbaritem::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -34,7 +34,7 @@
   pointer-events: none;
 }
 
-#zen-media-controls-toolbar > toolbaritem > * {
+#zen-media-controls-toolbar > xul|toolbaritem > * {
   position: relative;
   z-index: 1;
 }
