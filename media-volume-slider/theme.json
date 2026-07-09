@@ -1,8 +1,8 @@
 {
-  "version": "1.0.6",
+  "version": "1.1.0",
   "id": "media-volume-slider",
-  "name": "Media Volume Slider",
-  "description": "Hover volume slider on the sidebar media mute button",
+  "name": "Better Media Toolbar",
+  "description": "Volume slider on mute hover and media artwork background on toolbar hover",
   "scripts": {
     "media-volume-slider.uc.js": {
       "include": ["chrome://browser/content/browser.xhtml"]
@@ -14,8 +14,8 @@
   "homepage": "https://github.com/Zylaah/zen-mods/tree/main/media-volume-slider",
   "readme": "https://raw.githubusercontent.com/Zylaah/zen-mods/refs/heads/main/media-volume-slider/README.md",
   "author": "Zylaah",
-  "tags": ["Zen Browser", "media", "volume", "sidebar"],
+  "tags": ["Zen Browser", "media", "volume", "sidebar", "artwork"],
   "createdAt": "2026-06-27",
-  "updatedAt": "2026-06-27",
+  "updatedAt": "2026-07-09",
   "fork": ["zen"]
 }

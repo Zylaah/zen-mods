@@ -1,6 +1,42 @@
+@namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
+
 [zen-volume-anchor] {
   display: inline-flex;
   align-items: center;
+}
+
+/* Artwork background on media toolbar hover */
+#zen-media-controls-toolbar > toolbaritem {
+  position: relative;
+  clip-path: inset(0 round var(--border-radius-medium));
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+#zen-media-controls-toolbar:hover:not(:has([zen-volume-anchor]:hover)) > toolbaritem.has-artwork {
+  background-image: var(--zen-media-artwork-bg) !important;
+}
+
+#zen-media-controls-toolbar:hover:not(:has([zen-volume-anchor]:hover)) > toolbaritem.has-artwork::before {
+  background: light-dark(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.9));
+  opacity: 1;
+  pointer-events: none;
+}
+
+#zen-media-controls-toolbar > toolbaritem::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  z-index: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#zen-media-controls-toolbar > toolbaritem > * {
+  position: relative;
+  z-index: 1;
 }
 
 #zen-media-controls-toolbar:has([zen-volume-anchor]:hover) .show-on-hover {

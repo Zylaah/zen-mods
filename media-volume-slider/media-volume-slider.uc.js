@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name           Media Volume Slider
-// @description    Hover volume slider on the sidebar media mute button
+// @name           Better Media Toolbar
+// @description    Volume slider on mute hover and media artwork background on toolbar hover
 // @author         Zylaah
-// @version        1.0.5
+// @version        1.1.0
 // @namespace      https://github.com/Zylaah/zen-mods
 // ==/UserScript==
 
@@ -15,9 +15,11 @@
   if (window.__zenMediaVolumeSliderLoaded) return;
   window.__zenMediaVolumeSliderLoaded = true;
 
-  const LOG_PREFIX = "[MediaVolumeSlider]";
+  const LOG_PREFIX = "[BetterMediaToolbar]";
   const POPUP_ID = "zen-media-volume-slider-popup";
   const SLIDER_ID = "zen-media-volume-slider";
+  const ARTWORK_VAR = "--zen-media-artwork-bg";
+  const ARTWORK_CLASS = "has-artwork";
   const HIDE_DELAY_MS = 280;
   const POPUP_GAP_PX = 6;
   const INIT_RETRY_MS = 100;
@@ -46,6 +48,57 @@
   const browserPreMuteVolume = new WeakMap();
 
   const log = (...args) => console.log(LOG_PREFIX, ...args);
+
+  function findBestArtwork(artwork = []) {
+    if (!Array.isArray(artwork) || artwork.length === 0) return null;
+    artwork.sort((a, b) => {
+      const sizeA = parseInt(a.sizes?.split("x")[0] || "0", 10);
+      const sizeB = parseInt(b.sizes?.split("x")[0] || "0", 10);
+      return sizeB - sizeA;
+    });
+    return artwork[0]?.src || null;
+  }
+
+  function applyArtwork(toolbar) {
+    const toolbarItem = toolbar.querySelector(":scope > toolbaritem");
+    if (!toolbarItem) return;
+
+    try {
+      let artworkUrl = null;
+      if (window.gZenMediaController?._currentMediaController) {
+        const metadata =
+          window.gZenMediaController._currentMediaController.getMetadata();
+        artworkUrl = findBestArtwork(metadata?.artwork);
+      }
+
+      if (artworkUrl) {
+        toolbarItem.style.setProperty(ARTWORK_VAR, `url("${artworkUrl}")`);
+        toolbarItem.classList.add(ARTWORK_CLASS);
+      } else {
+        toolbarItem.style.removeProperty(ARTWORK_VAR);
+        toolbarItem.classList.remove(ARTWORK_CLASS);
+      }
+    } catch (e) {
+      console.error(LOG_PREFIX, "artwork apply failed", e);
+      toolbarItem.style.removeProperty(ARTWORK_VAR);
+      toolbarItem.classList.remove(ARTWORK_CLASS);
+    }
+  }
+
+  function removeArtwork(toolbar) {
+    const toolbarItem = toolbar.querySelector(":scope > toolbaritem");
+    if (!toolbarItem) return;
+    toolbarItem.style.removeProperty(ARTWORK_VAR);
+    toolbarItem.classList.remove(ARTWORK_CLASS);
+  }
+
+  function addArtworkHoverListeners(toolbar) {
+    if (toolbar.dataset.artworkListenersAdded === "true") return;
+
+    toolbar.addEventListener("mouseenter", () => applyArtwork(toolbar));
+    toolbar.addEventListener("mouseleave", () => removeArtwork(toolbar));
+    toolbar.dataset.artworkListenersAdded = "true";
+  }
 
   function safe(fn) {
     try {
@@ -415,6 +468,15 @@
     toolbarWasMuted = isMuted;
   }
 
+  function initArtworkBackground() {
+    const toolbar = document.getElementById("zen-media-controls-toolbar");
+    if (!toolbar || typeof window.gZenMediaController === "undefined") {
+      return false;
+    }
+    addArtworkHoverListeners(toolbar);
+    return true;
+  }
+
   function buildUi() {
     muteButton = document.getElementById("zen-media-mute-button");
     if (!muteButton || document.getElementById(POPUP_ID)) {
@@ -500,6 +562,7 @@
 
   function requestInit() {
     setupMessageListeners();
+    initArtworkBackground();
     if (buildUi()) {
       if (initRetryTimer) {
         clearTimeout(initRetryTimer);
