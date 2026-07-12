@@ -18,7 +18,8 @@
     DEFAULT_GMAIL_URL: 'mail.google.com',
     MAX_EMAILS: 20,
     PANEL_ID: 'live-gmail-panel',
-    SCANNER_TAB_ATTR: 'data-live-gmail-scanner'
+    SCANNER_TAB_ATTR: 'data-live-gmail-scanner',
+    HOVER_DELAY_MS: 1000
   };
 
   /**
@@ -53,6 +54,8 @@
   let lastLogTs = 0;
   let scanInProgress = false;
   let hideTimer = null;
+  let showTimer = null;
+  let pendingShowTab = null;
   let cachedFrameScriptUrl = null;
   let loadScanTimers = new WeakMap();
   let loadScansInFlight = new Set();
@@ -1656,7 +1659,7 @@
         const tab = event.target.closest('.tabbrowser-tab');
         if (!tab?.hasAttribute('zen-essential')) return;
         if (!isGmailEssentialTab(tab)) return;
-        showPanel(tab);
+        scheduleShow(tab);
       },
       true
     );
@@ -1671,18 +1674,20 @@
       // Use the delayed hide rather than an instant one so the grace period
       // applies regardless of which side the cursor exits the Gmail tab from.
       // If the cursor continues on to the panel, its mouseenter cancels this.
+      cancelShowTimer();
       scheduleHide();
       return;
     }
 
     // Do NOT set hoveredTab here — showPanel sets it after computing context.
-    showPanel(tab);
+    scheduleShow(tab);
   }
 
   /**
    * Handle tab leave
    */
   function handleTabLeave() {
+    cancelShowTimer();
     scheduleHide();
   }
 
@@ -1712,6 +1717,42 @@
       console.warn('[Live Gmail] hasGmailTab check failed:', e);
       return false;
     }
+  }
+
+  /**
+   * Cancel a pending panel open triggered by hover.
+   */
+  function cancelShowTimer() {
+    if (showTimer) { clearTimeout(showTimer); showTimer = null; }
+    pendingShowTab = null;
+  }
+
+  /**
+   * Open the panel after the user has hovered a Gmail essential tab long enough.
+   * If the panel is already open, switch context immediately.
+   */
+  function scheduleShow(tab) {
+    if (!tab || !isGmailEssentialTab(tab)) return;
+
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+
+    if (isPanelOpen()) {
+      cancelShowTimer();
+      showPanel(tab);
+      return;
+    }
+
+    if (pendingShowTab === tab && showTimer) return;
+
+    cancelShowTimer();
+    pendingShowTab = tab;
+
+    showTimer = setTimeout(() => {
+      showTimer = null;
+      pendingShowTab = null;
+      if (!tab.matches(':hover')) return;
+      showPanel(tab);
+    }, CONFIG.HOVER_DELAY_MS);
   }
 
   /**
@@ -1772,6 +1813,7 @@
    */
   function hidePanel() {
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    cancelShowTimer();
     persistActiveContextToMemory(activePanelContextKey);
     if (panelElement) panelElement.hidePopup();
     hoveredTab = null;
