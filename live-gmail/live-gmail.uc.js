@@ -19,7 +19,7 @@
     MAX_EMAILS: 20,
     PANEL_ID: 'live-gmail-panel',
     SCANNER_TAB_ATTR: 'data-live-gmail-scanner',
-    HOVER_DELAY_MS: 1000
+    HOVER_DELAY_MS: 500
   };
 
   /**
