@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        3.4.0
+// @version        3.4.1
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -60,27 +60,17 @@
   let loadScanTimers = new WeakMap();
   let loadScansInFlight = new Set();
   let activeLoadScanTabs = new WeakSet();
-  let activePanelContextKey = null; // `${workspaceUuid}:${containerId}`
+  let activePanelContextKey = null; // Firefox container id as string, e.g. "0" / "2"
   let scanContextKey = null; // context key for an in-flight hover scan
   let panelContexts = new Map(); // contextKey -> { currentEmails, cachedEmails, clickedEmailIds }
   let diskCacheStore = {}; // persisted cache keyed by contextKey
 
   /**
-   * Active Zen workspace uuid (space id)
-   */
-  function getActiveWorkspaceId() {
-    try {
-      return window.gZenWorkspaces?.getActiveWorkspaceFromCache?.()?.uuid || 'default';
-    } catch (e) {}
-    return 'default';
-  }
-
-  /**
-   * Panel cache key: one panel state per workspace + container combination.
-   * Essentials are shared across workspaces but each space/container may map to a different Gmail account.
+   * Panel cache key: one panel state per Firefox container.
+   * Zen shares essentials across workspaces that use the same container, so inbox
+   * content only differs by container — not by workspace uuid.
    */
   function getPanelContextKey(tab = hoveredTab) {
-    const workspaceId = getActiveWorkspaceId();
     let containerId = 0;
 
     if (window.gZenWorkspaces?.containerSpecificEssentials) {
@@ -92,15 +82,23 @@
       }
     }
 
-    return `${workspaceId}:${containerId}`;
-  }
-
-  function getContextContainerId(contextKey) {
-    return parseInt(String(contextKey).split(':')[1] || '0', 10);
+    return String(containerId || 0);
   }
 
   /**
-   * Whether an essential belongs to the container portion of a panel context key.
+   * Container id from a panel context key.
+   * Supports current keys ("2") and legacy workspace keys ("uuid:2", "default:0").
+   */
+  function getContextContainerId(contextKey) {
+    const key = String(contextKey || '0');
+    if (key.includes(':')) {
+      return parseInt(key.split(':').pop() || '0', 10) || 0;
+    }
+    return parseInt(key, 10) || 0;
+  }
+
+  /**
+   * Whether an essential belongs to the container of a panel context key.
    */
   function tabMatchesContainerContext(tab, contextKey) {
     if (!tab?.hasAttribute('zen-essential')) return false;
@@ -150,7 +148,7 @@
   }
 
   /**
-   * Switch the in-memory email state to a workspace/container context.
+   * Switch the in-memory email state to a container context.
    */
   function activatePanelContext(key) {
     if (!key) return;
@@ -189,12 +187,21 @@
     return isLoadedGmailBrowser(tab.linkedBrowser);
   }
 
-  function onWorkspaceOrContainerChanged() {
+  /**
+   * React when the active container changes (or separate-essentials is toggled).
+   * Same-container workspace switches are a no-op — essentials and inbox are shared.
+   */
+  function onWorkspaceOrContainerChanged(force = false) {
+    const nextKey = getPanelContextKey();
+    if (!force && nextKey === activePanelContextKey) {
+      return;
+    }
+
     hidePanel();
     scanInProgress = false;
     scanContextKey = null;
     loadScansInFlight.clear();
-    activatePanelContext(getPanelContextKey());
+    activatePanelContext(nextKey);
   }
 
   /**
@@ -262,7 +269,7 @@
   }
 
   /**
-   * Check if a tab is a Gmail essential tab for the given workspace/container context
+   * Check if a tab is a Gmail essential tab for the given container context
    */
   function isGmailEssentialTab(tab, contextKey = getPanelContextKey(tab)) {
     if (!tab || !tab.hasAttribute('zen-essential')) return false;
@@ -671,7 +678,37 @@
   }
 
   /**
-   * Persist all workspace/container caches to the profile file
+   * Fold legacy workspace:container cache keys into container-only keys.
+   * Prefers newer lastScanTs, then the entry with more emails.
+   */
+  function migrateDiskCacheStore(store) {
+    const migrated = {};
+
+    for (const [key, entry] of Object.entries(store || {})) {
+      const containerKey = String(getContextContainerId(key));
+      const normalized = normalizeDiskCacheEntry(entry);
+      const existing = migrated[containerKey];
+
+      if (!existing) {
+        migrated[containerKey] = normalized;
+        continue;
+      }
+
+      const preferNew =
+        normalized.lastScanTs > existing.lastScanTs ||
+        (normalized.lastScanTs === existing.lastScanTs &&
+          normalized.emails.length > existing.emails.length);
+
+      if (preferNew) {
+        migrated[containerKey] = normalized;
+      }
+    }
+
+    return migrated;
+  }
+
+  /**
+   * Persist all container caches to the profile file
    */
   function saveCacheToPrefs() {
     try {
@@ -693,12 +730,13 @@
         };
       }
 
+      diskCacheStore = migrateDiskCacheStore(diskCacheStore);
       IOUtils.writeUTF8(getCacheFilePath(), JSON.stringify(diskCacheStore)).catch(() => {});
     } catch (e) {}
   }
 
   /**
-   * Restore per-context caches from the profile file on startup
+   * Restore per-container caches from the profile file on startup
    */
   function loadCacheFromPrefs() {
     try {
@@ -706,9 +744,9 @@
         const parsed = JSON.parse(json);
         if (Array.isArray(parsed)) {
           // Legacy single-cache format
-          diskCacheStore = { 'default:0': parsed };
+          diskCacheStore = migrateDiskCacheStore({ '0': parsed });
         } else if (parsed && typeof parsed === 'object') {
-          diskCacheStore = parsed;
+          diskCacheStore = migrateDiskCacheStore(parsed);
         }
 
         const activeKey = getPanelContextKey();
@@ -1572,14 +1610,18 @@
 
 
   /**
-   * React to workspace (space) switches — each space gets its own panel cache.
+   * React when the active container changes (workspace switch may change container).
    */
   function setupWorkspaceMonitoring() {
-    window.addEventListener('ZenWorkspacesUIUpdate', onWorkspaceOrContainerChanged);
+    window.addEventListener('ZenWorkspacesUIUpdate', () => onWorkspaceOrContainerChanged(false));
 
     try {
       if (typeof Services !== 'undefined' && Services.prefs) {
-        Services.prefs.addObserver('zen.workspaces.separate-essentials', onWorkspaceOrContainerChanged, false);
+        Services.prefs.addObserver(
+          'zen.workspaces.separate-essentials',
+          () => onWorkspaceOrContainerChanged(true),
+          false
+        );
       }
     } catch (e) {}
   }
@@ -2248,7 +2290,7 @@
     }
   };
 
-  // Debug functions
+  // Debug API — context()/contexts() return Firefox container ids ("0", "2", …)
   window.liveGmailDebug = {
     showPanel: () => {
       if (panelElement) {
