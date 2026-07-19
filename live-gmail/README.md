@@ -18,7 +18,7 @@ A Zen Browser mod for Sine that shows your unread Gmail in a quick hover panel o
 ## Installation (Sine)
 
 1. Install [Sine](https://github.com/CosmoCreeper/Sine) on Zen Browser.
-2. In Sine, add this mod (`live-gmail`) from your local mods folder/repository.
+2. In Sine, enable unsafe JS and paste `Zylaah/zen-mods/tree/main/live-gmail`.
 3. Restart Zen when prompted.
 
 ## Usage
