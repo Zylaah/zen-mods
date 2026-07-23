@@ -239,9 +239,6 @@
 
 
 /* Scrollbar Styling */
-.live-gmail-content::-webkit-scrollbar {
-  width: 8px;
-}
 
 .live-gmail-content::-webkit-scrollbar-track {
   background: transparent;
