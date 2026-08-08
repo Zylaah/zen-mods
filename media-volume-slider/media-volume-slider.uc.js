@@ -2,7 +2,7 @@
 // @name           Better Media Toolbar
 // @description    Volume slider on mute hover and media artwork background on toolbar hover
 // @author         Zylaah
-// @version        1.3.1
+// @version        1.3.2
 // @namespace      https://github.com/Zylaah/zen-mods
 // ==/UserScript==
 
@@ -39,8 +39,6 @@
   let dragging = false;
   /** @type {Element | null} Active mute button the popup is anchored to */
   let muteButton = null;
-  /** @type {Element | null} Active volume anchor wrapping that mute button */
-  let anchorEl = null;
   /** @type {HTMLElement | null} Card that owns the active mute button */
   let activeCardEl = null;
   let popupEl = null;
@@ -206,7 +204,11 @@
     if (toolbar.dataset.artworkListenersAdded === "true") return;
 
     toolbar.addEventListener("mouseenter", () => applyArtworkToVisibleCards(toolbar));
-    toolbar.addEventListener("mouseleave", () => clearArtworkOnToolbar(toolbar));
+    toolbar.addEventListener("mouseleave", () => {
+      // Keep artwork while moving onto the volume slider / bridge.
+      if (popupOpen || toolbar.hasAttribute(TOOLBAR_VOLUME_ATTR)) return;
+      clearArtworkOnToolbar(toolbar);
+    });
     toolbar.dataset.artworkListenersAdded = "true";
   }
 
@@ -435,16 +437,16 @@
     popupEl.style.left = `${popupLeft}px`;
     popupEl.style.top = `${popupTop}px`;
 
-    // Bridge covers from inside the toolbar to the popup so :hover never drops.
+    // Gap-only bridge: from the toolbar's right edge to the popup (no overlap on controls).
     if (bridgeEl) {
-      const bridgeLeft = Math.max(0, toolbarRect.right - 36);
-      const bridgeWidth = Math.max(popupLeft - bridgeLeft + 8, POPUP_GAP_PX + 44);
-      const bridgeTop = Math.min(toolbarRect.top, anchorRect.top) - 12;
-      const bridgeBottom = Math.max(toolbarRect.bottom, anchorRect.bottom) + 12;
+      const bridgeLeft = toolbarRect.right;
+      const bridgeWidth = Math.max(POPUP_GAP_PX + 2, popupLeft - bridgeLeft + 2);
+      const bridgeTop = anchorRect.top - 4;
+      const bridgeHeight = Math.max(anchorRect.height + 8, 32);
       bridgeEl.style.left = `${bridgeLeft}px`;
       bridgeEl.style.top = `${bridgeTop}px`;
       bridgeEl.style.width = `${bridgeWidth}px`;
-      bridgeEl.style.height = `${Math.max(bridgeBottom - bridgeTop, 48)}px`;
+      bridgeEl.style.height = `${bridgeHeight}px`;
     }
   }
 
@@ -453,12 +455,17 @@
     popupOpen = false;
     dragging = false;
     popupEl?.removeAttribute("open");
+    bridgeEl?.removeAttribute("open");
     setToolbarVolumeOpen(false);
+
+    const toolbar = getToolbar();
+    if (toolbar && !toolbar.matches(":hover")) {
+      clearArtworkOnToolbar(toolbar);
+    }
   }
 
-  function setActiveMuteTarget(nextMuteButton, nextAnchor, nextCardEl) {
+  function setActiveMuteTarget(nextMuteButton, nextCardEl) {
     muteButton = nextMuteButton;
-    anchorEl = nextAnchor;
     activeCardEl = nextCardEl;
   }
 
@@ -475,7 +482,9 @@
     syncPopupPosition();
     popupOpen = true;
     popupEl?.setAttribute("open", "true");
+    bridgeEl?.setAttribute("open", "true");
     setToolbarVolumeOpen(true);
+    applyArtworkToVisibleCards(toolbar);
 
     const browser = getActiveBrowser();
     if (!browser) return;
@@ -504,42 +513,37 @@
     syncPopupPosition();
     popupOpen = true;
     popupEl?.setAttribute("open", "true");
+    bridgeEl?.setAttribute("open", "true");
     setToolbarVolumeOpen(true);
   }
 
-  /**
-   * Mount popup + bridge inside the toolbar so hovering them counts as
-   * toolbar :hover (keeps the native stack expanded).
-   */
-  function mountPopupIntoToolbar(toolbar) {
-    if (!toolbar || !popupEl) return;
-    if (popupEl.parentNode !== toolbar) {
-      toolbar.appendChild(popupEl);
+  /** Keep popup/bridge on documentElement so they never affect toolbar flex layout. */
+  function mountVolumeUi() {
+    const root = document.documentElement;
+    if (popupEl && popupEl.parentNode !== root) {
+      root.appendChild(popupEl);
     }
-    if (bridgeEl && bridgeEl.parentNode !== toolbar) {
-      toolbar.appendChild(bridgeEl);
+    if (bridgeEl && bridgeEl.parentNode !== root) {
+      root.appendChild(bridgeEl);
     }
   }
 
   function ensurePopup() {
-    const toolbar = getToolbar();
     const existing = document.getElementById(POPUP_ID);
     if (existing) {
       popupEl = existing;
       sliderEl = document.getElementById(SLIDER_ID);
       bridgeEl = document.getElementById(BRIDGE_ID);
-      if (!bridgeEl && toolbar) {
+      if (!bridgeEl) {
         bridgeEl = document.createElement("div");
         bridgeEl.id = BRIDGE_ID;
         bridgeEl.setAttribute("aria-hidden", "true");
         bridgeEl.addEventListener("mouseenter", () => keepVolumeUiOpen());
         bridgeEl.addEventListener("mouseleave", scheduleHide);
       }
-      if (toolbar) mountPopupIntoToolbar(toolbar);
+      mountVolumeUi();
       return !!popupEl && !!sliderEl;
     }
-
-    if (!toolbar) return false;
 
     popupEl = document.createElement("div");
     popupEl.id = POPUP_ID;
@@ -560,8 +564,8 @@
     bridgeEl.setAttribute("aria-hidden", "true");
 
     popupEl.appendChild(sliderEl);
-    toolbar.appendChild(bridgeEl);
-    toolbar.appendChild(popupEl);
+    document.documentElement.appendChild(bridgeEl);
+    document.documentElement.appendChild(popupEl);
 
     const onVolumeZoneEnter = () => keepVolumeUiOpen();
 
@@ -595,6 +599,16 @@
     return true;
   }
 
+  /** Undo older wraps that broke native toolbarbutton hover/layout. */
+  function unwrapMuteButton(button) {
+    const anchor = button?.parentElement;
+    if (!anchor?.hasAttribute?.("zen-volume-anchor")) return;
+    const parent = anchor.parentNode;
+    if (!parent) return;
+    parent.insertBefore(button, anchor);
+    anchor.remove();
+  }
+
   function onCardMuteChanged(cardEl) {
     if (!sliderEl || dragging || cardEl !== activeCardEl) return;
 
@@ -611,7 +625,7 @@
   }
 
   /**
-   * Wrap a card's mute button with the volume hover anchor and wire events.
+   * Wire mute button hover directly (no wrapper) so native hover styles stay intact.
    */
   function wireCard(cardEl) {
     if (!cardEl || wiredCards.has(cardEl)) return false;
@@ -627,29 +641,18 @@
 
     if (!ensurePopup()) return false;
 
-    let anchor = button.parentElement?.hasAttribute?.("zen-volume-anchor")
-      ? button.parentElement
-      : null;
+    unwrapMuteButton(button);
 
-    if (!anchor) {
-      anchor = document.createElement("div");
-      anchor.setAttribute("zen-volume-anchor", "true");
-      const parent = button.parentNode;
-      if (!parent) return false;
-      parent.insertBefore(anchor, button);
-      anchor.appendChild(button);
-    }
-
-    anchor.addEventListener("mouseenter", () => {
-      setActiveMuteTarget(button, anchor, cardEl);
+    button.addEventListener("mouseenter", () => {
+      setActiveMuteTarget(button, cardEl);
       openPopup();
     });
-    anchor.addEventListener("mouseleave", scheduleHide);
+    button.addEventListener("mouseleave", scheduleHide);
 
     button.addEventListener(
       "pointerdown",
       () => {
-        setActiveMuteTarget(button, anchor, cardEl);
+        setActiveMuteTarget(button, cardEl);
         capturePreMuteVolume(getActiveBrowser());
       },
       true

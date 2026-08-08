@@ -1,22 +1,15 @@
-[zen-volume-anchor] {
-  display: inline-flex;
-  align-items: center;
-}
-
-/* Artwork background on media card hover (hidden while volume UI is active) */
+/* Artwork background — keep visible on toolbar hover and while volume UI is open */
 #zen-media-controls-toolbar .zen-media-card {
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
 }
 
-#zen-media-controls-toolbar:hover:not(:has([zen-volume-anchor]:hover)):not([zen-volume-open])
-  .zen-media-card.has-artwork {
+#zen-media-controls-toolbar:is(:hover, [zen-volume-open]) .zen-media-card.has-artwork {
   background-image: var(--zen-media-artwork-bg) !important;
 }
 
-#zen-media-controls-toolbar:hover:not(:has([zen-volume-anchor]:hover)):not([zen-volume-open])
-  .zen-media-card.has-artwork::before {
+#zen-media-controls-toolbar:is(:hover, [zen-volume-open]) .zen-media-card.has-artwork::before {
   background: light-dark(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.9));
   opacity: 1;
   pointer-events: none;
@@ -37,11 +30,7 @@
   z-index: 1;
 }
 
-/*
- * Keep the stack expanded while the volume popup is open.
- * Popup is mounted inside the toolbar, but the mouse still crosses a gap
- * where :hover briefly drops — these rules cover that.
- */
+/* Keep the stack expanded while the volume popup is open */
 #zen-media-controls-toolbar[zen-volume-open] .show-on-hover {
   max-height: 50px !important;
   padding: 5px !important;
@@ -69,19 +58,26 @@
   height: calc(var(--zen-media-stack-gap, 6px) + var(--zen-media-stack-peek, 8px));
 }
 
-/* Invisible hit target covering the gap between toolbar and popup */
+/*
+ * Gap-only hover bridge (fixed, out of document flow).
+ * Must NOT overlap mute/controls — only the space between toolbar and popup.
+ */
 #zen-media-volume-hover-bridge {
   position: fixed;
   display: none;
-  z-index: 9999;
+  z-index: 9998;
   pointer-events: auto;
+  /* no size/margin contribution */
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
-#zen-media-controls-toolbar[zen-volume-open] #zen-media-volume-hover-bridge {
+#zen-media-volume-hover-bridge[open] {
   display: block;
 }
 
-/* Popup sits to the right of the media toolbar (mounted inside it) */
+/* Popup sits to the right of the media toolbar */
 #zen-media-volume-slider-popup {
   position: fixed;
   left: 0;
@@ -113,14 +109,14 @@
   transform: translate(0, -50%);
 }
 
-/* Extra hover pad overlapping back into the toolbar */
+/* Tiny pad across the gap only — do not cover toolbar controls */
 #zen-media-volume-slider-popup[open]::before {
   content: "";
   position: absolute;
   right: 100%;
-  top: -24px;
-  bottom: -24px;
-  width: 48px;
+  top: -8px;
+  bottom: -8px;
+  width: 12px;
 }
 
 #zen-media-volume-slider {
