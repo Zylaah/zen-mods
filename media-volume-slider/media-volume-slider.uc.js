@@ -2,7 +2,7 @@
 // @name           Better Media Toolbar
 // @description    Volume slider on mute hover and media artwork background on toolbar hover
 // @author         Zylaah
-// @version        1.3.0
+// @version        1.3.1
 // @namespace      https://github.com/Zylaah/zen-mods
 // ==/UserScript==
 
@@ -18,13 +18,14 @@
   const LOG_PREFIX = "[BetterMediaToolbar]";
   const POPUP_ID = "zen-media-volume-slider-popup";
   const SLIDER_ID = "zen-media-volume-slider";
+  const BRIDGE_ID = "zen-media-volume-hover-bridge";
   const ARTWORK_VAR = "--zen-media-artwork-bg";
   const ARTWORK_CLASS = "has-artwork";
   const CARD_SELECTOR = ".zen-media-card";
   const MUTE_SELECTOR = ".zen-media-mute-button";
   const TOOLBAR_VOLUME_ATTR = "zen-volume-open";
-  const HIDE_DELAY_MS = 280;
-  const POPUP_GAP_PX = 8;
+  const HIDE_DELAY_MS = 320;
+  const POPUP_GAP_PX = 4;
   const INIT_RETRY_MS = 100;
   const INIT_RETRY_MAX = 80;
 
@@ -44,6 +45,7 @@
   let activeCardEl = null;
   let popupEl = null;
   let sliderEl = null;
+  let bridgeEl = null;
   let toolbarObserver = null;
   let cardsObserver = null;
   let layoutObserver = null;
@@ -427,9 +429,23 @@
     const anchorRect =
       muteRect && muteRect.width > 0 && muteRect.height > 0 ? muteRect : toolbarRect;
 
-    const s = popupEl.style;
-    s.left = `${toolbarRect.right + POPUP_GAP_PX}px`;
-    s.top = `${anchorRect.top + anchorRect.height / 2}px`;
+    const popupLeft = toolbarRect.right + POPUP_GAP_PX;
+    const popupTop = anchorRect.top + anchorRect.height / 2;
+
+    popupEl.style.left = `${popupLeft}px`;
+    popupEl.style.top = `${popupTop}px`;
+
+    // Bridge covers from inside the toolbar to the popup so :hover never drops.
+    if (bridgeEl) {
+      const bridgeLeft = Math.max(0, toolbarRect.right - 36);
+      const bridgeWidth = Math.max(popupLeft - bridgeLeft + 8, POPUP_GAP_PX + 44);
+      const bridgeTop = Math.min(toolbarRect.top, anchorRect.top) - 12;
+      const bridgeBottom = Math.max(toolbarRect.bottom, anchorRect.bottom) + 12;
+      bridgeEl.style.left = `${bridgeLeft}px`;
+      bridgeEl.style.top = `${bridgeTop}px`;
+      bridgeEl.style.width = `${bridgeWidth}px`;
+      bridgeEl.style.height = `${Math.max(bridgeBottom - bridgeTop, 48)}px`;
+    }
   }
 
   function closePopup() {
@@ -483,12 +499,47 @@
     }, HIDE_DELAY_MS);
   }
 
+  function keepVolumeUiOpen() {
+    clearHideTimer();
+    syncPopupPosition();
+    popupOpen = true;
+    popupEl?.setAttribute("open", "true");
+    setToolbarVolumeOpen(true);
+  }
+
+  /**
+   * Mount popup + bridge inside the toolbar so hovering them counts as
+   * toolbar :hover (keeps the native stack expanded).
+   */
+  function mountPopupIntoToolbar(toolbar) {
+    if (!toolbar || !popupEl) return;
+    if (popupEl.parentNode !== toolbar) {
+      toolbar.appendChild(popupEl);
+    }
+    if (bridgeEl && bridgeEl.parentNode !== toolbar) {
+      toolbar.appendChild(bridgeEl);
+    }
+  }
+
   function ensurePopup() {
-    if (document.getElementById(POPUP_ID)) {
-      popupEl = document.getElementById(POPUP_ID);
+    const toolbar = getToolbar();
+    const existing = document.getElementById(POPUP_ID);
+    if (existing) {
+      popupEl = existing;
       sliderEl = document.getElementById(SLIDER_ID);
+      bridgeEl = document.getElementById(BRIDGE_ID);
+      if (!bridgeEl && toolbar) {
+        bridgeEl = document.createElement("div");
+        bridgeEl.id = BRIDGE_ID;
+        bridgeEl.setAttribute("aria-hidden", "true");
+        bridgeEl.addEventListener("mouseenter", () => keepVolumeUiOpen());
+        bridgeEl.addEventListener("mouseleave", scheduleHide);
+      }
+      if (toolbar) mountPopupIntoToolbar(toolbar);
       return !!popupEl && !!sliderEl;
     }
+
+    if (!toolbar) return false;
 
     popupEl = document.createElement("div");
     popupEl.id = POPUP_ID;
@@ -504,17 +555,20 @@
     sliderEl.value = "100";
     sliderEl.setAttribute("aria-label", "Volume");
 
+    bridgeEl = document.createElement("div");
+    bridgeEl.id = BRIDGE_ID;
+    bridgeEl.setAttribute("aria-hidden", "true");
+
     popupEl.appendChild(sliderEl);
-    document.documentElement.appendChild(popupEl);
+    toolbar.appendChild(bridgeEl);
+    toolbar.appendChild(popupEl);
 
-    popupEl.addEventListener("mouseenter", () => {
-      clearHideTimer();
-      syncPopupPosition();
-      popupOpen = true;
-      popupEl.setAttribute("open", "true");
-      setToolbarVolumeOpen(true);
-    });
+    const onVolumeZoneEnter = () => keepVolumeUiOpen();
 
+    bridgeEl.addEventListener("mouseenter", onVolumeZoneEnter);
+    bridgeEl.addEventListener("mouseleave", scheduleHide);
+
+    popupEl.addEventListener("mouseenter", onVolumeZoneEnter);
     popupEl.addEventListener("mouseleave", scheduleHide);
 
     sliderEl.addEventListener("pointerdown", () => {

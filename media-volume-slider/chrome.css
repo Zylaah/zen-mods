@@ -37,24 +37,27 @@
   z-index: 1;
 }
 
-/* Keep the stacked toolbar expanded while the volume popup is open
-   (mouse leaves the toolbar to reach the slider on the right). */
+/*
+ * Keep the stack expanded while the volume popup is open.
+ * Popup is mounted inside the toolbar, but the mouse still crosses a gap
+ * where :hover briefly drops — these rules cover that.
+ */
 #zen-media-controls-toolbar[zen-volume-open] .show-on-hover {
-  max-height: 50px;
-  padding: 5px;
-  margin-bottom: 0;
-  opacity: 1;
+  max-height: 50px !important;
+  padding: 5px !important;
+  margin-bottom: 0 !important;
+  opacity: 1 !important;
   transform: translateY(0) !important;
-  pointer-events: auto;
+  pointer-events: auto !important;
 }
 
 #zen-media-controls-toolbar[zen-volume-open] .zen-media-card {
-  transform: none;
-  opacity: 1;
+  transform: none !important;
+  opacity: 1 !important;
 }
 
 #zen-media-controls-toolbar[zen-volume-open] .zen-media-focus-button::after {
-  display: none;
+  display: none !important;
 }
 
 #zen-media-controls-toolbar[zen-volume-open] .zen-media-card::after {
@@ -66,7 +69,19 @@
   height: calc(var(--zen-media-stack-gap, 6px) + var(--zen-media-stack-peek, 8px));
 }
 
-/* Popup sits to the right of the media toolbar */
+/* Invisible hit target covering the gap between toolbar and popup */
+#zen-media-volume-hover-bridge {
+  position: fixed;
+  display: none;
+  z-index: 9999;
+  pointer-events: auto;
+}
+
+#zen-media-controls-toolbar[zen-volume-open] #zen-media-volume-hover-bridge {
+  display: block;
+}
+
+/* Popup sits to the right of the media toolbar (mounted inside it) */
 #zen-media-volume-slider-popup {
   position: fixed;
   left: 0;
@@ -98,14 +113,14 @@
   transform: translate(0, -50%);
 }
 
-/* Hover bridge back toward the toolbar / mute button */
+/* Extra hover pad overlapping back into the toolbar */
 #zen-media-volume-slider-popup[open]::before {
   content: "";
   position: absolute;
   right: 100%;
-  top: -16px;
-  bottom: -16px;
-  width: 20px;
+  top: -24px;
+  bottom: -24px;
+  width: 48px;
 }
 
 #zen-media-volume-slider {
