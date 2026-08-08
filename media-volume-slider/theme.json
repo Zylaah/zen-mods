@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "id": "media-volume-slider",
   "name": "Better Media Toolbar",
   "description": "Volume slider on mute hover and media artwork background on toolbar hover",
@@ -16,6 +16,6 @@
   "author": "Zylaah",
   "tags": ["Zen Browser", "media", "volume", "sidebar", "artwork"],
   "createdAt": "2026-06-27",
-  "updatedAt": "2026-07-09",
+  "updatedAt": "2026-08-08",
   "fork": ["zen"]
 }

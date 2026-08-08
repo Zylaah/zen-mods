@@ -1,30 +1,28 @@
-@namespace xul url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
-
 [zen-volume-anchor] {
   display: inline-flex;
   align-items: center;
 }
 
-/* Artwork background on media toolbar hover */
-#zen-media-controls-toolbar > xul|toolbaritem {
-  position: relative;
-  clip-path: inset(0 round var(--border-radius-medium));
+/* Artwork background on media card hover */
+#zen-media-controls-toolbar .zen-media-card {
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
 }
 
-#zen-media-controls-toolbar:hover:not(:has([zen-volume-anchor]:hover)) > xul|toolbaritem.has-artwork {
+#zen-media-controls-toolbar:hover:not(:has([zen-volume-anchor]:hover))
+  .zen-media-card.has-artwork {
   background-image: var(--zen-media-artwork-bg) !important;
 }
 
-#zen-media-controls-toolbar:hover:not(:has([zen-volume-anchor]:hover)) > xul|toolbaritem.has-artwork::before {
+#zen-media-controls-toolbar:hover:not(:has([zen-volume-anchor]:hover))
+  .zen-media-card.has-artwork::before {
   background: light-dark(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.9));
   opacity: 1;
   pointer-events: none;
 }
 
-#zen-media-controls-toolbar > xul|toolbaritem::before {
+#zen-media-controls-toolbar .zen-media-card::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -34,7 +32,7 @@
   pointer-events: none;
 }
 
-#zen-media-controls-toolbar > xul|toolbaritem > * {
+#zen-media-controls-toolbar .zen-media-card > * {
   position: relative;
   z-index: 1;
 }

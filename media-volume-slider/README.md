@@ -1,15 +1,18 @@
 # Better Media Toolbar
 
-Enhances Zen’s sidebar media controls with a hover volume slider and an artwork background on the media toolbar.
+Enhances Zen’s sidebar media controls with a hover volume slider and an artwork background on media cards.
+
+Compatible with Zen’s stacked media-card toolbar (multiple sessions / peek stack).
 
 ## Features
 
-- **Volume slider** — hover the mute button to reveal a horizontal volume slider (0–100%)
-- **Artwork background** — hover the media toolbar to show the current track’s album art as a background
-- Artwork is hidden while hovering the mute button (so the volume slider stays readable)
-- At 0%, mutes the tab (same as the mute button)
-- Above 0%, unmutes if needed and sets media element volume in the playing tab
-- Hidden during WebRTC / screenshare mode (`[media-sharing]`)
+- **Volume slider** — hover a card’s mute button to reveal a horizontal volume slider (0–100%)
+- **Artwork background** — hover the media toolbar to show each card’s album art as a background
+- Artwork is hidden while hovering a mute button (so the volume slider stays readable)
+- At 0%, mutes the tab that owns that card
+- Above 0%, unmutes if needed and sets media element volume in that tab
+- Works with stacked cards; the slider targets the card you hover
+- Hidden during WebRTC / screenshare cards (`[media-sharing]`)
 - Styled to match Zen’s existing media progress bar
 
 ## Requirements
@@ -28,9 +31,9 @@ Enhances Zen’s sidebar media controls with a hover volume slider and an artwor
 
 ## Usage
 
-1. Play media in a tab so the sidebar media bar appears
-2. Hover the **media toolbar** to see album artwork in the background
-3. Hover the **speaker / mute** icon to use the volume slider (artwork hides automatically)
+1. Play media in a tab so a sidebar media card appears
+2. Hover the **media toolbar** to see album artwork on cards
+3. Hover a card’s **speaker / mute** icon to use the volume slider (artwork hides automatically)
 4. Move away to dismiss the popup
 
 The native mute button still works as a toggle; the slider stays in sync when muting via the button.
@@ -38,13 +41,15 @@ The native mute button still works as a toggle; the slider stays in sync when mu
 ## How it works
 
 - **UI** runs in browser chrome via `media-volume-slider.uc.js` on `browser.xhtml`
+- Hooks `gZenMediaController.activateMediaControls` / `activateMediaDeviceControls` to map each `.zen-media-card` to its browser/controller
+- Wires `.zen-media-mute-button` on every card (class-based; cards are created from `#zen-media-card-template`)
 - **Volume** is applied in the content process with a small frame script that adjusts the active `video` / `audio` element
-- **Artwork** reads metadata from `gZenMediaController` and applies it via a CSS custom property on toolbar hover
-- Tab mute state uses Zen’s existing `toggleMuteAudio()` so the toolbar `[muted]` attribute stays correct
+- **Artwork** reads metadata from the card’s media controller and applies it via a CSS custom property on toolbar hover
+- Tab mute state uses Zen’s existing `toggleMuteAudio()`; the card’s `[muted]` attribute is kept in sync
 
 ## Compatibility
 
-- Works alongside other sidebar media mods (e.g. Zenslop)
+- Targets Zen’s stacked media-card UI (not the older single-`toolbaritem` bar)
 - Volume control targets HTML media elements; sites with custom players may behave differently
 - Does not amplify above 100% (no Web Audio gain boost)
 
