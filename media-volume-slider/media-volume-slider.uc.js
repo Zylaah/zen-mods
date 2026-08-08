@@ -2,12 +2,12 @@
 // @name           Better Media Toolbar
 // @description    Volume slider on mute hover and media artwork background on toolbar hover
 // @author         Zylaah
-// @version        1.2.0
+// @version        1.3.0
 // @namespace      https://github.com/Zylaah/zen-mods
 // ==/UserScript==
 
 /* eslint-env es6, browser */
-/* global Services, gBrowser, Ci */
+/* global Services, gBrowser */
 
 (function () {
   "use strict";
@@ -22,11 +22,11 @@
   const ARTWORK_CLASS = "has-artwork";
   const CARD_SELECTOR = ".zen-media-card";
   const MUTE_SELECTOR = ".zen-media-mute-button";
+  const TOOLBAR_VOLUME_ATTR = "zen-volume-open";
   const HIDE_DELAY_MS = 280;
-  const POPUP_GAP_PX = 6;
+  const POPUP_GAP_PX = 8;
   const INIT_RETRY_MS = 100;
   const INIT_RETRY_MAX = 80;
-  const PREF_LAST_VOLUME = "mod.media-volume-slider.last-volume";
 
   let frameScriptUrl = null;
   let messageListenersReady = false;
@@ -48,11 +48,9 @@
   let cardsObserver = null;
   let layoutObserver = null;
 
-  /** @type {WeakSet<object>} */
-  const bootstrappedBrowsers = new WeakSet();
-
+  /** Per-browser last unmuted volume (never shared across cards/tabs). */
   /** @type {WeakMap<object, number>} */
-  const browserPreMuteVolume = new WeakMap();
+  const browserVolumes = new WeakMap();
 
   /** @type {WeakMap<Element, { browser: object, controller: object | null }>} */
   const cardBindings = new WeakMap();
@@ -210,49 +208,30 @@
     toolbar.dataset.artworkListenersAdded = "true";
   }
 
-  function ensureVolumePrefDefault() {
-    safe(() => {
-      if (Services.prefs.getPrefType(PREF_LAST_VOLUME) === Ci.nsIPrefBranch.PREF_INVALID) {
-        Services.prefs.getDefaultBranch("").setIntPref(PREF_LAST_VOLUME, 100);
-      }
-    });
-  }
-
-  function getStoredVolume() {
-    return (
-      safe(() => {
-        ensureVolumePrefDefault();
-        return Math.max(0, Math.min(100, Services.prefs.getIntPref(PREF_LAST_VOLUME, 100)));
-      }) ?? 100
-    );
-  }
-
-  function saveStoredVolume(volume) {
-    const value = Math.max(0, Math.min(100, Math.round(volume)));
-    if (value <= 0) return;
-    safe(() => {
-      ensureVolumePrefDefault();
-      Services.prefs.setIntPref(PREF_LAST_VOLUME, value);
-    });
-  }
-
-  function rememberPreMuteVolume(browser, volume) {
+  function rememberBrowserVolume(browser, volume) {
+    if (!browser) return;
     const value = Math.max(1, Math.min(100, Math.round(volume)));
-    browserPreMuteVolume.set(browser, value);
-    saveStoredVolume(value);
+    browserVolumes.set(browser, value);
   }
 
-  function getPreMuteVolume(browser) {
-    return browserPreMuteVolume.get(browser) ?? getStoredVolume();
+  function getBrowserVolume(browser) {
+    return browserVolumes.get(browser) ?? 100;
   }
 
   function capturePreMuteVolume(browser) {
     if (!browser || browser.audioMuted) return;
     const fromSlider = Number(sliderEl?.value);
-    rememberPreMuteVolume(
+    rememberBrowserVolume(
       browser,
-      fromSlider > 0 ? fromSlider : getStoredVolume()
+      fromSlider > 0 ? fromSlider : getBrowserVolume(browser)
     );
+  }
+
+  function setToolbarVolumeOpen(open) {
+    const toolbar = getToolbar();
+    if (!toolbar) return;
+    if (open) toolbar.setAttribute(TOOLBAR_VOLUME_ATTR, "true");
+    else toolbar.removeAttribute(TOOLBAR_VOLUME_ATTR);
   }
 
   const VOLUME_FRAME_SCRIPT = `
@@ -356,6 +335,7 @@
           "data:application/javascript;charset=utf-8," +
           encodeURIComponent(VOLUME_FRAME_SCRIPT);
       }
+      // Always (re)load for this browser; content script is version-gated.
       browser.messageManager.loadFrameScript(frameScriptUrl, true);
       return true;
     } catch (e) {
@@ -369,6 +349,7 @@
     Services.mm.addMessageListener("ZenMediaVolumeSlider:State", (message) => {
       const tab = getTabForMessageManager(message.target);
       const current = getActiveBrowser();
+      // Only update the slider from the browser that owns the active card.
       if (!tab || !current || tab.linkedBrowser !== current) return;
       if (!sliderEl) return;
       const volume = Math.max(0, Math.min(100, message.data?.volume ?? 0));
@@ -376,7 +357,7 @@
         restoreVolumeAfterUnmute();
         return;
       }
-      if (volume > 0) saveStoredVolume(volume);
+      if (volume > 0) rememberBrowserVolume(current, volume);
       sliderEl.value = String(volume);
     });
     messageListenersReady = true;
@@ -388,16 +369,6 @@
     browser.messageManager.sendAsyncMessage("ZenMediaVolumeSlider:Get", {});
   }
 
-  function bootstrapContentVolume(browser) {
-    if (!browser?.messageManager || browser.audioMuted) return;
-    if (bootstrappedBrowsers.has(browser)) return;
-    bootstrappedBrowsers.add(browser);
-    ensureFrameScript(browser);
-    browser.messageManager.sendAsyncMessage("ZenMediaVolumeSlider:Init", {
-      volume: getStoredVolume(),
-    });
-  }
-
   function applyVolume(percent) {
     const browser = getActiveBrowser();
     const tab = getActiveTab();
@@ -406,17 +377,18 @@
     const value = Math.max(0, Math.min(100, Math.round(percent)));
     ensureFrameScript(browser);
 
-    if (value > 0) saveStoredVolume(value);
+    if (value > 0) rememberBrowserVolume(browser, value);
 
     if (value === 0) {
       const current =
-        Number(sliderEl?.value) > 0 ? Number(sliderEl.value) : getPreMuteVolume(browser);
-      rememberPreMuteVolume(browser, current);
+        Number(sliderEl?.value) > 0 ? Number(sliderEl.value) : getBrowserVolume(browser);
+      rememberBrowserVolume(browser, current);
       if (!browser.audioMuted) tab.toggleMuteAudio();
     } else if (browser.audioMuted) {
       tab.toggleMuteAudio();
     }
 
+    // Set only goes to this card's browser message manager.
     browser.messageManager.sendAsyncMessage("ZenMediaVolumeSlider:Set", {
       volume: value,
     });
@@ -427,7 +399,7 @@
     const browser = getActiveBrowser();
     if (!browser || browser.audioMuted) return;
 
-    const volume = getPreMuteVolume(browser);
+    const volume = getBrowserVolume(browser);
     ensureFrameScript(browser);
     browser.messageManager.sendAsyncMessage("ZenMediaVolumeSlider:Unmute", {
       volume,
@@ -444,12 +416,20 @@
   }
 
   function syncPopupPosition() {
-    if (!popupEl || !muteButton) return;
-    const rect = muteButton.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return;
+    if (!popupEl) return;
+    const toolbar = getToolbar();
+    if (!toolbar) return;
+
+    const toolbarRect = toolbar.getBoundingClientRect();
+    if (toolbarRect.width === 0 || toolbarRect.height === 0) return;
+
+    const muteRect = muteButton?.getBoundingClientRect();
+    const anchorRect =
+      muteRect && muteRect.width > 0 && muteRect.height > 0 ? muteRect : toolbarRect;
+
     const s = popupEl.style;
-    s.left = `${rect.left + rect.width / 2}px`;
-    s.top = `${rect.top - POPUP_GAP_PX}px`;
+    s.left = `${toolbarRect.right + POPUP_GAP_PX}px`;
+    s.top = `${anchorRect.top + anchorRect.height / 2}px`;
   }
 
   function closePopup() {
@@ -457,6 +437,7 @@
     popupOpen = false;
     dragging = false;
     popupEl?.removeAttribute("open");
+    setToolbarVolumeOpen(false);
   }
 
   function setActiveMuteTarget(nextMuteButton, nextAnchor, nextCardEl) {
@@ -478,15 +459,18 @@
     syncPopupPosition();
     popupOpen = true;
     popupEl?.setAttribute("open", "true");
+    setToolbarVolumeOpen(true);
 
     const browser = getActiveBrowser();
     if (!browser) return;
 
+    // Show this browser's remembered volume immediately, then sync from content.
     if (browser.audioMuted) {
       sliderEl.value = "0";
       return;
     }
 
+    sliderEl.value = String(getBrowserVolume(browser));
     requestContentVolume(browser);
   }
 
@@ -506,8 +490,6 @@
       return !!popupEl && !!sliderEl;
     }
 
-    ensureVolumePrefDefault();
-
     popupEl = document.createElement("div");
     popupEl.id = POPUP_ID;
     popupEl.setAttribute("role", "group");
@@ -519,7 +501,7 @@
     sliderEl.min = "0";
     sliderEl.max = "100";
     sliderEl.step = "1";
-    sliderEl.value = String(getStoredVolume());
+    sliderEl.value = "100";
     sliderEl.setAttribute("aria-label", "Volume");
 
     popupEl.appendChild(sliderEl);
@@ -530,6 +512,7 @@
       syncPopupPosition();
       popupOpen = true;
       popupEl.setAttribute("open", "true");
+      setToolbarVolumeOpen(true);
     });
 
     popupEl.addEventListener("mouseleave", scheduleHide);
@@ -627,7 +610,7 @@
     });
 
     const binding = resolveCardBinding(cardEl);
-    if (binding?.browser) bootstrapContentVolume(binding.browser);
+    if (binding?.browser) ensureFrameScript(binding.browser);
 
     wiredCards.add(cardEl);
     return true;

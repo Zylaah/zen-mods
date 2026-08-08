@@ -3,19 +3,19 @@
   align-items: center;
 }
 
-/* Artwork background on media card hover */
+/* Artwork background on media card hover (hidden while volume UI is active) */
 #zen-media-controls-toolbar .zen-media-card {
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
 }
 
-#zen-media-controls-toolbar:hover:not(:has([zen-volume-anchor]:hover))
+#zen-media-controls-toolbar:hover:not(:has([zen-volume-anchor]:hover)):not([zen-volume-open])
   .zen-media-card.has-artwork {
   background-image: var(--zen-media-artwork-bg) !important;
 }
 
-#zen-media-controls-toolbar:hover:not(:has([zen-volume-anchor]:hover))
+#zen-media-controls-toolbar:hover:not(:has([zen-volume-anchor]:hover)):not([zen-volume-open])
   .zen-media-card.has-artwork::before {
   background: light-dark(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.9));
   opacity: 1;
@@ -37,14 +37,36 @@
   z-index: 1;
 }
 
-#zen-media-controls-toolbar:has([zen-volume-anchor]:hover) .show-on-hover {
-  max-height: 0 !important;
-  opacity: 0 !important;
-  transform: translateY(1rem) !important;
-  padding: 0 6px !important;
-  pointer-events: none !important;
+/* Keep the stacked toolbar expanded while the volume popup is open
+   (mouse leaves the toolbar to reach the slider on the right). */
+#zen-media-controls-toolbar[zen-volume-open] .show-on-hover {
+  max-height: 50px;
+  padding: 5px;
+  margin-bottom: 0;
+  opacity: 1;
+  transform: translateY(0) !important;
+  pointer-events: auto;
 }
 
+#zen-media-controls-toolbar[zen-volume-open] .zen-media-card {
+  transform: none;
+  opacity: 1;
+}
+
+#zen-media-controls-toolbar[zen-volume-open] .zen-media-focus-button::after {
+  display: none;
+}
+
+#zen-media-controls-toolbar[zen-volume-open] .zen-media-card::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: calc(var(--zen-media-stack-gap, 6px) + var(--zen-media-stack-peek, 8px));
+}
+
+/* Popup sits to the right of the media toolbar */
 #zen-media-volume-slider-popup {
   position: fixed;
   left: 0;
@@ -53,8 +75,8 @@
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  transform: translate(-50%, calc(-100% + 4px));
-  transform-origin: 50% 100%;
+  transform: translate(-4px, -50%);
+  transform-origin: 0 50%;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
@@ -73,16 +95,17 @@
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
-  transform: translate(-50%, -100%);
+  transform: translate(0, -50%);
 }
 
-#zen-media-volume-slider-popup[open]::after {
+/* Hover bridge back toward the toolbar / mute button */
+#zen-media-volume-slider-popup[open]::before {
   content: "";
   position: absolute;
-  left: -8px;
-  right: -8px;
-  top: 100%;
-  height: 12px;
+  right: 100%;
+  top: -16px;
+  bottom: -16px;
+  width: 20px;
 }
 
 #zen-media-volume-slider {
