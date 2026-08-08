@@ -7,7 +7,7 @@ Compatible with Zen’s stacked media-card toolbar (multiple sessions / peek sta
 ## Features
 
 - **Volume slider** — hover a card’s mute button to reveal a slider to the **right** of the media toolbar (0–100%)
-- **Per-card volume** — each media card/tab keeps its own volume; changing one never overwrites the others
+- **Per-site volume** — each origin keeps its own volume; changing one card never overwrites another, and levels persist across browser restarts
 - Toolbar stays expanded while the mute button or slider is hovered
 - **Artwork background** — hover the media toolbar to show each card’s album art as a background
 - Artwork is hidden while the volume UI is active

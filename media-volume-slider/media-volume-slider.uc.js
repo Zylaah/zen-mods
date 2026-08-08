@@ -2,7 +2,7 @@
 // @name           Better Media Toolbar
 // @description    Volume slider on mute hover and media artwork background on toolbar hover
 // @author         Zylaah
-// @version        1.3.3
+// @version        1.4.0
 // @namespace      https://github.com/Zylaah/zen-mods
 // ==/UserScript==
 
@@ -24,6 +24,8 @@
   const CARD_SELECTOR = ".zen-media-card";
   const MUTE_SELECTOR = ".zen-media-mute-button";
   const TOOLBAR_VOLUME_ATTR = "zen-volume-open";
+  const PREF_VOLUMES_BY_ORIGIN = "mod.media-volume-slider.volumes-by-origin";
+  const MAX_STORED_ORIGINS = 100;
   const HIDE_DELAY_MS = 320;
   const POPUP_GAP_PX = 4;
   const INIT_RETRY_MS = 100;
@@ -48,9 +50,13 @@
   let cardsObserver = null;
   let layoutObserver = null;
 
-  /** Per-browser last unmuted volume (never shared across cards/tabs). */
+  /** Per-browser last unmuted volume for this session. */
   /** @type {WeakMap<object, number>} */
   const browserVolumes = new WeakMap();
+
+  /** Browsers that already had persisted volume applied to content this session. */
+  /** @type {WeakSet<object>} */
+  const restoredBrowsers = new WeakSet();
 
   /** @type {WeakMap<Element, { browser: object, controller: object | null }>} */
   const cardBindings = new WeakMap();
@@ -212,14 +218,78 @@
     toolbar.dataset.artworkListenersAdded = "true";
   }
 
-  function rememberBrowserVolume(browser, volume) {
+  /**
+   * Stable key for persistence: site origin (e.g. https://www.youtube.com).
+   * Each origin keeps its own volume across sessions without sharing across cards.
+   */
+  function getVolumeKey(browser) {
+    return (
+      safe(() => {
+        const uri = browser?.currentURI;
+        if (!uri) return null;
+        if (uri.schemeIs("about") || uri.schemeIs("chrome") || uri.schemeIs("resource")) {
+          return null;
+        }
+        return uri.prePath || null;
+      }) ?? null
+    );
+  }
+
+  function readVolumeMap() {
+    const raw =
+      safe(() => Services.prefs.getStringPref(PREF_VOLUMES_BY_ORIGIN, "")) || "";
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function writeVolumeMap(map) {
+    const keys = Object.keys(map);
+    if (keys.length > MAX_STORED_ORIGINS) {
+      for (const key of keys.slice(0, keys.length - MAX_STORED_ORIGINS)) {
+        delete map[key];
+      }
+    }
+    safe(() => Services.prefs.setStringPref(PREF_VOLUMES_BY_ORIGIN, JSON.stringify(map)));
+  }
+
+  function getPersistedVolumeForBrowser(browser) {
+    const key = getVolumeKey(browser);
+    if (!key) return null;
+    const value = readVolumeMap()[key];
+    if (typeof value !== "number" || !Number.isFinite(value)) return null;
+    return Math.max(1, Math.min(100, Math.round(value)));
+  }
+
+  /**
+   * Remember volume for this browser; optionally persist by origin for next sessions.
+   */
+  function rememberBrowserVolume(browser, volume, { persist = true } = {}) {
     if (!browser) return;
     const value = Math.max(1, Math.min(100, Math.round(volume)));
     browserVolumes.set(browser, value);
+    if (!persist) return;
+
+    const key = getVolumeKey(browser);
+    if (!key) return;
+    const map = readVolumeMap();
+    map[key] = value;
+    writeVolumeMap(map);
   }
 
   function getBrowserVolume(browser) {
-    return browserVolumes.get(browser) ?? 100;
+    if (!browser) return 100;
+    if (browserVolumes.has(browser)) return browserVolumes.get(browser);
+    const persisted = getPersistedVolumeForBrowser(browser);
+    if (persisted != null) {
+      browserVolumes.set(browser, persisted);
+      return persisted;
+    }
+    return 100;
   }
 
   function capturePreMuteVolume(browser) {
@@ -229,6 +299,24 @@
       browser,
       fromSlider > 0 ? fromSlider : getBrowserVolume(browser)
     );
+  }
+
+  /**
+   * Apply this origin's saved volume to the tab's media once per browser/session.
+   */
+  function restorePersistedVolumeToContent(browser) {
+    if (!browser?.messageManager || browser.audioMuted) return;
+    if (restoredBrowsers.has(browser)) return;
+
+    const persisted = getPersistedVolumeForBrowser(browser);
+    if (persisted == null) return;
+
+    restoredBrowsers.add(browser);
+    browserVolumes.set(browser, persisted);
+    ensureFrameScript(browser);
+    browser.messageManager.sendAsyncMessage("ZenMediaVolumeSlider:Init", {
+      volume: persisted,
+    });
   }
 
   function setToolbarVolumeOpen(open) {
@@ -361,7 +449,9 @@
         restoreVolumeAfterUnmute();
         return;
       }
-      if (volume > 0) rememberBrowserVolume(current, volume);
+      // Session cache only — never persist Get responses (would clobber saved
+      // volumes with the site's default 100 before Init runs after restart).
+      if (volume > 0) rememberBrowserVolume(current, volume, { persist: false });
       sliderEl.value = String(volume);
     });
     messageListenersReady = true;
@@ -667,7 +757,12 @@
     });
 
     const binding = resolveCardBinding(cardEl);
-    if (binding?.browser) ensureFrameScript(binding.browser);
+    if (binding?.browser) {
+      ensureFrameScript(binding.browser);
+      // Warm volume from prefs and push into content so restart restores level.
+      getBrowserVolume(binding.browser);
+      restorePersistedVolumeToContent(binding.browser);
+    }
 
     wiredCards.add(cardEl);
     return true;
@@ -774,7 +869,14 @@
     }
 
     installControllerHooks();
+    setupMessageListeners();
+    // Prebuild popup + frame-script URL so the first mute hover isn't cold.
     ensurePopup();
+    if (!frameScriptUrl) {
+      frameScriptUrl =
+        "data:application/javascript;charset=utf-8," +
+        encodeURIComponent(VOLUME_FRAME_SCRIPT);
+    }
     addArtworkHoverListeners(toolbar);
     observeToolbar(toolbar);
     scanAndWireCards(toolbar);
