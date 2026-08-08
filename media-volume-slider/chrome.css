@@ -35,8 +35,6 @@
    padding-top: 0 and nudges pip/close/progress when the slider opens. */
 #zen-media-controls-toolbar[zen-volume-open] .show-on-hover {
   max-height: 50px !important;
-  padding-block: 5px !important;
-  padding-inline: 5px !important;
   margin-bottom: 0 !important;
   opacity: 1 !important;
   transform: translateY(0) !important;
