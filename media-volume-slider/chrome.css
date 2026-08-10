@@ -85,7 +85,7 @@
   z-index: 10000;
   padding: 10px 12px;
   border-radius: var(--border-radius-medium, 10px);
-  background-color: var(--zen-sidebar-notification-bg, light-dark(#fff, #1c1c1e));
+  background-color: var(--zen-sidebar-notification-bg);
   box-shadow: var(--zen-sidebar-notification-shadow, 0 2px 8px rgba(0, 0, 0, 0.25));
   transition:
     opacity 0.15s ease,
