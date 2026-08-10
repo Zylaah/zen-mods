@@ -2,7 +2,7 @@
 // @name           Better Media Toolbar
 // @description    Volume slider on mute hover and media artwork background on toolbar hover
 // @author         Zylaah
-// @version        1.4.0
+// @version        1.4.1
 // @namespace      https://github.com/Zylaah/zen-mods
 // ==/UserScript==
 
