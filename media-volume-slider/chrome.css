@@ -68,7 +68,17 @@
   display: block;
 }
 
-/* Popup sits to the right of the media toolbar */
+/* Popup sits to the right of the media toolbar.
+   Prefer card theme tokens; JS also copies computed card chrome on open. */
+#zen-media-controls-toolbar > #zen-media-volume-slider-popup,
+#zen-media-controls-toolbar > #zen-media-volume-hover-bridge {
+  /* Stay out of the card stack flex flow even when parented under the toolbar */
+  flex: 0 0 auto;
+  align-self: auto;
+  margin: 0;
+  order: 1000;
+}
+
 #zen-media-volume-slider-popup {
   position: fixed;
   left: 0;
@@ -84,9 +94,12 @@
   pointer-events: none;
   z-index: 10000;
   padding: 10px 12px;
-  border-radius: var(--border-radius-medium, 10px);
+  border-radius: var(--border-radius-medium);
   background-color: var(--zen-sidebar-notification-bg);
-  box-shadow: var(--zen-sidebar-notification-shadow, 0 2px 8px rgba(0, 0, 0, 0.25));
+  box-shadow: var(--zen-sidebar-notification-shadow);
+  outline: var(--zen-sidebar-notification-outline);
+  outline-offset: -1.5px;
+  color: inherit;
   transition:
     opacity 0.15s ease,
     transform 0.15s ease,

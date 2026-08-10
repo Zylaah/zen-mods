@@ -2,7 +2,7 @@
 // @name           Better Media Toolbar
 // @description    Volume slider on mute hover and media artwork background on toolbar hover
 // @author         Zylaah
-// @version        1.4.1
+// @version        1.4.2
 // @namespace      https://github.com/Zylaah/zen-mods
 // ==/UserScript==
 
@@ -538,6 +538,29 @@
       bridgeEl.style.width = `${bridgeWidth}px`;
       bridgeEl.style.height = `${bridgeHeight}px`;
     }
+
+    syncPopupChromeFromCard();
+  }
+
+  /**
+   * Match popup chrome to the active media card. Theme tokens on :root often
+   * disagree with the sidebar card (e.g. white card, dark popup).
+   */
+  function syncPopupChromeFromCard() {
+    if (!popupEl) return;
+    const card =
+      activeCardEl ||
+      getToolbar()?.querySelector(`${CARD_SELECTOR}:not([hidden])`) ||
+      null;
+    if (!card) return;
+
+    const cs = getComputedStyle(card);
+    popupEl.style.backgroundColor = cs.backgroundColor;
+    popupEl.style.boxShadow = cs.boxShadow;
+    popupEl.style.borderRadius = cs.borderRadius;
+    popupEl.style.outline = cs.outline;
+    popupEl.style.outlineOffset = cs.outlineOffset;
+    popupEl.style.color = cs.color;
   }
 
   function closePopup() {
@@ -607,14 +630,18 @@
     setToolbarVolumeOpen(true);
   }
 
-  /** Keep popup/bridge on documentElement so they never affect toolbar flex layout. */
+  /**
+   * Mount under the media toolbar so the popup inherits the same sidebar
+   * theme tokens as .zen-media-card (still position:fixed — no layout shift).
+   */
   function mountVolumeUi() {
-    const root = document.documentElement;
-    if (popupEl && popupEl.parentNode !== root) {
-      root.appendChild(popupEl);
+    const toolbar = getToolbar();
+    const parent = toolbar || document.documentElement;
+    if (popupEl && popupEl.parentNode !== parent) {
+      parent.appendChild(popupEl);
     }
-    if (bridgeEl && bridgeEl.parentNode !== root) {
-      root.appendChild(bridgeEl);
+    if (bridgeEl && bridgeEl.parentNode !== parent) {
+      parent.appendChild(bridgeEl);
     }
   }
 
@@ -654,8 +681,7 @@
     bridgeEl.setAttribute("aria-hidden", "true");
 
     popupEl.appendChild(sliderEl);
-    document.documentElement.appendChild(bridgeEl);
-    document.documentElement.appendChild(popupEl);
+    mountVolumeUi();
 
     const onVolumeZoneEnter = () => keepVolumeUiOpen();
 
