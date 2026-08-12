@@ -2,7 +2,7 @@
 // @name           Better Media Toolbar
 // @description    Volume slider on mute hover and media artwork background on toolbar hover
 // @author         Zylaah
-// @version        1.4.2
+// @version        1.4.3
 // @namespace      https://github.com/Zylaah/zen-mods
 // ==/UserScript==
 
@@ -83,7 +83,9 @@
 
   /**
    * Resolve browser/controller for a card element.
-   * Uses bindings from activate* hooks, frontCard, or metadata matching.
+   * Only uses bindings from activate* hooks or frontCard — never walks
+   * gBrowser tabs (touching linkedBrowser/browsingContext loads pinned
+   * and essentials tabs in Zen).
    */
   function resolveCardBinding(cardEl) {
     if (!cardEl) return null;
@@ -96,35 +98,6 @@
       const binding = { browser: front.browser, controller: front.controller ?? null };
       cardBindings.set(cardEl, binding);
       return binding;
-    }
-
-    const title = cardEl.querySelector(".zen-media-title")?.textContent ?? "";
-    const artist = cardEl.querySelector(".zen-media-artist")?.textContent ?? "";
-    const isSharing = cardEl.hasAttribute("media-sharing");
-
-    if (!window.gBrowser?.tabContainer?.allTabs) return null;
-
-    for (const tab of gBrowser.tabContainer.allTabs) {
-      const browser = tab.linkedBrowser;
-      if (!browser) continue;
-
-      if (isSharing) {
-        if (tab.label === title) {
-          const binding = { browser, controller: null };
-          cardBindings.set(cardEl, binding);
-          return binding;
-        }
-        continue;
-      }
-
-      const controller = browser.browsingContext?.mediaController;
-      if (!controller?.isActive) continue;
-      const metadata = safe(() => controller.getMetadata()) ?? {};
-      if ((metadata.title || "") === title && (metadata.artist || "") === artist) {
-        const binding = { browser, controller };
-        cardBindings.set(cardEl, binding);
-        return binding;
-      }
     }
 
     return null;
@@ -411,12 +384,21 @@
 })();
 `;
 
-  function getTabForMessageManager(mm) {
-    if (!window.gBrowser?.tabContainer?.allTabs) return null;
-    for (const tab of gBrowser.tabContainer.allTabs) {
-      if (tab.linkedBrowser?.messageManager === mm) return tab;
-    }
-    return null;
+  /**
+   * Browser that sent a frame-script message — no tab list walk.
+   */
+  function getBrowserFromFrameMessage(message) {
+    return (
+      safe(() => {
+        const target = message?.target;
+        if (!target) return null;
+        if (target.nodeName === "browser") return target;
+        const top = target.browsingContext?.top || target.browsingContext;
+        const embedder = top?.embedderElement;
+        if (embedder?.nodeName === "browser") return embedder;
+        return null;
+      }) ?? null
+    );
   }
 
   function ensureFrameScript(browser) {
@@ -427,7 +409,7 @@
           "data:application/javascript;charset=utf-8," +
           encodeURIComponent(VOLUME_FRAME_SCRIPT);
       }
-      // Always (re)load for this browser; content script is version-gated.
+      // Only the media card's own browser — never broadcast to other tabs.
       browser.messageManager.loadFrameScript(frameScriptUrl, true);
       return true;
     } catch (e) {
@@ -439,10 +421,10 @@
   function setupMessageListeners() {
     if (messageListenersReady || !Services.mm) return;
     Services.mm.addMessageListener("ZenMediaVolumeSlider:State", (message) => {
-      const tab = getTabForMessageManager(message.target);
+      const browser = getBrowserFromFrameMessage(message);
       const current = getActiveBrowser();
       // Only update the slider from the browser that owns the active card.
-      if (!tab || !current || tab.linkedBrowser !== current) return;
+      if (!browser || !current || browser !== current) return;
       if (!sliderEl) return;
       const volume = Math.max(0, Math.min(100, message.data?.volume ?? 0));
       if (volume === 0 && !current.audioMuted) {
@@ -796,7 +778,6 @@
 
   function scanAndWireCards(toolbar) {
     for (const cardEl of toolbar.querySelectorAll(CARD_SELECTOR)) {
-      // Prefer official frontCard binding when available.
       const front = window.gZenMediaController?.frontCard;
       if (front?.element === cardEl) {
         bindCard(cardEl, front.browser, front.controller ?? null);
