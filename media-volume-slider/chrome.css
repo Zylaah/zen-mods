@@ -4,6 +4,7 @@
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
+  filter: blur(8px) !important;
 }
 
 #zen-media-controls-toolbar:is(:hover, [zen-volume-open]) .zen-media-card.has-artwork {
@@ -13,7 +14,6 @@
       light-dark(rgba(255, 255, 255, 0.7), rgba(0, 0, 0, 0.9))
     ),
     var(--zen-media-artwork-bg) !important;
-	filter: blur(8px) !important;
 }
 
 /* Keep the stack expanded while the volume popup is open.
