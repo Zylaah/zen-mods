@@ -90,6 +90,9 @@
   margin: 0;
   border: 1px solid light-dark(rgba(0,0,0,0.1), rgba(255,255,255,0.1));
   border-radius: 50%;
+  /* Beat Zen's *:not(.no-squircles) superellipse so these stay true circles */
+  --zen-squircle-value: 1;
+  corner-shape: round !important;
   box-sizing: border-box;
   cursor: pointer;
   display: flex;
