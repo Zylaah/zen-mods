@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        3.4.1
+// @version        3.4.2
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -64,6 +64,7 @@
   let scanContextKey = null; // context key for an in-flight hover scan
   let panelContexts = new Map(); // contextKey -> { currentEmails, cachedEmails, clickedEmailIds }
   let diskCacheStore = {}; // persisted cache keyed by contextKey
+  let compactPinTarget = null; // non-tab node with [open] while the panel is shown
 
   /**
    * Panel cache key: one panel state per Firefox container.
@@ -1513,6 +1514,7 @@
     });
 
     panelElement.addEventListener('mouseleave', scheduleHide);
+    panelElement.addEventListener('popuphidden', unpinCompactChrome);
 
     updatePanelTheme();
     watchThemeChanges();
@@ -1798,6 +1800,41 @@
   }
 
   /**
+   * Compact mode ignores [open] on <tab>. Pin a descendant instead, the same
+   * way zen-folder-tabs-popup keeps the toolbox expanded.
+   */
+  function getCompactPinTarget(tab) {
+    if (tab) {
+      const inner = tab.querySelector('.tab-content, .tab-icon-stack');
+      if (inner) return inner;
+      const essentials = tab.closest('#zen-essentials, .zen-essentials-container');
+      if (essentials) return essentials;
+    }
+    return document.getElementById('zen-essentials')
+      || document.querySelector('.zen-essentials-container');
+  }
+
+  function pinCompactChrome(tab) {
+    const target = getCompactPinTarget(tab);
+    if (compactPinTarget && compactPinTarget !== target) {
+      unpinCompactChrome();
+    }
+    if (!target) return;
+    compactPinTarget = target;
+    target.setAttribute('open', 'true');
+    target.setAttribute('data-live-gmail-compact-pin', 'true');
+  }
+
+  function unpinCompactChrome() {
+    if (!compactPinTarget) return;
+    if (compactPinTarget.hasAttribute('data-live-gmail-compact-pin')) {
+      compactPinTarget.removeAttribute('open');
+      compactPinTarget.removeAttribute('data-live-gmail-compact-pin');
+    }
+    compactPinTarget = null;
+  }
+
+  /**
    * Show panel
    */
   function showPanel(tab) {
@@ -1829,6 +1866,7 @@
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
 
     const tabHeight = tab ? tab.getBoundingClientRect().height : 0;
+    pinCompactChrome(tab);
     panelElement.openPopup(tab || document.documentElement, 'end_before', 4, tabHeight);
     updateEmailDisplay();
   }
@@ -1857,6 +1895,7 @@
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
     cancelShowTimer();
     persistActiveContextToMemory(activePanelContextKey);
+    unpinCompactChrome();
     if (panelElement) panelElement.hidePopup();
     hoveredTab = null;
   }
@@ -2294,6 +2333,7 @@
   window.liveGmailDebug = {
     showPanel: () => {
       if (panelElement) {
+        pinCompactChrome(hoveredTab);
         panelElement.openPopup(document.documentElement, 'overlap', 100, 100);
       }
     },
