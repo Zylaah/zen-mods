@@ -2,7 +2,7 @@
 // @name           Better Media Toolbar
 // @description    Volume slider on mute hover and media artwork background on toolbar hover
 // @author         Zylaah
-// @version        1.4.3
+// @version        1.4.5
 // @namespace      https://github.com/Zylaah/zen-mods
 // ==/UserScript==
 
@@ -30,6 +30,9 @@
   const POPUP_GAP_PX = 4;
   const INIT_RETRY_MS = 100;
   const INIT_RETRY_MAX = 80;
+  /** Match ZenMediaController stack limits. */
+  const MAX_STACKED_CARDS = 3;
+  const MAX_PEEK_LEVELS = 2;
 
   let frameScriptUrl = null;
   let messageListenersReady = false;
@@ -67,6 +70,20 @@
   /** @type {WeakMap<Element, boolean>} */
   const cardWasMuted = new WeakMap();
 
+  /** Last time each card transitioned into playing. */
+  /** @type {WeakMap<Element, number>} */
+  const playStartedAt = new WeakMap();
+
+  /** Previous .playing class (not visibility) so tab-hide does not look like a new play. */
+  /** @type {WeakMap<Element, boolean>} */
+  const cardWasPlaying = new WeakMap();
+
+  /** @type {WeakSet<Element>} */
+  const playbackWired = new WeakSet();
+
+  let restackBusy = false;
+  let ignoreCardMutations = 0;
+
   const log = (...args) => console.log(LOG_PREFIX, ...args);
 
   function safe(fn) {
@@ -97,6 +114,7 @@
     if (front?.element === cardEl && front.browser) {
       const binding = { browser: front.browser, controller: front.controller ?? null };
       cardBindings.set(cardEl, binding);
+      wirePlayback(cardEl, binding.controller);
       return binding;
     }
 
@@ -106,6 +124,7 @@
   function bindCard(cardEl, browser, controller = null) {
     if (!cardEl || !browser) return;
     cardBindings.set(cardEl, { browser, controller });
+    wirePlayback(cardEl, controller);
   }
 
   function getActiveBrowser() {
@@ -166,23 +185,162 @@
     cardEl.classList.remove(ARTWORK_CLASS);
   }
 
-  function applyArtworkToVisibleCards(toolbar) {
-    for (const cardEl of toolbar.querySelectorAll(CARD_SELECTOR)) {
-      if (cardEl.hidden) continue;
-      applyArtworkToCard(cardEl);
+  function isMediaPlayingCard(cardEl) {
+    return (
+      !!cardEl &&
+      cardEl.classList.contains("playing") &&
+      !cardEl.hasAttribute("media-sharing")
+    );
+  }
+
+  function isVisiblePlayingCard(cardEl) {
+    return isMediaPlayingCard(cardEl) && !cardEl.hidden;
+  }
+
+  /**
+   * Record the instant a card starts playing. Visibility must not count —
+   * selecting the tab hides the card without pausing.
+   */
+  function syncPlayingTimestamp(cardEl) {
+    const playing = isMediaPlayingCard(cardEl);
+    const prev = cardWasPlaying.get(cardEl) === true;
+    if (playing && !prev) {
+      playStartedAt.set(cardEl, Date.now());
+    }
+    cardWasPlaying.set(cardEl, playing);
+  }
+
+  function getPlayRank(cardEl) {
+    return playStartedAt.get(cardEl) || 0;
+  }
+
+  function getVisibleCards(toolbar) {
+    return [...toolbar.querySelectorAll(CARD_SELECTOR)].filter((el) => !el.hidden);
+  }
+
+  /**
+   * Put the playing session at the front of Zen's stack. If several are
+   * playing, the most recently started one wins; paused cards keep native
+   * newest-first order behind them.
+   */
+  function restackPlayingToFront(toolbar = getToolbar()) {
+    if (!toolbar || restackBusy) return;
+    restackBusy = true;
+    try {
+      for (const cardEl of toolbar.querySelectorAll(CARD_SELECTOR)) {
+        syncPlayingTimestamp(cardEl);
+      }
+
+      const visible = getVisibleCards(toolbar);
+      if (!visible.length) return;
+
+      visible.sort((a, b) => {
+        const aPlaying = isVisiblePlayingCard(a);
+        const bPlaying = isVisiblePlayingCard(b);
+        if (aPlaying !== bPlaying) return aPlaying ? -1 : 1;
+        if (aPlaying && bPlaying) {
+          const rankDiff = getPlayRank(b) - getPlayRank(a);
+          if (rankDiff !== 0) return rankDiff;
+        }
+        // Native stack: later in DOM = newer = closer to front.
+        return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? 1 : -1;
+      });
+
+      let alreadyOrdered = true;
+      for (let index = 0; index < visible.length; index++) {
+        if (visible[index].style.getPropertyValue("--zen-media-card-index") !== String(index)) {
+          alreadyOrdered = false;
+          break;
+        }
+      }
+      if (alreadyOrdered) return;
+
+      visible.forEach((cardEl, index) => {
+        cardEl.toggleAttribute("stack-overflow", index >= MAX_STACKED_CARDS);
+        cardEl.toggleAttribute("stacked-behind", index > 0);
+        cardEl.style.setProperty("--zen-media-card-index", String(index));
+        cardEl.style.zIndex = String(100 - index);
+        cardEl.style.setProperty(
+          "--zen-media-card-peek-level",
+          String(Math.min(index, MAX_PEEK_LEVELS))
+        );
+      });
+
+      const stackedCount = Math.min(visible.length, MAX_STACKED_CARDS);
+      toolbar.style.setProperty(
+        "--zen-media-stack-behind",
+        String(Math.max(Math.min(stackedCount - 1, MAX_PEEK_LEVELS), 0))
+      );
+    } finally {
+      restackBusy = false;
     }
   }
 
-  function clearArtworkOnToolbar(toolbar) {
-    for (const cardEl of toolbar.querySelectorAll(CARD_SELECTOR)) {
-      removeArtworkFromCard(cardEl);
+  function withCardMutationsIgnored(fn) {
+    ignoreCardMutations++;
+    try {
+      fn();
+    } finally {
+      // Observer callbacks run after this stack; keep the guard until then.
+      queueMicrotask(() => {
+        ignoreCardMutations = Math.max(0, ignoreCardMutations - 1);
+      });
     }
+  }
+
+  function refreshArtworkIfToolbarActive(toolbar = getToolbar()) {
+    if (!toolbar) return;
+    if (toolbar.matches(":hover") || toolbar.hasAttribute(TOOLBAR_VOLUME_ATTR) || popupOpen) {
+      applyArtworkToVisibleCards(toolbar);
+    }
+  }
+
+  function applyArtworkToVisibleCards(toolbar) {
+    withCardMutationsIgnored(() => {
+      for (const cardEl of toolbar.querySelectorAll(CARD_SELECTOR)) {
+        if (isVisiblePlayingCard(cardEl)) applyArtworkToCard(cardEl);
+        else removeArtworkFromCard(cardEl);
+      }
+    });
+  }
+
+  function clearArtworkOnToolbar(toolbar) {
+    withCardMutationsIgnored(() => {
+      for (const cardEl of toolbar.querySelectorAll(CARD_SELECTOR)) {
+        removeArtworkFromCard(cardEl);
+      }
+    });
+  }
+
+  function onPlaybackChanged(cardEl, controller) {
+    if (controller?.isPlaying) {
+      playStartedAt.set(cardEl, Date.now());
+      cardWasPlaying.set(cardEl, true);
+    } else {
+      cardWasPlaying.set(cardEl, false);
+    }
+    restackPlayingToFront();
+    refreshArtworkIfToolbarActive();
+  }
+
+  function wirePlayback(cardEl, controller) {
+    if (!cardEl || !controller || playbackWired.has(cardEl)) return;
+    playbackWired.add(cardEl);
+    syncPlayingTimestamp(cardEl);
+    if (controller.isPlaying && !playStartedAt.has(cardEl)) {
+      playStartedAt.set(cardEl, Date.now());
+    }
+    controller.addEventListener("playbackstatechange", () => {
+      onPlaybackChanged(cardEl, controller);
+    });
   }
 
   function addArtworkHoverListeners(toolbar) {
     if (toolbar.dataset.artworkListenersAdded === "true") return;
 
-    toolbar.addEventListener("mouseenter", () => applyArtworkToVisibleCards(toolbar));
+    toolbar.addEventListener("mouseenter", () => {
+      applyArtworkToVisibleCards(toolbar);
+    });
     toolbar.addEventListener("mouseleave", () => {
       // Keep artwork while moving onto the volume slider / bridge.
       if (popupOpen || toolbar.hasAttribute(TOOLBAR_VOLUME_ATTR)) return;
@@ -829,6 +987,15 @@
       };
     }
 
+    if (typeof mc.onCardVisibilityChanged === "function") {
+      const originalVis = mc.onCardVisibilityChanged.bind(mc);
+      mc.onCardVisibilityChanged = () => {
+        originalVis();
+        restackPlayingToFront();
+        refreshArtworkIfToolbarActive();
+      };
+    }
+
     hooksInstalled = true;
     return true;
   }
@@ -848,16 +1015,38 @@
     });
 
     cardsObserver = new MutationObserver((mutations) => {
+      if (ignoreCardMutations || restackBusy) return;
+
       let shouldScan = false;
+      let shouldRestack = false;
       for (const mutation of mutations) {
         if (mutation.type === "childList") {
           shouldScan = true;
-          break;
+          continue;
+        }
+        if (mutation.attributeName === "hidden") {
+          shouldRestack = true;
+          continue;
+        }
+        if (mutation.attributeName === "class") {
+          const nowPlaying = mutation.target?.classList?.contains("playing");
+          const wasPlaying = mutation.oldValue?.split(/\s+/).includes("playing");
+          if (nowPlaying !== wasPlaying) shouldRestack = true;
         }
       }
       if (shouldScan) scanAndWireCards(toolbar);
+      if (shouldScan || shouldRestack) {
+        restackPlayingToFront(toolbar);
+        refreshArtworkIfToolbarActive(toolbar);
+      }
     });
-    cardsObserver.observe(toolbar, { childList: true });
+    cardsObserver.observe(toolbar, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeOldValue: true,
+      attributeFilter: ["class", "hidden"],
+    });
 
     const bumpLayout = () => {
       if (popupOpen) syncPopupPosition();
@@ -887,6 +1076,7 @@
     addArtworkHoverListeners(toolbar);
     observeToolbar(toolbar);
     scanAndWireCards(toolbar);
+    restackPlayingToFront(toolbar);
 
     // Ready once controller + toolbar exist; cards may appear later via observer.
     log("UI ready for stacked media cards");
