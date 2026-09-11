@@ -6,7 +6,9 @@
   background-repeat: no-repeat;
 }
 
-#zen-media-controls-toolbar:is(:hover, [zen-volume-open]) .zen-media-card.has-artwork.playing {
+:root:not([zen-library-open], [zen-library-open-compact])
+  #zen-media-controls-toolbar:is(:hover, [zen-volume-open])
+  .zen-media-card.has-artwork.playing {
   background-image:
     linear-gradient(
       light-dark(rgba(255, 255, 255, 0.7), rgba(0, 0, 0, 0.9)),
@@ -69,14 +71,12 @@
 }
 
 /* Popup sits to the right of the media toolbar.
-   Prefer card theme tokens; JS also copies computed card chrome on open. */
-#zen-media-controls-toolbar > #zen-media-volume-slider-popup,
-#zen-media-controls-toolbar > #zen-media-volume-hover-bridge {
-  /* Stay out of the card stack flex flow even when parented under the toolbar */
-  flex: 0 0 auto;
-  align-self: auto;
-  margin: 0;
-  order: 1000;
+   Prefer card theme tokens; JS also copies computed card chrome on open.
+   These nodes are document children — never toolbar flex items — so a
+   toolbox transform cannot capture their position:fixed containing block. */
+:root:is([zen-library-open], [zen-library-open-compact]) #zen-media-volume-slider-popup,
+:root:is([zen-library-open], [zen-library-open-compact]) #zen-media-volume-hover-bridge {
+  display: none !important;
 }
 
 #zen-media-volume-slider-popup {

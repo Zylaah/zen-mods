@@ -288,8 +288,13 @@
     }
   }
 
+  function isLibraryOpen() {
+    const root = document.documentElement;
+    return root.hasAttribute("zen-library-open") || root.hasAttribute("zen-library-open-compact");
+  }
+
   function refreshArtworkIfToolbarActive(toolbar = getToolbar()) {
-    if (!toolbar) return;
+    if (!toolbar || isLibraryOpen()) return;
     if (toolbar.matches(":hover") || toolbar.hasAttribute(TOOLBAR_VOLUME_ATTR) || popupOpen) {
       applyArtworkToVisibleCards(toolbar);
     }
@@ -339,6 +344,7 @@
     if (toolbar.dataset.artworkListenersAdded === "true") return;
 
     toolbar.addEventListener("mouseenter", () => {
+      if (isLibraryOpen()) return;
       applyArtworkToVisibleCards(toolbar);
     });
     toolbar.addEventListener("mouseleave", () => {
@@ -703,6 +709,19 @@
     popupEl.style.color = cs.color;
   }
 
+  function clearVolumeUiPosition() {
+    if (popupEl) {
+      popupEl.style.removeProperty("left");
+      popupEl.style.removeProperty("top");
+    }
+    if (bridgeEl) {
+      bridgeEl.style.removeProperty("left");
+      bridgeEl.style.removeProperty("top");
+      bridgeEl.style.removeProperty("width");
+      bridgeEl.style.removeProperty("height");
+    }
+  }
+
   function closePopup() {
     clearHideTimer();
     popupOpen = false;
@@ -710,6 +729,7 @@
     popupEl?.removeAttribute("open");
     bridgeEl?.removeAttribute("open");
     setToolbarVolumeOpen(false);
+    clearVolumeUiPosition();
 
     const toolbar = getToolbar();
     if (toolbar && !toolbar.matches(":hover")) {
@@ -724,7 +744,7 @@
 
   function openPopup() {
     const toolbar = getToolbar();
-    if (!toolbar || toolbar.hasAttribute("hidden") || !muteButton || !activeCardEl) {
+    if (isLibraryOpen() || !toolbar || toolbar.hasAttribute("hidden") || !muteButton || !activeCardEl) {
       return;
     }
     if (activeCardEl.hasAttribute("media-sharing") || activeCardEl.hidden) {
@@ -771,12 +791,14 @@
   }
 
   /**
-   * Mount under the media toolbar so the popup inherits the same sidebar
-   * theme tokens as .zen-media-card (still position:fixed — no layout shift).
+   * Mount on the document, never under #zen-media-controls-toolbar.
+   * That toolbar lives inside #navigator-toolbox; a transform there
+   * (Zen Library's open spring) captures position:fixed descendants
+   * and leftover viewport left/top become toolbox-local overflow that
+   * clips the sidebar. Card chrome is copied in syncPopupChromeFromCard.
    */
   function mountVolumeUi() {
-    const toolbar = getToolbar();
-    const parent = toolbar || document.documentElement;
+    const parent = document.documentElement;
     if (popupEl && popupEl.parentNode !== parent) {
       parent.appendChild(popupEl);
     }
@@ -1058,6 +1080,20 @@
     });
   }
 
+  function observeLibraryOpen() {
+    const root = document.documentElement;
+    const onLibraryAttr = () => {
+      if (!isLibraryOpen()) return;
+      closePopup();
+      clearArtworkOnToolbar(getToolbar());
+    };
+    onLibraryAttr();
+    new MutationObserver(onLibraryAttr).observe(root, {
+      attributes: true,
+      attributeFilter: ["zen-library-open", "zen-library-open-compact"],
+    });
+  }
+
   function buildUi() {
     const toolbar = getToolbar();
     if (!toolbar || typeof window.gZenMediaController === "undefined") {
@@ -1075,6 +1111,7 @@
     }
     addArtworkHoverListeners(toolbar);
     observeToolbar(toolbar);
+    observeLibraryOpen();
     scanAndWireCards(toolbar);
     restackPlayingToFront(toolbar);
 
