@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        3.4.2
+// @version        3.4.3
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -126,19 +126,38 @@
   }
 
   function getOrCreatePanelContext(key) {
-    if (!panelContexts.has(key)) {
-      const entry = Object.prototype.hasOwnProperty.call(diskCacheStore, key)
-        ? normalizeDiskCacheEntry(diskCacheStore[key])
+    const storeKey = String(key ?? 0);
+    if (!panelContexts.has(storeKey)) {
+      const entry = Object.prototype.hasOwnProperty.call(diskCacheStore, storeKey)
+        ? normalizeDiskCacheEntry(diskCacheStore[storeKey])
         : { emails: [], lastScanTs: 0 };
-      panelContexts.set(key, {
+      panelContexts.set(storeKey, {
         currentEmails: [],
         cachedEmails: entry.emails.slice(),
         clickedEmailIds: new Set(),
-        hasScanned: Object.prototype.hasOwnProperty.call(diskCacheStore, key),
+        hasScanned: Object.prototype.hasOwnProperty.call(diskCacheStore, storeKey),
         lastScanTs: entry.lastScanTs
       });
+    } else {
+      hydrateContextFromDisk(storeKey, panelContexts.get(storeKey));
     }
-    return panelContexts.get(key);
+    return panelContexts.get(storeKey);
+  }
+
+  /**
+   * Fill an already-created context from disk. Startup can create an empty
+   * context (workspace UI / first hover) before IOUtils.readUTF8 finishes.
+   */
+  function hydrateContextFromDisk(key, ctx) {
+    if (!ctx || !Object.prototype.hasOwnProperty.call(diskCacheStore, key)) return;
+    const entry = normalizeDiskCacheEntry(diskCacheStore[key]);
+    ctx.hasScanned = true;
+    if (!ctx.lastScanTs && entry.lastScanTs) {
+      ctx.lastScanTs = entry.lastScanTs;
+    }
+    if (ctx.cachedEmails.length === 0 && entry.emails.length > 0) {
+      ctx.cachedEmails = entry.emails.slice();
+    }
   }
 
   function persistActiveContextToMemory(key = activePanelContextKey) {
@@ -152,15 +171,16 @@
    * Switch the in-memory email state to a container context.
    */
   function activatePanelContext(key) {
-    if (!key) return;
+    if (key == null || key === '') return;
+    const storeKey = String(key);
 
-    if (key !== activePanelContextKey) {
+    if (storeKey !== activePanelContextKey) {
       persistActiveContextToMemory(activePanelContextKey);
-      activePanelContextKey = key;
-      debugLog('Panel context:', key);
+      activePanelContextKey = storeKey;
+      debugLog('Panel context:', storeKey);
     }
 
-    const ctx = getOrCreatePanelContext(key);
+    const ctx = getOrCreatePanelContext(storeKey);
     currentEmails = ctx.currentEmails;
     cachedEmails = ctx.cachedEmails;
     clickedEmailIds = ctx.clickedEmailIds;
@@ -750,14 +770,16 @@
           diskCacheStore = migrateDiskCacheStore(parsed);
         }
 
+        for (const storeKey of Object.keys(diskCacheStore)) {
+          getOrCreatePanelContext(storeKey);
+        }
+
         const activeKey = getPanelContextKey();
         activatePanelContext(activeKey);
 
         const count = getOrCreatePanelContext(activeKey).cachedEmails.length;
-        if (count > 0) {
-          debugLog('Restored', count, 'emails for context', activeKey);
-          updateEmailDisplay();
-        }
+        debugLog('Restored', count, 'emails for context', activeKey);
+        updateEmailDisplay();
       }).catch(() => {
         activatePanelContext(getPanelContextKey());
       });
