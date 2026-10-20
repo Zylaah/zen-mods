@@ -1,7 +1,7 @@
 /* Same Solar (480 Design) glyph as before, loaded like native permission
-   icons so context-fill follows .permission-popup-permission-icon’s CSS fill. */
+   icons so context-fill follows .permission-popup-permission-icon's CSS fill. */
 .permission-popup-permission-item-auto-pip {
-  list-style-image: url("icon.svg") !important;
+  list-style-image: url("chrome://sine/content/auto-pip-setting/icon.svg") !important;
 }
 
 .permission-popup-permission-item-auto-pip > .permission-popup-permission-icon {
