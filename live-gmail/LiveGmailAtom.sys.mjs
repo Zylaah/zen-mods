@@ -524,10 +524,12 @@ export class LiveGmailAtom {
         err.signin = true;
         throw err;
       }
+      const feedDocument = /<feed[\s>]/.test(text || '');
       const head = (text || '').slice(0, 2000);
       if (
-        /accounts\.google\.com|ServiceLogin/i.test(finalUrl || '') ||
-        /accounts\.google\.com|ServiceLogin/i.test(head)
+        !feedDocument &&
+        (/accounts\.google\.com|ServiceLogin/i.test(finalUrl || '') ||
+          /accounts\.google\.com|ServiceLogin/i.test(head))
       ) {
         const err = new Error('Sign-in required');
         err.signin = true;
