@@ -1,4 +1,4 @@
-const { debugLog, getTabUserContextId } = ChromeUtils.importESModule(
+const { CONFIG, debugLog, getTabUserContextId } = ChromeUtils.importESModule(
   'chrome://sine/content/live-gmail/LiveGmailUtil.sys.mjs' + new URL(import.meta.url).search
 );
 const { LiveGmailCache } = ChromeUtils.importESModule(
@@ -84,9 +84,23 @@ export class LiveGmail {
     }
     debugLog('Initialized successfully');
     this.oauth.startPoll();
+    this.sourceObserver = {
+      observe: () => {
+        if (this.oauth.usesOAuth() && this.oauth.isConnected()) this.oauth.startPoll();
+        else this.oauth.stopPoll();
+        this.panel.updateDisplay();
+        const tab = this.tabs.findAnchor();
+        if (tab) this.atom.requestScan(tab, { force: true });
+      }
+    };
+    Services.prefs.addObserver(CONFIG.SOURCE_PREF, this.sourceObserver);
   }
 
   destroy() {
+    if (this.sourceObserver) {
+      try { Services.prefs.removeObserver(CONFIG.SOURCE_PREF, this.sourceObserver); } catch (e) {}
+      this.sourceObserver = null;
+    }
     this.oauth.stopPoll();
     this.panel.hide();
     if (this.panelElement?.remove) {

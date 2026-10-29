@@ -11,6 +11,7 @@ export const CONFIG = {
   ATOM_MAX_BYTES: 500000,
   OAUTH_CLIENT_ID_PREF: 'live-gmail.oauth.client-id',
   OAUTH_CLIENT_SECRET_PREF: 'live-gmail.oauth.client-secret',
+  SOURCE_PREF: 'live-gmail.source',
   OAUTH_POLL_MS: 60000,
   OAUTH_FILE: 'live-gmail-oauth.json'
 };

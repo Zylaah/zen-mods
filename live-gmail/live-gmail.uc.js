@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential or pinned tabs
 // @author         Bxth
-// @version        4.1.4
+// @version        4.1.6
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 

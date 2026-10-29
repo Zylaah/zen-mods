@@ -138,6 +138,14 @@ export class LiveGmailOAuth {
     return !!this.tokens?.refreshToken;
   }
 
+  usesOAuth() {
+    try {
+      return Services.prefs.getStringPref(CONFIG.SOURCE_PREF, 'atom') === 'oauth';
+    } catch (e) {
+      return false;
+    }
+  }
+
   status() {
     return {
       connected: this.isConnected(),
@@ -148,7 +156,7 @@ export class LiveGmailOAuth {
 
   startPoll() {
     this.stopPoll();
-    if (!this.isConnected()) return;
+    if (!this.usesOAuth() || !this.isConnected()) return;
     const win = this.app.window;
     this.pollTimer = win.setInterval(() => {
       const tab = this.app.tabs.findAnchor();

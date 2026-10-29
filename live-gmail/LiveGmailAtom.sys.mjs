@@ -128,7 +128,10 @@ export class LiveGmailAtom {
 
   async requestScan(tab, options = {}) {
     if (!tab) return;
-    if (this.app.oauth?.isConnected()) return this.#requestOAuthScan(tab, options);
+    if (this.app.oauth?.usesOAuth()) {
+      if (!this.app.oauth.isConnected()) return;
+      return this.#requestOAuthScan(tab, options);
+    }
     return this.#requestAtomScan(tab, options);
   }
 
