@@ -9,29 +9,32 @@ const STYLE_ID = 'live-gmail-account-style';
 
 const ACCOUNT_STYLE = `
 #${MODAL_ID} {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
   box-sizing: border-box;
-  padding: 16px;
-  background: rgba(0, 0, 0, 0.45);
+  width: 100% !important;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0 !important;
+  color: inherit;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 #${MODAL_ID}[hidden] {
-  display: none;
+  display: none !important;
 }
 #${MODAL_ID} .live-gmail-account-card {
-  width: 320px;
-  max-width: 100%;
   box-sizing: border-box;
-  padding: 16px;
-  border-radius: 12px;
-  border: 1px solid light-dark(rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.14));
-  background: light-dark(#fff, #1c1c1f);
-  color: light-dark(#0c0c0d, #f9f9fa);
-  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  max-height: calc(96vh - 110px);
+  overflow: auto;
+  padding: 2px 0 0;
+}
+.sineItemPreferenceDialogContent:has(#${MODAL_ID}:not([hidden])) {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
 }
 #${MODAL_ID} h2 {
   margin: 0 0 6px;
@@ -50,7 +53,10 @@ const ACCOUNT_STYLE = `
 }
 #${MODAL_ID} input {
   box-sizing: border-box;
+  display: block;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   padding: 7px 8px;
   border-radius: 8px;
   border: 1px solid light-dark(rgba(0, 0, 0, 0.16), rgba(255, 255, 255, 0.16));
@@ -65,6 +71,7 @@ const ACCOUNT_STYLE = `
 #${MODAL_ID} .live-gmail-account-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
 }
@@ -113,10 +120,38 @@ function showAccountButton(button) {
 }
 
 function ensureAccountStyle(doc) {
-  if (doc.getElementById(STYLE_ID)) return;
-  const style = htmlElement(doc, 'style', { id: STYLE_ID });
+  let style = doc.getElementById(STYLE_ID);
+  if (!style) {
+    style = htmlElement(doc, 'style', { id: STYLE_ID });
+    (doc.head || doc.documentElement).appendChild(style);
+  }
   style.textContent = ACCOUNT_STYLE;
-  (doc.head || doc.documentElement).appendChild(style);
+}
+
+function preferenceContent(doc) {
+  return doc.querySelector('.sineItem[mod-id="live-gmail"] .sineItemPreferenceDialogContent');
+}
+
+function hidePreferenceRows(modal) {
+  for (const child of modal.parentElement.children) {
+    if (child === modal) continue;
+    if (child.dataset.liveGmailDisplay == null) {
+      child.dataset.liveGmailDisplay = child.style.display;
+    }
+    child.style.display = 'none';
+  }
+}
+
+function showPreferenceRows(modal) {
+  const parent = modal.parentElement;
+  if (!parent) return;
+  for (const child of parent.children) {
+    if (child === modal || child.dataset.liveGmailDisplay == null) continue;
+    child.style.display = child.dataset.liveGmailDisplay;
+    delete child.dataset.liveGmailDisplay;
+  }
+  const button = parent.querySelector('#' + BUTTON_ID);
+  if (button) showAccountButton(button);
 }
 
 function gmailFrom(contentWindow, chromeWindow) {
@@ -153,13 +188,19 @@ function ensureAccountButton(win) {
 
 function accountModal(doc) {
   let modal = doc.getElementById(MODAL_ID);
+  if (modal && modal.dataset.layout !== 'in-flow') {
+    showPreferenceRows(modal);
+    modal.remove();
+    modal = null;
+  }
   if (modal) return modal;
 
   ensureAccountStyle(doc);
-  const dialog = doc.querySelector('.sineItem[mod-id="live-gmail"] dialog.sineItemPreferenceDialog');
-  if (!dialog) return null;
+  const content = preferenceContent(doc);
+  if (!content) return null;
 
   modal = htmlElement(doc, 'div', { id: MODAL_ID, hidden: '' });
+  modal.dataset.layout = 'in-flow';
   const card = htmlElement(doc, 'div', { class: 'live-gmail-account-card' });
   const title = htmlElement(doc, 'h2');
   title.textContent = 'Connect Gmail';
@@ -197,15 +238,13 @@ function accountModal(doc) {
   actions.append(disconnect, spacer, cancel, connect);
   card.append(title, help, idLabel, clientId, secretLabel, clientSecret, status, actions);
   modal.appendChild(card);
-  dialog.appendChild(modal);
+  content.appendChild(modal);
 
   const close = () => {
     modal.hidden = true;
+    showPreferenceRows(modal);
   };
 
-  modal.addEventListener('click', (event) => {
-    if (event.target === modal) close();
-  });
   cancel.addEventListener('click', close);
   doc.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || modal.hidden) return;
@@ -278,6 +317,7 @@ function openAccountModal(contentWindow, chromeWindow) {
     : '';
   connect.disabled = false;
   disconnect.disabled = !account?.connected;
+  hidePreferenceRows(modal);
   modal.hidden = false;
   clientId.focus();
 }
