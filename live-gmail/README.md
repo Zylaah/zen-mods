@@ -30,7 +30,7 @@ A Zen Browser mod for Sine that shows your unread Gmail in a quick hover panel o
 
 ## Preferences
 
-The settings button on the Live Gmail mod opens a settings page. **Unread source** chooses how the panel loads mail.
+The settings button on the Live Gmail mod opens a settings panel. **Unread source** chooses how the panel loads mail.
 
 | Source | Behavior |
 | ------ | -------- |

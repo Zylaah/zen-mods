@@ -390,4 +390,224 @@
   background: rgba(0, 0, 0, 0.05);
 }
 
+/* Settings panel, opened from the mod's cog. Same idea as Zia's settings card:
+   a dimmed window and a card on top, not a separate page. */
+#live-gmail-settings {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.62);
+  color: light-dark(#15141a, #fbfbfe);
+  color-scheme: light dark;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  opacity: 0;
+  transition: opacity 0.22s ease;
+
+  &::backdrop {
+    background: transparent;
+  }
+
+  &[shown] {
+    opacity: 1;
+  }
+
+  &[closing] {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  & * {
+    box-sizing: border-box;
+  }
+
+  & [hidden] {
+    display: none !important;
+  }
+
+  & :is(button, input, select) {
+    font: inherit;
+    color: inherit;
+  }
+}
+
+#live-gmail-settings .lg-set-scrim {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+#live-gmail-settings .lg-set-card {
+  width: min(420px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.12));
+  background: light-dark(#fff, #2b2a33);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+#live-gmail-settings:not([shown]) .lg-set-card {
+  translate: 0 10px;
+  scale: 0.98;
+}
+
+#live-gmail-settings .lg-set-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 12px 14px 18px;
+  border-bottom: 1px solid light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.1));
+}
+
+#live-gmail-settings .lg-set-title {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+#live-gmail-settings .lg-set-close {
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+#live-gmail-settings .lg-set-close:hover {
+  background: light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.08));
+}
+
+#live-gmail-settings .lg-set-body {
+  overflow: auto;
+  padding: 8px 10px 16px;
+}
+
+#live-gmail-settings .lg-set-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 8px;
+}
+
+#live-gmail-settings .lg-set-text {
+  flex: 1;
+  min-width: 0;
+}
+
+#live-gmail-settings .lg-set-label {
+  font-weight: 600;
+}
+
+#live-gmail-settings .lg-set-desc,
+#live-gmail-settings .lg-set-hint,
+#live-gmail-settings .lg-set-status,
+#live-gmail-settings .lg-set-kicker {
+  color: light-dark(#5b5b66, #cfcfd8);
+  font-size: 12px;
+}
+
+#live-gmail-settings .lg-set-select,
+#live-gmail-settings .lg-set-field {
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: light-dark(rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.16)) !important;
+  box-shadow: none !important;
+  color: inherit !important;
+}
+
+#live-gmail-settings .lg-set-select {
+  flex: none;
+  max-width: 42%;
+  padding: 6px 8px !important;
+}
+
+#live-gmail-settings .lg-set-account {
+  margin: 4px 8px 0;
+  padding-top: 12px;
+  border-top: 1px solid light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.1));
+}
+
+#live-gmail-settings .lg-set-kicker {
+  margin: 0 0 4px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+#live-gmail-settings .lg-set-email {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+#live-gmail-settings .lg-set-form {
+  display: flex;
+  flex-direction: column;
+}
+
+#live-gmail-settings .lg-set-hint {
+  margin: 0 0 8px;
+}
+
+#live-gmail-settings .lg-set-form label {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#live-gmail-settings .lg-set-field {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px !important;
+}
+
+#live-gmail-settings .lg-set-status {
+  min-height: 1.2em;
+  margin: 8px 0 0;
+}
+
+#live-gmail-settings .lg-set-connect,
+#live-gmail-settings .lg-set-disconnect {
+  appearance: none;
+  width: fit-content;
+  margin-top: 12px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#live-gmail-settings .lg-set-connect {
+  border: 0;
+  background: light-dark(#0060df, #0a84ff);
+  color: #fff;
+}
+
+#live-gmail-settings .lg-set-disconnect {
+  border: 1px solid light-dark(rgba(215, 0, 34, 0.35), rgba(255, 106, 117, 0.45));
+  background: transparent;
+  color: light-dark(#d70022, #ff6a75);
+}
+
+#live-gmail-settings button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 
