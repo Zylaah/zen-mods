@@ -126,7 +126,63 @@ export class LiveGmailAtom {
 
   onFeedDocument() {}
 
-  async requestScan(tab, { force = false } = {}) {
+  async requestScan(tab, options = {}) {
+    if (!tab) return;
+    if (this.app.oauth?.isConnected()) return this.#requestOAuthScan(tab, options);
+    return this.#requestAtomScan(tab, options);
+  }
+
+  async #requestOAuthScan(tab, { force = false } = {}) {
+    const app = this.app;
+    const contextKey = app.getPanelContextKey(tab);
+    const feedUrl = 'oauth';
+    const cached = app.atomMemCache[contextKey];
+    if (!force && cached && cached.feedUrl === feedUrl && Date.now() - cached.ts < CONFIG.ATOM_CACHE_MS) {
+      if (
+        app.activePanelContextKey !== contextKey ||
+        (app.currentEmails.length === 0 && app.cachedEmails.length === 0)
+      ) {
+        this.applyEmails(cached.emails, contextKey);
+      }
+      return;
+    }
+
+    if (app.atomInFlight.has(contextKey)) return;
+    app.atomInFlight.add(contextKey);
+    app.scanContextKey = contextKey;
+    app.loadScansInFlight.add(contextKey);
+    if (app.panel.shouldShowLoadProgress(contextKey)) {
+      app.scanInProgress = true;
+      app.panel.updateDisplay();
+    }
+
+    try {
+      debugLog('Unread via OAuth');
+      const emails = await app.oauth.fetchUnread();
+      app.atomMemCache[contextKey] = { ts: Date.now(), feedUrl, emails };
+      debugLog('OAuth scan', emails.length, 'unread, context=', contextKey);
+      this.applyEmails(emails, contextKey);
+    } catch (e) {
+      debugLog('OAuth fetch failed', e && e.message ? e.message : e);
+      app.scanInProgress = false;
+      app.loadScansInFlight.delete(contextKey);
+      if (app.scanContextKey === contextKey) app.scanContextKey = null;
+      if (
+        e?.reauth &&
+        app.activePanelContextKey === contextKey &&
+        app.currentEmails.length === 0 &&
+        app.cachedEmails.length === 0
+      ) {
+        app.panel.showError('Gmail connection expired');
+      }
+      app.panel.updateDisplay();
+    } finally {
+      app.atomInFlight.delete(contextKey);
+      app.tabs.finishLoadScan(tab);
+    }
+  }
+
+  async #requestAtomScan(tab, { force = false } = {}) {
     if (!tab) return;
     const app = this.app;
     const contextKey = app.getPanelContextKey(tab);

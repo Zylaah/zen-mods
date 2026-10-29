@@ -8,7 +8,10 @@ export const CONFIG = {
   HOVER_DELAY_MS: 200,
   ATOM_CACHE_MS: 60000,
   ATOM_TIMEOUT_MS: 8000,
-  ATOM_MAX_BYTES: 500000
+  ATOM_MAX_BYTES: 500000,
+  OAUTH_CLIENT_ID_PREF: 'live-gmail.oauth.client-id',
+  OAUTH_POLL_MS: 60000,
+  OAUTH_FILE: 'live-gmail-oauth.json'
 };
 
 export const XUL_NS = 'http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul';

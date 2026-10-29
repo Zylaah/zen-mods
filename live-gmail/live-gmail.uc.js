@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential or pinned tabs
 // @author         Bxth
-// @version        4.0.9
+// @version        4.1.0
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -64,6 +64,12 @@
         const tab = app.tabs.findAnchor();
         if (tab) app.atom.requestScan(tab, { force: true });
       },
+      authorize: (clientId) => app.oauth.authorize(clientId).catch((error) => {
+        console.error('[Live Gmail] OAuth', error && error.message ? error.message : error);
+        throw error;
+      }),
+      disconnect: () => app.oauth.disconnect(),
+      oauth: () => app.oauth.status(),
       rescan: () => app.tabs.scanLoadedAnchors(),
       emails: () => app.currentEmails,
       context: () => app.activePanelContextKey,

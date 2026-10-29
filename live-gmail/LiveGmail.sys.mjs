@@ -13,6 +13,9 @@ const { LiveGmailPanel } = ChromeUtils.importESModule(
 const { LiveGmailTabs } = ChromeUtils.importESModule(
   'chrome://sine/content/live-gmail/LiveGmailTabs.sys.mjs' + new URL(import.meta.url).search
 );
+const { LiveGmailOAuth } = ChromeUtils.importESModule(
+  'chrome://sine/content/live-gmail/LiveGmailOAuth.sys.mjs' + new URL(import.meta.url).search
+);
 
 export class LiveGmail {
   constructor(window) {
@@ -42,6 +45,7 @@ export class LiveGmail {
     this.atom = new LiveGmailAtom(this);
     this.panel = new LiveGmailPanel(this);
     this.tabs = new LiveGmailTabs(this);
+    this.oauth = new LiveGmailOAuth(this);
   }
 
   getPanelContextKey(tab = this.hoveredTab) {
@@ -68,6 +72,7 @@ export class LiveGmail {
 
   init() {
     debugLog('Initializing Live Gmail...');
+    this.oauth.load();
     this.cache.load();
     this.tabs.cleanupScannerTabs();
     this.panel.create();
@@ -78,9 +83,11 @@ export class LiveGmail {
       if (tab) this.atom.requestScan(tab, { force: false });
     }
     debugLog('Initialized successfully');
+    this.oauth.startPoll();
   }
 
   destroy() {
+    this.oauth.stopPoll();
     this.panel.hide();
     if (this.panelElement?.remove) {
       try {
