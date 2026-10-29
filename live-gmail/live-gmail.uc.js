@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential or pinned tabs
 // @author         Bxth
-// @version        4.1.6
+// @version        4.1.7
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -77,11 +77,62 @@
       reInit: () => app.init()
     };
 
+    const settingsUrl = `${MOD_ROOT}/settings.html`;
+    const hookedWindows = new Set();
+
+    function openSettings() {
+      const existing = gBrowser.tabs.find(
+        (tab) => tab.linkedBrowser?.currentURI?.spec?.split('#')[0] === settingsUrl
+      );
+      gBrowser.selectedTab = existing ?? gBrowser.addTrustedTab(settingsUrl);
+    }
+
+    function onSineClick(event) {
+      const button = event.target.closest?.('.sineItemConfigureButton');
+      if (button?.closest('.sineItem')?.getAttribute('mod-id') !== 'live-gmail') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      openSettings();
+    }
+
+    function hookModCard(browser) {
+      let win;
+      try {
+        win = browser.contentWindow;
+      } catch (e) {
+        return;
+      }
+      if (!win || hookedWindows.has(win) || !/^about:(preferences|settings)/.test(String(win.location?.href))) {
+        return;
+      }
+      hookedWindows.add(win);
+      win.addEventListener('click', onSineClick, true);
+      win.addEventListener('unload', () => hookedWindows.delete(win), { once: true });
+    }
+
+    const progressListener = {
+      onLocationChange(browser, webProgress) {
+        if (webProgress?.isTopLevel) hookModCard(browser);
+      },
+      onStateChange(browser, webProgress, _request, flags) {
+        if (webProgress?.isTopLevel && flags & Ci.nsIWebProgressListener.STATE_STOP) {
+          hookModCard(browser);
+        }
+      }
+    };
+    gBrowser.addTabsProgressListener(progressListener);
+    gBrowser.browsers.forEach(hookModCard);
+
     if (typeof window.addUnloadListener === 'function') {
       window.addUnloadListener(() => {
         try {
           app.destroy();
         } catch (e) {}
+        gBrowser.removeTabsProgressListener(progressListener);
+        for (const win of hookedWindows) {
+          win.removeEventListener('click', onSineClick, true);
+        }
+        hookedWindows.clear();
         if (window.liveGmail === app) window.liveGmail = null;
       });
     }

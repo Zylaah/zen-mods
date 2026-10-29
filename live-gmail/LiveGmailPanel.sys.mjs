@@ -112,18 +112,6 @@ export class LiveGmailPanel {
     title.appendChild(document.createTextNode('Unread'));
     header.appendChild(title);
 
-    const connectOpen = document.createElement('button');
-    connectOpen.type = 'button';
-    connectOpen.className = 'live-gmail-connect-open';
-    connectOpen.hidden = true;
-    connectOpen.textContent = 'Connect';
-    connectOpen.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      this.openConnect();
-    });
-    header.appendChild(connectOpen);
-
     const content = document.createElement('div');
     content.className = 'live-gmail-content';
 
@@ -172,7 +160,6 @@ export class LiveGmailPanel {
     panel.addEventListener('popuphidden', () => this.unpinCompactChrome());
 
     app.panelElement = panel;
-    this.createConnectDialog();
     this.updateTheme();
     this.watchThemeChanges();
   }
@@ -373,103 +360,6 @@ export class LiveGmailPanel {
     this.app.hoveredTab = null;
   }
 
-  createConnectDialog() {
-    if (this.connectDialog) return;
-    const document = this.document;
-    const html = 'http://www.w3.org/1999/xhtml';
-    const dialog = document.createElementNS(html, 'dialog');
-    dialog.className = 'live-gmail-connect-dialog';
-    dialog.innerHTML = `
-      <form class="live-gmail-connect-form" method="dialog">
-        <div class="live-gmail-connect-title">Connect Gmail</div>
-        <p class="live-gmail-connect-note">Paste the client id and secret from your Google Desktop OAuth client.</p>
-        <label class="live-gmail-connect-label" for="live-gmail-client-id">Client ID</label>
-        <input id="live-gmail-client-id" class="live-gmail-connect-id" autocomplete="off" spellcheck="false">
-        <label class="live-gmail-connect-label" for="live-gmail-client-secret">Client secret</label>
-        <input id="live-gmail-client-secret" class="live-gmail-connect-secret" type="password" autocomplete="off" spellcheck="false">
-        <div class="live-gmail-connect-status" role="status"></div>
-        <div class="live-gmail-connect-actions">
-          <button type="button" class="live-gmail-connect-disconnect">Disconnect</button>
-          <span class="live-gmail-connect-spacer"></span>
-          <button type="button" class="live-gmail-connect-cancel" value="cancel">Cancel</button>
-          <button type="submit" class="live-gmail-connect-submit">Connect</button>
-        </div>
-      </form>
-    `;
-    dialog.addEventListener('click', (event) => {
-      if (event.target === dialog) dialog.close();
-    });
-    dialog.querySelector('.live-gmail-connect-cancel').addEventListener('click', () => dialog.close());
-    dialog.querySelector('.live-gmail-connect-form').addEventListener('submit', (event) => {
-      event.preventDefault();
-      this.submitConnect();
-    });
-    dialog.querySelector('.live-gmail-connect-disconnect').addEventListener('click', () => {
-      this.disconnectConnect();
-    });
-    document.documentElement.appendChild(dialog);
-    this.connectDialog = dialog;
-  }
-
-  openConnect() {
-    this.createConnectDialog();
-    const app = this.app;
-    const dialog = this.connectDialog;
-    const idInput = dialog.querySelector('.live-gmail-connect-id');
-    const secretInput = dialog.querySelector('.live-gmail-connect-secret');
-    const status = dialog.querySelector('.live-gmail-connect-status');
-    const disconnect = dialog.querySelector('.live-gmail-connect-disconnect');
-    idInput.value = app.oauth.clientId();
-    secretInput.value = '';
-    secretInput.placeholder = app.oauth.clientSecret() ? 'Saved' : '';
-    const account = app.oauth.status();
-    status.textContent = account.connected
-      ? 'Connected' + (account.email ? ' as ' + account.email : '')
-      : '';
-    disconnect.disabled = !account.connected;
-    if (typeof dialog.showModal === 'function' && !dialog.open) {
-      dialog.showModal();
-    }
-    idInput.focus();
-  }
-
-  async submitConnect() {
-    const app = this.app;
-    const dialog = this.connectDialog;
-    if (!dialog) return;
-    const idInput = dialog.querySelector('.live-gmail-connect-id');
-    const secretInput = dialog.querySelector('.live-gmail-connect-secret');
-    const status = dialog.querySelector('.live-gmail-connect-status');
-    const submit = dialog.querySelector('.live-gmail-connect-submit');
-    const clientId = idInput.value.trim();
-    if (!clientId) {
-      status.textContent = 'Enter the client ID';
-      idInput.focus();
-      return;
-    }
-    submit.disabled = true;
-    status.textContent = 'Opening Google…';
-    try {
-      await app.oauth.authorize(clientId, secretInput.value.trim());
-      if (dialog.open) dialog.close();
-      this.updateDisplay();
-    } catch (e) {
-      status.textContent = e && e.message ? e.message : 'Could not connect';
-    } finally {
-      submit.disabled = false;
-    }
-  }
-
-  async disconnectConnect() {
-    const dialog = this.connectDialog;
-    const status = dialog?.querySelector('.live-gmail-connect-status');
-    const disconnect = dialog?.querySelector('.live-gmail-connect-disconnect');
-    await this.app.oauth.disconnect();
-    if (status) status.textContent = 'Disconnected. Unread mail comes from the Atom feed.';
-    if (disconnect) disconnect.disabled = true;
-    this.updateDisplay();
-  }
-
   showError(message) {
     const panel = this.app.panelElement;
     if (!panel) return;
@@ -491,8 +381,6 @@ export class LiveGmailPanel {
     const app = this.app;
     const panel = app.panelElement;
     if (!panel) return;
-    const connectOpen = panel.querySelector('.live-gmail-connect-open');
-    if (connectOpen) connectOpen.hidden = !app.oauth?.usesOAuth();
     const document = this.document;
     const emailsContainer = panel.querySelector('.live-gmail-emails');
     const loadingContainer = panel.querySelector('.live-gmail-loading');
@@ -506,7 +394,7 @@ export class LiveGmailPanel {
 
     if (app.oauth?.usesOAuth() && !app.oauth.isConnected()) {
       if (loadingContainer) loadingContainer.style.display = 'none';
-      emailsContainer.innerHTML = '<div class="live-gmail-empty">Connect Gmail to see unread mail</div>';
+      emailsContainer.innerHTML = '<div class="live-gmail-empty">Open Live Gmail settings and connect Gmail</div>';
       setComposeVisible(false);
       return;
     }

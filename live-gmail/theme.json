@@ -1,5 +1,5 @@
 {
-  "version": "4.1.6",
+  "version": "4.1.7",
   "id": "live-gmail",
   "name": "Live Gmail Panel",
   "description": "Unread Gmail preview when hovering Gmail essential or pinned tabs",
@@ -13,7 +13,7 @@
   "style": {
     "chrome": "chrome.css"
   },
-  "preferences": "preference.json",
+  "preferences": "preferences.json",
   "homepage": "https://github.com/Zylaah/zen-mods/tree/main/live-gmail",
   "readme": "https://raw.githubusercontent.com/Zylaah/zen-mods/refs/heads/main/live-gmail/README.md",
   "author": "Bxth",
