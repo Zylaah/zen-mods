@@ -1,5 +1,5 @@
 {
-  "version": "3.4.3",
+  "version": "3.5.0",
   "id": "live-gmail",
   "name": "Live Gmail Panel",
   "description": "Unread Gmail preview when hovering Gmail essential tabs",
@@ -23,7 +23,7 @@
     "Unread"
   ],
   "createdAt": "2025-12-08",
-  "updatedAt": "2026-05-18",
+  "updatedAt": "2026-10-29",
   "fork": ["zen"],
   "ai": "yes"
 }

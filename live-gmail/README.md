@@ -38,4 +38,5 @@ A Zen Browser mod for Sine that shows your unread Gmail in a quick hover panel o
 ## Notes
 
 - Works best with a signed-in Gmail session in the same profile/container.
-- This mod reads Gmail inbox content shown in your browser to build previews.
+- Unread mail comes from Gmail's Atom feed (`/mail/u/N/feed/atom`) using that tab's cookies. The inbox page is only watched to refresh after you mark mail read.
+- Clicking an item opens Gmail's permalink for that conversation.

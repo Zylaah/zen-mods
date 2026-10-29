@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
 // @author         Bxth
-// @version        3.4.3
+// @version        3.5.0
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -19,8 +19,14 @@
     MAX_EMAILS: 20,
     PANEL_ID: 'live-gmail-panel',
     SCANNER_TAB_ATTR: 'data-live-gmail-scanner',
-    HOVER_DELAY_MS: 200
+    HOVER_DELAY_MS: 200,
+    ATOM_CACHE_MS: 60000,
+    ATOM_TIMEOUT_MS: 8000,
+    ATOM_MAX_BYTES: 500000
   };
+
+  const { NetUtil } = ChromeUtils.importESModule('resource://gre/modules/NetUtil.sys.mjs');
+  const Cr = globalThis.Cr || Components.results;
 
   /**
    * Check if debug logging is enabled
@@ -51,8 +57,10 @@
   let gmailTabs = new Map();
   let clickedEmailIds = new Set();
   let messageListenersRegistered = false;
-  let lastLogTs = 0;
   let scanInProgress = false;
+  let atomMemCache = {}; // contextKey -> { ts, feedUrl, emails }
+  let atomInFlight = new Set();
+  let readStateTimers = new Map();
   let hideTimer = null;
   let showTimer = null;
   let pendingShowTab = null;
@@ -197,15 +205,6 @@
       } catch (e) {}
     }
     return null;
-  }
-
-  /**
-   * Whether a tab is a live scan source (loaded Gmail document).
-   */
-  function isLiveGmailScanSource(tab) {
-    if (!tab?.linkedBrowser) return false;
-    if (isTabPendingOrDiscarded(tab)) return false;
-    return isLoadedGmailBrowser(tab.linkedBrowser);
   }
 
   /**
@@ -400,101 +399,15 @@
 
   function performLoadScan(tab) {
     if (!tab || tab.closing || !isGmailEssentialTab(tab)) return;
-    if (isTabPendingOrDiscarded(tab)) return;
-    if (activeLoadScanTabs.has(tab)) return;
 
     const browser = tab.linkedBrowser;
-    if (!browser) return;
-
-    activeLoadScanTabs.add(tab);
-    tab.setAttribute('data-live-gmail-was-loaded', 'true');
-
-    const contextKey = getPanelContextKey(tab);
-    scanContextKey = contextKey;
-    loadScansInFlight.add(contextKey);
-
-    if (shouldShowLoadProgress(contextKey)) {
-      scanInProgress = true;
-      updateEmailDisplay();
+    if (browser && !isTabPendingOrDiscarded(tab) && !activeLoadScanTabs.has(tab)) {
+      activeLoadScanTabs.add(tab);
+      tab.setAttribute('data-live-gmail-was-loaded', 'true');
+      loadFrameScript(browser);
     }
 
-    startLoadScanWhenReady(tab);
-  }
-
-  /**
-   * Wait until the Gmail document has finished loading, then scan the inbox.
-   */
-  function startLoadScanWhenReady(tab) {
-    const browser = tab?.linkedBrowser;
-    if (!browser) return;
-
-    const contextKey = getPanelContextKey(tab);
-    let attempts = 0;
-    let pollTimer = null;
-    let scanStarted = false;
-
-    const cleanup = () => {
-      if (pollTimer) {
-        clearTimeout(pollTimer);
-        pollTimer = null;
-      }
-      try {
-        browser.removeEventListener('load', onLoad);
-      } catch (e) {}
-    };
-
-    const abortLoadScan = (reason) => {
-      if (scanStarted) return;
-      cleanup();
-      debugLog('startLoadScanWhenReady:', reason);
-      finishLoadScanForTab(tab);
-      loadScansInFlight.delete(contextKey);
-      scanInProgress = false;
-      tab.removeAttribute('data-live-gmail-was-loaded');
-      updateEmailDisplay();
-    };
-
-    const tryScan = () => {
-      if (scanStarted) return;
-      if (tab.closing || isTabPendingOrDiscarded(tab)) {
-        abortLoadScan('tab unloaded');
-        return;
-      }
-      if (!isLoadedGmailBrowser(browser)) {
-        if (++attempts >= 150) {
-          abortLoadScan('timed out waiting for Gmail document');
-          return;
-        }
-        pollTimer = setTimeout(tryScan, 400);
-        return;
-      }
-      if (!isBrowserNavigationComplete(browser)) {
-        if (++attempts >= 150) {
-          abortLoadScan('timed out waiting for navigation');
-          return;
-        }
-        pollTimer = setTimeout(tryScan, 400);
-        return;
-      }
-
-      scanStarted = true;
-      cleanup();
-      if (!scanBrowserWhenReady(browser, tab)) {
-        finishLoadScanForTab(tab);
-        loadScansInFlight.delete(contextKey);
-        scanInProgress = false;
-        tab.removeAttribute('data-live-gmail-was-loaded');
-        updateEmailDisplay();
-      }
-    };
-
-    const onLoad = () => {
-      debugLog('startLoadScanWhenReady: browser load');
-      tryScan();
-    };
-
-    browser.addEventListener('load', onLoad);
-    tryScan();
+    requestAtomScan(tab, { force: false });
   }
 
   /**
@@ -558,93 +471,13 @@
     return true;
   }
 
-  function scanBrowserWhenReady(browser, tab) {
-    if (!browser?.messageManager) return false;
-
-    let finished = false;
-    let pollTimer = null;
-    let attempts = 0;
-
-    const isStale = () =>
-      !tab || tab.closing || isTabPendingOrDiscarded(tab) || !browser.messageManager;
-
-    const cleanup = () => {
-      if (pollTimer) {
-        clearTimeout(pollTimer);
-        pollTimer = null;
-      }
-      Services.mm.removeMessageListener('LiveGmail:ReadyStatus', onReady);
-    };
-
-    const finishWithError = () => {
-      if (finished) return;
-      finished = true;
-      cleanup();
-      debugLog('scanBrowserWhenReady: timed out or stale');
-      if (tab) {
-        finishLoadScanForTab(tab);
-        loadScansInFlight.delete(getPanelContextKey(tab));
-        tab.removeAttribute('data-live-gmail-was-loaded');
-      }
-      scanInProgress = false;
-      updateEmailDisplay();
-    };
-
-    const sendScan = () => {
-      if (finished) return;
-      finished = true;
-      cleanup();
-      try {
-        browser.messageManager.sendAsyncMessage('LiveGmail:RequestScan', {});
-        debugLog('Sent RequestScan (inbox ready)');
-      } catch (e) {
-        console.warn('[Live Gmail] Could not send RequestScan:', e);
-        if (tab) {
-          finishLoadScanForTab(tab);
-          loadScansInFlight.delete(getPanelContextKey(tab));
-          tab.removeAttribute('data-live-gmail-was-loaded');
-        }
-        scanInProgress = false;
-        updateEmailDisplay();
-      }
-    };
-
-    const onReady = (message) => {
-      if (finished || isStale()) return;
-      if (!message.data?.inboxReady) return;
-      debugLog('Inbox ready, rows=', message.data.rows);
-      sendScan();
-    };
-
-    Services.mm.addMessageListener('LiveGmail:ReadyStatus', onReady);
-
-    const poll = () => {
-      if (finished) return;
-      if (isStale()) {
-        finishWithError();
-        return;
-      }
-      try {
-        browser.messageManager.sendAsyncMessage('LiveGmail:CheckReady', {});
-      } catch (e) {}
-      if (++attempts >= 150) {
-        finishWithError();
-        return;
-      }
-      pollTimer = setTimeout(poll, 400);
-    };
-
-    loadFrameScript(browser);
-    poll();
-    return true;
-  }
-
   /**
-   * Request a load scan on an already-loaded Gmail essential (e.g. after opening an email).
+   * Refresh unread mail for this container (Atom). Works with a discarded essential.
    */
   function scanLoadedGmailEssential(contextKey = activePanelContextKey || getPanelContextKey()) {
-    const essential = findLoadedGmailEssentialTab(contextKey);
-    if (!essential?.linkedBrowser) return false;
+    const essential =
+      findLoadedGmailEssentialTab(contextKey) || findGmailEssentialTab(contextKey);
+    if (!essential) return false;
     performLoadScan(essential);
     return true;
   }
@@ -814,453 +647,409 @@
     }
   }
 
+  function fnv1a(str) {
+    let h = 0x811c9dc5;
+    const s = String(str || '');
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return ('0000000' + (h >>> 0).toString(36)).slice(-8);
+  }
+
+  function gmailAccountSlotFromHints(hints) {
+    for (const hint of hints || []) {
+      const match = String(hint).match(/\/mail\/u\/(\d+)/);
+      if (match) return match[1];
+    }
+    return '0';
+  }
+
+  function getGmailFeedUrl(tab) {
+    const slot = gmailAccountSlotFromHints(getTabUrlHints(tab));
+    return `https://${getGmailUrlPattern()}/mail/u/${slot}/feed/atom`;
+  }
+
+  function normalizeGmailOpenUrl(url) {
+    if (!url || typeof url !== 'string') return '';
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== 'https:') return '';
+      if (parsed.hostname.toLowerCase() !== 'mail.google.com') return '';
+      if (/\/feed\/atom/i.test(parsed.pathname)) {
+        const slot = parsed.pathname.match(/\/u\/(\d+)/)?.[1] || '0';
+        return `https://mail.google.com/mail/u/${slot}/#inbox`;
+      }
+      return parsed.href;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function parseGmailAtom(xml, feedUrl) {
+    const feed = new DOMParser().parseFromString(xml, 'application/xml');
+    if (feed.documentElement?.localName !== 'feed' || feed.querySelector('parsererror')) {
+      throw new Error('Not an Atom feed');
+    }
+
+    const value = (node, name) =>
+      (node.getElementsByTagNameNS('*', name)[0]?.textContent || '').trim();
+
+    const items = Array.from(feed.getElementsByTagNameNS('*', 'entry')).map((entry, sourceRank) => {
+      const atomId = value(entry, 'id');
+      const subject = value(entry, 'title') || '(No subject)';
+      const sender = value(entry, 'name') || value(entry, 'email') || 'Unknown';
+      const snippet = value(entry, 'summary').slice(0, 200);
+      const link = Array.from(entry.getElementsByTagNameNS('*', 'link')).find(
+        (node) => !node.getAttribute('rel') || node.getAttribute('rel') === 'alternate'
+      );
+      let url = '';
+      try {
+        url = new URL(link?.getAttribute('href') || '', feedUrl).href;
+      } catch (e) {}
+      url = normalizeGmailOpenUrl(url);
+      const date =
+        value(entry, 'issued') ||
+        value(entry, 'published') ||
+        value(entry, 'modified') ||
+        value(entry, 'updated');
+      const ts = Date.parse(date);
+      const id = 'gmail:atom:' + fnv1a(atomId || url + '|' + subject);
+      return {
+        id,
+        threadId: id,
+        from: sender,
+        subject,
+        snippet,
+        date: Number.isFinite(ts) ? new Date(ts).toISOString() : date,
+        ts: Number.isFinite(ts) ? ts : 0,
+        isUnread: true,
+        url,
+        rowIndex: sourceRank
+      };
+    });
+
+    items.sort((a, b) => (b.ts || 0) - (a.ts || 0) || a.rowIndex - b.rowIndex);
+    return items.slice(0, CONFIG.MAX_EMAILS);
+  }
+
+  function cancelAuthPrompt() {
+    return {
+      QueryInterface: ChromeUtils.generateQI([
+        Ci.nsIInterfaceRequestor,
+        Ci.nsIAuthPrompt,
+        Ci.nsIAuthPrompt2
+      ]),
+      getInterface(iid) {
+        return this.QueryInterface(iid);
+      },
+      prompt() {
+        return false;
+      },
+      promptUsernameAndPassword() {
+        return false;
+      },
+      promptPassword() {
+        return false;
+      },
+      promptAuth() {
+        return false;
+      },
+      asyncPromptAuth(_channel, callback) {
+        try {
+          callback.onAuthCancelled(null, false);
+        } catch (e) {}
+      }
+    };
+  }
+
+  /**
+   * Fetch Gmail's unread Atom feed with the container's cookies.
+   * Uses TYPE_SAVEAS_DOWNLOAD so the content principal actually attaches cookies
+   * (same pattern as Zen live folders). Auth prompts are cancelled so a 401
+   * cannot open Gmail's HTTP Basic dialog.
+   */
+  function fetchAtomXml(feedUrl, userContextId) {
+    const uri = Services.io.newURI(feedUrl);
+    const principal = Services.scriptSecurityManager.createContentPrincipal(uri, {
+      userContextId: userContextId || 0
+    });
+    const channel = NetUtil.newChannel({
+      uri,
+      contentPolicyType: Ci.nsIContentPolicy.TYPE_SAVEAS_DOWNLOAD,
+      loadingPrincipal: principal,
+      triggeringPrincipal: principal,
+      securityFlags:
+        Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_SEC_CONTEXT_IS_NULL |
+        Ci.nsILoadInfo.SEC_COOKIES_INCLUDE
+    }).QueryInterface(Ci.nsIHttpChannel);
+    channel.notificationCallbacks = cancelAuthPrompt();
+
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      let totalLength = 0;
+      let settled = false;
+
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        fn(value);
+      };
+
+      const timer = setTimeout(() => {
+        try {
+          channel.cancel(Cr.NS_BINDING_ABORTED);
+        } catch (e) {}
+        finish(reject, new Error('Timeout'));
+      }, CONFIG.ATOM_TIMEOUT_MS);
+
+      channel.asyncOpen({
+        onStartRequest() {},
+        onDataAvailable(request, stream, _offset, count) {
+          totalLength += count;
+          if (totalLength > CONFIG.ATOM_MAX_BYTES) {
+            request.cancel(Cr.NS_ERROR_FILE_TOO_BIG);
+            return;
+          }
+          chunks.push(NetUtil.readInputStream(stream, count));
+        },
+        onStopRequest(_request, status) {
+          if (!Components.isSuccessCode(status)) {
+            finish(reject, new Error('Network error'));
+            return;
+          }
+          const bytes = new Uint8Array(totalLength);
+          let offset = 0;
+          for (const chunk of chunks) {
+            bytes.set(new Uint8Array(chunk), offset);
+            offset += chunk.byteLength;
+          }
+          let httpStatus = 0;
+          let finalUrl = feedUrl;
+          try {
+            httpStatus = channel.responseStatus;
+          } catch (e) {}
+          try {
+            finalUrl = channel.URI.spec;
+          } catch (e) {}
+          finish(resolve, {
+            status: httpStatus,
+            finalUrl,
+            text: new TextDecoder('utf-8').decode(bytes)
+          });
+        }
+      });
+    });
+  }
+
+  function applyAtomEmails(allEmails, targetKey) {
+    const viewKey = activePanelContextKey;
+    const restoreView = targetKey && viewKey && targetKey !== viewKey;
+    if (targetKey && restoreView) {
+      activatePanelContext(targetKey);
+    }
+
+    const clickedIds = clickedEmailIds;
+    const nextEmails = allEmails.filter((email) => !clickedIds.has(email.id));
+    currentEmails = nextEmails;
+    cachedEmails = nextEmails.slice();
+
+    const ctx = getOrCreatePanelContext(targetKey);
+    ctx.hasScanned = true;
+    ctx.lastScanTs = Date.now();
+    persistActiveContextToMemory(targetKey);
+    saveCacheToPrefs();
+
+    const currentIds = new Set(allEmails.map((email) => email.id));
+    for (const clickedId of clickedIds) {
+      if (!currentIds.has(clickedId)) clickedIds.delete(clickedId);
+    }
+
+    scanContextKey = null;
+    loadScansInFlight.delete(targetKey);
+
+    if (restoreView && viewKey) {
+      activatePanelContext(viewKey);
+    }
+
+    scanInProgress = false;
+    if (targetKey === viewKey) {
+      hideError();
+      updateEmailDisplay();
+    }
+  }
+
+  async function requestAtomScan(tab, { force = false } = {}) {
+    if (!tab) return;
+    const contextKey = getPanelContextKey(tab);
+    const feedUrl = getGmailFeedUrl(tab);
+    const cached = atomMemCache[contextKey];
+    if (
+      !force &&
+      cached &&
+      cached.feedUrl === feedUrl &&
+      Date.now() - cached.ts < CONFIG.ATOM_CACHE_MS
+    ) {
+      if (activePanelContextKey !== contextKey || (currentEmails.length === 0 && cachedEmails.length === 0)) {
+        applyAtomEmails(cached.emails, contextKey);
+      }
+      return;
+    }
+
+    if (atomInFlight.has(contextKey)) return;
+    atomInFlight.add(contextKey);
+    scanContextKey = contextKey;
+    loadScansInFlight.add(contextKey);
+
+    if (shouldShowLoadProgress(contextKey)) {
+      scanInProgress = true;
+      updateEmailDisplay();
+    }
+
+    try {
+      const { status, finalUrl, text } = await fetchAtomXml(
+        feedUrl,
+        getContextContainerId(contextKey)
+      );
+      if (status === 401 || status === 403) {
+        const err = new Error('Sign-in required');
+        err.signin = true;
+        throw err;
+      }
+      const head = (text || '').slice(0, 2000);
+      if (
+        /accounts\.google\.com|ServiceLogin/i.test(finalUrl || '') ||
+        /accounts\.google\.com|ServiceLogin/i.test(head)
+      ) {
+        const err = new Error('Sign-in required');
+        err.signin = true;
+        throw err;
+      }
+      if (status < 200 || status >= 300) {
+        throw new Error('HTTP ' + status);
+      }
+      if (
+        finalUrl &&
+        finalUrl !== feedUrl &&
+        !finalUrl.startsWith('https://mail.google.com/mail/')
+      ) {
+        throw new Error('Feed URL changed');
+      }
+
+      const emails = parseGmailAtom(text, feedUrl);
+      atomMemCache[contextKey] = { ts: Date.now(), feedUrl, emails };
+      debugLog('Atom scan', emails.length, 'unread, context=', contextKey);
+      applyAtomEmails(emails, contextKey);
+    } catch (e) {
+      debugLog('Atom fetch failed', e && e.message ? e.message : e);
+      scanInProgress = false;
+      loadScansInFlight.delete(contextKey);
+      if (scanContextKey === contextKey) scanContextKey = null;
+      if (
+        e?.signin &&
+        activePanelContextKey === contextKey &&
+        currentEmails.length === 0 &&
+        cachedEmails.length === 0
+      ) {
+        showError('Sign in to Gmail to see unread mail');
+      }
+      updateEmailDisplay();
+    } finally {
+      atomInFlight.delete(contextKey);
+      finishLoadScanForTab(tab);
+    }
+  }
+
+  function onGmailReadStateChanged(tab) {
+    if (!tab || !isGmailEssentialTab(tab)) return;
+    const contextKey = getPanelContextKey(tab);
+    if (readStateTimers.has(contextKey)) {
+      clearTimeout(readStateTimers.get(contextKey));
+    }
+    readStateTimers.set(
+      contextKey,
+      setTimeout(() => {
+        readStateTimers.delete(contextKey);
+        requestAtomScan(tab, { force: true });
+      }, 400)
+    );
+  }
+
   // ============================================
-  // Frame Script for Gmail DOM Parsing
+  // Frame script: watch inbox read-state only
   // ============================================
 
   /**
-   * The content script that runs in Gmail tabs to parse the inbox DOM.
-   * This is injected via messageManager.loadFrameScript as a data: URL.
+   * Content script: watch Gmail inbox read-state. Unread mail comes from Atom in chrome.
    */
   const GMAIL_FRAME_SCRIPT = `
 (function() {
   'use strict';
-  
-  const MAX_EMAILS = 20;
   const SCAN_DEBOUNCE_MS = 500;
-  let scanTimeout = null;
   let observer = null;
-  let lastScanResult = null;
-  let lastDebugLog = 0;
-  const DEBUG_INTERVAL_MS = 5000;
-  let cachedRowSelector = null;
-  
-  // Debug logging function (controlled by parent via message)
+  let scanTimeout = null;
+  let lastReadKey = '';
   let DEBUG_ENABLED = false;
+
   function frameDebugLog(...args) {
-    if (DEBUG_ENABLED) {
-      content.console.log('[Live Gmail Frame]', ...args);
-    }
-  }
-  
-  frameDebugLog('Script loaded on', content.location.href);
-  
-  /**
-   * Check if current page is Gmail inbox
-   */
-  function isGmailInbox() {
-    return content.location.href.includes('mail.google.com');
-  }
-  
-  /**
-   * Extract thread ID from a Gmail row element
-   */
-  /**
-   * Compute a row's thread ID using the same logic as scanInbox(), so it can
-   * be recomputed identically after a tab reload/unload and matched against
-   * a previously cached email that only carries this stable content hash.
-   */
-  function computeRowThreadId(row) {
-    const gmailUrl = extractGmailUrl(row);
-    let threadId = extractThreadId(row);
-
-    if (!threadId && gmailUrl) {
-      const match = gmailUrl.match(/#(?:inbox|all|sent|starred|label)\\/([^/?#]+)/i);
-      if (match && match[1]) threadId = match[1];
-    }
-
-    if (!threadId) {
-      const sender = extractSender(row);
-      const subject = extractSubject(row);
-      const date = extractDate(row);
-      const contentStr = sender + '|' + subject + '|' + date;
-      let hash = 0;
-      for (let i = 0; i < contentStr.length; i++) {
-        hash = ((hash << 5) - hash) + contentStr.charCodeAt(i);
-        hash = hash & hash;
-      }
-      threadId = 'hash-' + Math.abs(hash).toString(36);
-    }
-
-    return threadId;
+    if (DEBUG_ENABLED) content.console.log('[Live Gmail Frame]', ...args);
   }
 
-  function extractThreadId(row) {
-    const attrs = ['data-legacy-thread-id', 'data-thread-id', 'data-legacy-message-id', 
-                   'data-message-id', 'data-id', 'data-uid', 'data-internalid'];
-    for (const attr of attrs) {
-      const val = row.getAttribute(attr);
-      if (val) return val;
+  function isGmail() {
+    try {
+      return content.location.hostname === 'mail.google.com';
+    } catch (e) {
+      return false;
     }
-    
-    // Try to find link with thread hash
-    const links = row.querySelectorAll('a[href*="#inbox/"], a[href*="#all/"], a[href*="#sent/"]');
-    for (const link of links) {
-      const href = link.getAttribute('href') || '';
-      const match = href.match(/#(?:inbox|all|sent|starred|label)\\/([a-zA-Z0-9]+)/);
-      if (match && match[1]) return match[1];
-    }
-    
-    if (row.id && row.id.length > 5) return row.id;
-    return null;
   }
 
-  /**
-   * Extract a Gmail URL/hash from a row
-   */
-  function extractGmailUrl(row) {
-    if (row.tagName === 'A' && row.href) return row.href;
-    
-    const link = row.querySelector('a[href*="#inbox/"], a[href*="#all/"], a[href*="#sent/"], a[href*="#label/"]');
-    if (link) return link.href || link.getAttribute('href') || '';
-    
-    const anyLink = row.querySelector('a[href*="#"]');
-    if (anyLink) return anyLink.getAttribute('href') || '';
-    return '';
-  }
-  
-  /**
-   * Check if a row represents an unread email
-   */
-  function isUnread(row) {
-    const cls = row.classList;
-    if (cls.contains('zE')) return true;
-    if (cls.contains('unread')) return true;
-    if (cls.contains('yO')) return false;
-    if (row.getAttribute('data-is-read') === 'false') return true;
-
-    const ariaLabel = (row.getAttribute('aria-label') || '').toLowerCase();
-    if (ariaLabel.includes('unread') || ariaLabel.includes('non lu') || 
-        ariaLabel.includes('no leído') || ariaLabel.includes('nicht gelesen')) return true;
-
-    const boldElements = row.querySelectorAll('b, strong');
-    if (boldElements.length > 0) return true;
-
-    return false;
-  }
-  
-  /**
-   * Extract sender name from row
-   */
-  function extractSender(row) {
-    const emailSpan = row.querySelector('span[email]');
-    if (emailSpan) return emailSpan.getAttribute('name') || emailSpan.textContent.trim();
-    
-    const selectors = ['td.yX span.yP', 'td.yX span.zF', 'span.bA4 span', 'td.xY span'];
-    for (const sel of selectors) {
-      const el = row.querySelector(sel);
-      if (el && el.textContent.trim()) return el.textContent.trim();
-    }
-    
-    const bold = row.querySelector('b, strong');
-    if (bold && bold.textContent.trim()) return bold.textContent.trim();
-    return 'Unknown';
-  }
-  
-  /**
-   * Extract subject from row
-   */
-  function extractSubject(row) {
-    const selectors = ['span.bog', 'span.bqe', 'td.xY span.y2'];
-    for (const sel of selectors) {
-      const el = row.querySelector(sel);
-      if (el && el.textContent.trim()) return el.textContent.trim();
-    }
-    return '(No subject)';
-  }
-  
-  /**
-   * Extract snippet from row
-   */
-  function extractSnippet(row) {
-    const selectors = ['span.y2', 'span.Zt'];
-    for (const sel of selectors) {
-      const el = row.querySelector(sel);
-      if (el && el.textContent.trim()) {
-        let text = el.textContent.trim();
-        if (text.startsWith('-')) text = text.substring(1).trim();
-        return text;
-      }
-    }
-    return '';
-  }
-  
-  /**
-   * Extract date from row - prefer short text content over full title
-   */
-  function extractDate(row) {
-    const selectors = ['td.xW span', 'span.bq3', 'td:last-child span', 'span[title]'];
-    for (const sel of selectors) {
-      const el = row.querySelector(sel);
-      if (el) {
-        // Prefer the visible text content (usually short like "Dec 5" or "10:30")
-        const text = el.textContent.trim();
-        if (text && text.length < 20) return text;
-      }
-    }
-    return '';
-  }
-  
-  /**
-   * Find email rows in the inbox.
-   * Caches the first selector that returns results so subsequent scans pay
-   * only one querySelectorAll instead of up to seven.
-   */
-  function findEmailRows() {
-    if (cachedRowSelector) {
-      const rows = content.document.querySelectorAll(cachedRowSelector);
-      if (rows.length > 0) return Array.from(rows);
-      // Cached selector no longer works (e.g. Gmail navigated away); fall through.
-      cachedRowSelector = null;
-    }
-
-    const rowSelectors = [
-      'tr.zA',
-      'tr[role="row"]',
-      'div[role="row"]',
-      '[data-legacy-thread-id]',
-      '[data-thread-id]',
-      'div.Cp tr',
-      'div[role="main"] tr'
-    ];
-    
-    for (const selector of rowSelectors) {
-      const rows = content.document.querySelectorAll(selector);
-      if (rows.length > 0) {
-        cachedRowSelector = selector;
-        return Array.from(rows);
-      }
-    }
-    
-    const links = content.document.querySelectorAll('a[href*="#inbox/"], a[href*="#all/"]');
-    if (links.length > 0) return Array.from(links);
-    return [];
-  }
-  
-  /**
-   * Scan inbox DOM and extract unread emails
-   */
-  function scanInbox() {
-    if (!isGmailInbox()) return null;
-    
-    const rows = findEmailRows();
-    const threads = [];
-    let unreadCount = 0;
-    let rowIndex = 0;
-    
+  function readStateKey() {
+    const rows = content.document.querySelectorAll('tr.zA, tr[role="row"], div[role="row"]');
+    const parts = [];
     for (const row of rows) {
-      rowIndex++;
-      if (threads.length >= MAX_EMAILS) break;
-      if (!isUnread(row)) continue;
-      unreadCount++;
-      
-      const gmailUrl = extractGmailUrl(row);
-      const threadId = computeRowThreadId(row);
-      const sender = extractSender(row);
-      const subject = extractSubject(row);
-      const date = extractDate(row);
+      const unread = row.classList.contains('zE') || row.getAttribute('data-is-read') === 'false';
+      const id = row.getAttribute('data-legacy-thread-id') || row.getAttribute('data-thread-id') || '';
+      parts.push((unread ? 'u' : 'r') + id);
+    }
+    return String(rows.length) + ':' + parts.join(',');
+  }
 
-      threads.push({
-        id: threadId,
-        threadId: threadId,
-        from: sender,
-        subject: subject,
-        snippet: extractSnippet(row),
-        date: date,
-        isUnread: true,
-        url: gmailUrl,
-        rowIndex: threads.length // Store index for clicking
-      });
-    }
-    
-    const now = Date.now();
-    if (now - lastDebugLog > DEBUG_INTERVAL_MS) {
-      lastDebugLog = now;
-      frameDebugLog('rows=', rows.length, 'unread=', unreadCount, 'threads=', threads.length);
-    }
-    
-    return {
-      threads,
-      timestamp: Date.now(),
-      meta: {
-        rows: rows.length,
-        unread: unreadCount,
-        inboxReady: rows.length > 0 || (
-          !!content.document.querySelector('div[role="main"]') &&
-          !content.document.querySelector('[aria-busy="true"], [role="progressbar"]')
-        )
-      }
-    };
+  function maybeNotify() {
+    if (!isGmail()) return;
+    const key = readStateKey();
+    if (key === lastReadKey) return;
+    lastReadKey = key;
+    frameDebugLog('read-state changed');
+    sendAsyncMessage('LiveGmail:ReadState', { key: key });
   }
-  
-  /**
-   * Debounced scan that sends results to parent
-   */
-  function debouncedScan() {
-    if (scanTimeout) content.clearTimeout(scanTimeout);
-    scanTimeout = content.setTimeout(() => {
-      const result = scanInbox();
-      // Never push partial results — chrome waits for a complete inbox.
-      if (result && result.meta.inboxReady) {
-        const resultStr = JSON.stringify(result.threads);
-        if (resultStr !== lastScanResult) {
-          lastScanResult = resultStr;
-          sendAsyncMessage('LiveGmail:UnreadData', result);
-        }
-      }
-    }, SCAN_DEBOUNCE_MS);
-  }
-  
-  /**
-   * Set up mutation observer
-   */
+
   function setupObserver() {
     if (observer) observer.disconnect();
-    
-    const target = content.document.querySelector('div[role="main"]') || 
-                   content.document.querySelector('div.Cp') || 
-                   content.document.body;
-    
+    const target = content.document.querySelector('div[role="main"]') || content.document.body;
     if (!target) {
       content.setTimeout(setupObserver, 1000);
       return;
     }
-    
-    observer = new content.MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        if (mutation.type === 'childList') {
-          debouncedScan();
-          return;
-        }
-        if (mutation.type === 'attributes') {
-          // Only react to class changes on row-level elements, not deeply nested ones.
-          // Gmail fires hundreds of attribute mutations per second on icons, buttons,
-          // and hover highlights — filtering here prevents the debounce from being
-          // perpetually reset by irrelevant noise.
-          const el = mutation.target;
-          if (
-            el.tagName === 'TR' ||
-            el.getAttribute('role') === 'row' ||
-            el.classList.contains('zA')
-          ) {
-            debouncedScan();
-            return;
-          }
-        }
-      }
+    observer = new content.MutationObserver(function() {
+      if (scanTimeout) content.clearTimeout(scanTimeout);
+      scanTimeout = content.setTimeout(maybeNotify, SCAN_DEBOUNCE_MS);
     });
-    observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
-  }
-  
-  // Message handlers
-  addMessageListener('LiveGmail:RequestScan', () => {
-    frameDebugLog('Received RequestScan');
-    const result = scanInbox();
-    if (result && result.meta.inboxReady) {
-      lastScanResult = JSON.stringify(result.threads);
-      sendAsyncMessage('LiveGmail:UnreadData', result);
-    }
-  });
-  
-  addMessageListener('LiveGmail:CheckReady', () => {
-    const result = scanInbox();
-    if (!result) {
-      sendAsyncMessage('LiveGmail:ReadyStatus', { ready: false, inboxReady: false, rows: 0 });
-      return;
-    }
-    sendAsyncMessage('LiveGmail:ReadyStatus', {
-      ready: result.meta.inboxReady,
-      inboxReady: result.meta.inboxReady,
-      rows: result.meta.rows
+    observer.observe(target, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class']
     });
-  });
-  
-  function clickRow(row) {
-    const link = row.querySelector('a[href*="#"], a[role="link"]') || row.querySelector('a');
-    if (link) {
-      link.click();
-    } else {
-      row.click();
-    }
   }
 
-  addMessageListener('LiveGmail:OpenThread', (message) => {
-    try {
-      const data = message && message.data ? message.data : {};
-      const rowIndex = data.rowIndex;
-      const targetThreadId = data.threadId;
-      const targetUrl = data.url || '';
-      frameDebugLog('OpenThread', data);
-
-      const rows = findEmailRows();
-
-      // Prefer matching by content-derived thread ID: it's recomputed the
-      // same way on every scan, so it still matches after the tab has been
-      // unloaded/reloaded and Gmail's row order or DOM has changed — unlike
-      // rowIndex, which is only valid against the DOM snapshot it came from.
-      if (targetThreadId) {
-        for (const row of rows) {
-          if (computeRowThreadId(row) === targetThreadId) {
-            frameDebugLog('Clicking row matched by threadId', targetThreadId);
-            clickRow(row);
-            return;
-          }
-        }
-      }
-
-      // Fall back to click the row by index (only valid if the DOM matches
-      // the snapshot this rowIndex was computed from, e.g. a live scan).
-      if (rowIndex !== undefined && rowIndex !== null) {
-        let unreadIdx = 0;
-        for (const row of rows) {
-          if (isUnread(row)) {
-            if (unreadIdx === rowIndex) {
-              frameDebugLog('Clicking row at index', rowIndex);
-              clickRow(row);
-              return;
-            }
-            unreadIdx++;
-          }
-        }
-      }
-
-      // Last resort: navigate via URL (only if it's a real Gmail URL, not a
-      // synthetic fallback id/hash that was never a valid permalink).
-      if (targetUrl && !targetUrl.includes('idx-') && !targetUrl.includes('row-') && !targetUrl.includes('hash-')) {
-        if (/^https?:/i.test(targetUrl)) {
-          content.location.href = targetUrl;
-        } else if (targetUrl.startsWith('#')) {
-          content.location.hash = targetUrl;
-        } else {
-          content.location.href = 'https://mail.google.com/mail/u/0/' + targetUrl;
-        }
-        return;
-      }
-
-      content.console.warn('[Live Gmail Frame] OpenThread: no matching row found and no usable URL fallback', data);
-    } catch (e) {
-      content.console.warn('[Live Gmail Frame] OpenThread failed:', e);
-    }
+  addMessageListener('LiveGmail:SetDebug', function(message) {
+    DEBUG_ENABLED = !!(message && message.data && message.data.enabled);
   });
-  
-  // Initialize — observer for live updates; chrome sends RequestScan on tab load.
-  function init() {
-    frameDebugLog('Initializing...');
-    const start = () => setupObserver();
-    if (content.document.readyState === 'complete') {
-      start();
-    } else {
-      content.addEventListener('load', start, { once: true });
-    }
-  }
-  
-  // Listen for debug enable/disable
-  addMessageListener('LiveGmail:SetDebug', (message) => {
-    DEBUG_ENABLED = message && message.data ? message.data.enabled : false;
-  });
-  
-  if (content.location.href.includes('mail.google.com')) {
-    init();
+
+  if (isGmail()) {
+    if (content.document.readyState === 'complete') setupObserver();
+    else content.addEventListener('load', setupObserver, { once: true });
   }
 })();
 `;
@@ -1308,11 +1097,12 @@
         return;
       }
       
-      globalMM.addMessageListener('LiveGmail:UnreadData', (message) => {
+      globalMM.addMessageListener('LiveGmail:ReadState', (message) => {
         try {
-          handleFrameScriptData(message.data, message.target);
+          const sourceTab = getTabForMessageManager(message.target);
+          if (sourceTab) onGmailReadStateChanged(sourceTab);
         } catch (e) {
-          console.error('[Live Gmail] Error handling frame script data:', e);
+          console.error('[Live Gmail] Error handling read-state:', e);
         }
       });
       
@@ -1323,104 +1113,17 @@
     }
   }
 
-
-  /**
-   * Handle data from frame script
-   */
-  function handleFrameScriptData(payload, sourceMM) {
-    if (!payload || !Array.isArray(payload.threads)) return;
-
-    const sourceTab = getTabForMessageManager(sourceMM);
-    if (sourceTab && !isLiveGmailScanSource(sourceTab)) {
-      const staleKey = scanContextKey || getPanelContextKey(sourceTab);
-      debugLog('Ignoring scan from unloaded tab');
-      finishLoadScanForTab(sourceTab);
-      if (staleKey) loadScansInFlight.delete(staleKey);
-      scanInProgress = false;
-      updateEmailDisplay();
-      return;
-    }
-
-    const rows = payload.meta?.rows ?? 0;
-    const inboxReady = payload.meta?.inboxReady === true;
-    const isAuthoritative = rows > 0 || inboxReady;
-
-    if (!isAuthoritative) {
-      debugLog('Premature scan (inbox not ready), waiting for MutationObserver update');
-      if (activePanelContextKey) updateEmailDisplay();
-      return;
-    }
-
-    const targetKey = scanContextKey || activePanelContextKey;
-    const viewKey = activePanelContextKey;
-    const restoreView = targetKey && viewKey && targetKey !== viewKey;
-
-    if (targetKey && restoreView) {
-      activatePanelContext(targetKey);
-    }
-
-    // Throttle noisy logs
-    const now = Date.now();
-    if (payload.meta && now - lastLogTs > 10000) {
-      lastLogTs = now;
-      debugLog('Frame meta rows=', payload.meta.rows, 'unread=', payload.meta.unread, 'context=', targetKey);
-      debugLog('Received', payload.threads.length, 'threads from frame');
-    }
-
-    const clickedIds = clickedEmailIds;
-    const allEmails = payload.threads.slice(0, CONFIG.MAX_EMAILS).map((thread, idx) => ({
-      id: thread.id || thread.threadId || '',
-      threadId: thread.threadId || thread.id || '',
-      from: thread.from || 'Unknown',
-      subject: thread.subject || '(No subject)',
-      date: thread.date || '',
-      snippet: thread.snippet || '',
-      isUnread: thread.isUnread !== false,
-      url: thread.url || '',
-      rowIndex: thread.rowIndex !== undefined ? thread.rowIndex : idx
-    }));
-
-    const nextEmails = allEmails.filter(email => !clickedIds.has(email.id));
-
-    currentEmails = nextEmails;
-    cachedEmails = nextEmails.slice();
-    const ctx = getOrCreatePanelContext(targetKey);
-    ctx.hasScanned = true;
-    ctx.lastScanTs = Date.now();
-    persistActiveContextToMemory(targetKey);
-    saveCacheToPrefs();
-
-    const currentIds = new Set(allEmails.map(e => e.id));
-    for (const clickedId of clickedIds) {
-      if (!currentIds.has(clickedId)) {
-        clickedIds.delete(clickedId);
-      }
-    }
-
-    scanContextKey = null;
-    loadScansInFlight.delete(targetKey);
-    finishLoadScanForTab(sourceTab);
-
-    if (restoreView && viewKey) {
-      activatePanelContext(viewKey);
-    }
-
-    if (targetKey === viewKey) {
-      scanInProgress = false;
-      hideError();
-      updateEmailDisplay();
-    } else {
-      scanInProgress = false;
-    }
-  }
-
   /**
    * Initialize DOM mode
    */
   function initDomMode() {
-    debugLog('Initializing DOM mode');
+    debugLog('Initializing Atom unread source');
     setupMessageListeners();
     scanAllLoadedGmailEssentials();
+    if (!findLoadedGmailEssentialTab()) {
+      const tab = findGmailEssentialTab();
+      if (tab) requestAtomScan(tab, { force: false });
+    }
     return true;
   }
 
@@ -1891,6 +1594,7 @@
     pinCompactChrome(tab);
     panelElement.openPopup(tab || document.documentElement, 'end_before', 4, tabHeight);
     updateEmailDisplay();
+    if (isEssentialHover) requestAtomScan(tab, { force: false });
   }
 
   /**
@@ -2048,7 +1752,7 @@
       const isUnloaded = !contextEssential || isTabDiscardedOrUnloaded(contextEssential);
       const hasScanned = getOrCreatePanelContext(activePanelContextKey).hasScanned;
       const emptyMessage = isUnloaded && !hasScanned
-        ? 'Load Gmail to see inbox'
+        ? 'Sign in to Gmail to see unread mail'
         : 'No unread emails';
       emailsContainer.innerHTML = `<div class="live-gmail-empty">${emptyMessage}</div>`;
       setComposeVisible(false);
@@ -2086,151 +1790,24 @@
           : resolveGmailTargetTab(activePanelContextKey);
 
         if (!targetTab || !gBrowser) return;
-        
-        // Select the tab
+
         if (gBrowser.selectedTab !== targetTab) {
           gBrowser.selectedTab = targetTab;
         }
-        
-        let gmailUrl = email.url || `https://mail.google.com/mail/u/0/#inbox/${email.threadId || email.id}`;
-        
-        if (!/^https?:/i.test(gmailUrl)) {
-          if (gmailUrl.startsWith('#')) {
-            gmailUrl = 'https://mail.google.com/mail/u/0/' + gmailUrl;
-          } else {
-            gmailUrl = 'https://mail.google.com/mail/u/0/' + gmailUrl;
+
+        const gmailUrl = normalizeGmailOpenUrl(email.url) || getGmailInboxUrl();
+        debugLog('Opening email', gmailUrl);
+
+        try {
+          const browser = targetTab.linkedBrowser;
+          if (browser?.fixupAndLoadURIString) {
+            browser.fixupAndLoadURIString(gmailUrl, {
+              triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
+            });
           }
+        } catch (err) {
+          console.warn('[Live Gmail] Could not open email:', err);
         }
-        
-        debugLog('Opening email at rowIndex:', email.rowIndex, 'url:', gmailUrl);
-
-        // Wait for tab to be ready, then send OpenThread message
-        const waitForTabReady = (tab, maxAttempts = 50) => {
-          return new Promise((resolve) => {
-            let attempts = 0;
-            let gmailReady = false;
-            let readyCheckListener = null;
-            
-            const checkReady = () => {
-              attempts++;
-              
-              if (tab.linkedBrowser && tab.linkedBrowser.messageManager) {
-                try {
-                  const browser = tab.linkedBrowser;
-                  const uri = browser.currentURI;
-                  
-                  if (uri && uri.spec.includes(getGmailUrlPattern())) {
-                    // Browser is loaded and on Gmail
-                    if (!gmailReady) {
-                      // First time: inject frame script and wait for Gmail to be ready
-                      loadFrameScript(browser);
-                      
-                      // Set up listener for ready status
-                      if (!readyCheckListener) {
-                        readyCheckListener = (message) => {
-                          if (message.name === 'LiveGmail:ReadyStatus' && message.data?.inboxReady) {
-                            gmailReady = true;
-                            debugLog('Gmail inbox is ready, rows:', message.data.rows);
-                            
-                            // Now send the OpenThread message immediately
-                            try {
-                              debugLog('Sending OpenThread message:', {
-                                threadId: email.threadId || email.id,
-                                url: gmailUrl,
-                                rowIndex: email.rowIndex
-                              });
-                              browser.messageManager.sendAsyncMessage('LiveGmail:OpenThread', {
-                                threadId: email.threadId || email.id,
-                                url: gmailUrl,
-                                rowIndex: email.rowIndex
-                              });
-                              debugLog('Sent OpenThread to tab');
-                              
-                              // Clean up listener
-                              if (readyCheckListener) {
-                                Services.mm.removeMessageListener('LiveGmail:ReadyStatus', readyCheckListener);
-                              }
-                              resolve(true);
-                            } catch (err) {
-                              console.warn('[Live Gmail] Could not send OpenThread:', err);
-                              if (readyCheckListener) {
-                                Services.mm.removeMessageListener('LiveGmail:ReadyStatus', readyCheckListener);
-                              }
-                              resolve(false);
-                            }
-                          }
-                        };
-                        
-                        Services.mm.addMessageListener('LiveGmail:ReadyStatus', readyCheckListener);
-                      }
-                      
-                      // Request ready check from frame script immediately
-                      try {
-                        browser.messageManager.sendAsyncMessage('LiveGmail:CheckReady', {});
-                      } catch (e) {
-                        debugLog('Could not send CheckReady:', e);
-                      }
-                    }
-                    
-                    // Continue checking if not ready yet
-                    if (!gmailReady && attempts < maxAttempts) {
-                      setTimeout(checkReady, 50);
-                    } else if (!gmailReady) {
-                      console.warn('[Live Gmail] Gmail did not become ready in time');
-                      if (readyCheckListener) {
-                        Services.mm.removeMessageListener('LiveGmail:ReadyStatus', readyCheckListener);
-                      }
-                      resolve(false);
-                    }
-                    return;
-                  }
-                } catch (e) {
-                  debugLog('Error checking tab ready:', e);
-                }
-              }
-              
-              if (attempts >= maxAttempts) {
-                console.warn('[Live Gmail] Tab did not become ready in time');
-                if (readyCheckListener) {
-                  Services.mm.removeMessageListener('LiveGmail:ReadyStatus', readyCheckListener);
-                }
-                resolve(false);
-                return;
-              }
-              
-              setTimeout(checkReady, 100);
-            };
-            
-            // Also listen for load event
-            if (tab.linkedBrowser) {
-              tab.linkedBrowser.addEventListener('load', () => {
-                setTimeout(checkReady, 500);
-              }, { once: true });
-            }
-            
-            checkReady();
-          });
-        };
-
-        // Always use waitForTabReady to ensure frame script is loaded
-        waitForTabReady(targetTab).then((success) => {
-          if (success) {
-            debugLog('Successfully navigated to email');
-          } else {
-            console.warn('[Live Gmail] Failed to navigate to email, falling back to URL navigation');
-            // Fallback: navigate via URL
-            try {
-              const browser = targetTab.linkedBrowser;
-              if (browser && browser.currentURI) {
-                browser.loadURI(gmailUrl, {
-                  triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
-                });
-              }
-            } catch (err) {
-              console.warn('[Live Gmail] Could not navigate via URL:', err);
-            }
-          }
-        });
         
         // Track clicked email by its stable ID
         clickedEmailIds.add(email.id);
@@ -2360,7 +1937,10 @@
       }
     },
     hidePanel,
-    scan: () => scanLoadedGmailEssential(),
+    scan: () => {
+      const tab = findGmailEssentialTab();
+      if (tab) requestAtomScan(tab, { force: true });
+    },
     rescan: () => scanAllLoadedGmailEssentials(),
     emails: () => currentEmails,
     context: () => activePanelContextKey,

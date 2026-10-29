@@ -2,9 +2,9 @@
 
 > **Purpose:** Hand this file to a fresh LLM conversation when working on this mod. It describes what the mod does, how it is built, and how it integrates with Zen Browser / Firefox internals.
 >
-> **Current version:** `3.0.2` (see `theme.json` and `@version` in `live-gmail.uc.js`)
+> **Current version:** `3.5.0` (see `theme.json` and `@version` in `live-gmail.uc.js`)
 >
-> **Last updated:** 2026-06-20
+> **Last updated:** 2026-10-29
 
 ---
 
@@ -19,10 +19,11 @@ User-facing behavior:
 3. The panel lists unread emails (sender, subject, snippet, date).
 4. Clicking an email selects the Gmail tab and opens that thread.
 5. A floating **+** button opens Gmail compose.
-6. If the Gmail essential is **unloaded/discarded**, the mod **briefly loads it in the background**, scans the inbox DOM, then **unloads it again** (transient scan).
+6. Unread mail comes from Gmail's **Atom feed** (`https://mail.google.com/mail/u/N/feed/atom`) using the essential's container cookies. The tab does not need to be loaded.
 7. Cached results persist across browser restarts via a profile JSON file.
+8. If a Gmail tab **is** loaded, a small frame script watches inbox **read-state** only and forces a fresh Atom fetch when it changes.
 
-**Important:** This mod does **not** use the Gmail API. It **scrapes the Gmail inbox DOM** inside a real Gmail tab via an injected frame script.
+**Important:** This mod does **not** use the Gmail API and does **not** scrape inbox rows for the unread list. It fetches Atom in chrome (cookies via content principal + `userContextId`, same pattern as Zen live folders). XML is parsed in chrome, outside Gmail CSP. Never navigate a tab to `/feed/atom` (that triggers HTTP Basic auth). The frame script must not be used as the unread source.
 
 ---
 
@@ -84,7 +85,15 @@ If `gBrowser` is not ready yet, init retries every 200ms.
 
 ---
 
-## Architecture overview
+## Architecture overview (3.5.0)
+
+Chrome fetches Atom with the essential's `userContextId`, parses XML, and fills the panel. A frame script is optional: it only sends `LiveGmail:ReadState` so chrome can bust the 60s Atom cache. Clicking an item loads the Atom permalink with `fixupAndLoadURIString`.
+
+Older sections below that describe inbox-row scraping, `OpenThread`, `CheckReady`, or waking discarded tabs for a DOM scan are **obsolete**.
+
+---
+
+## Architecture overview (historical)
 
 Two layers communicate via **frame script messages**:
 
