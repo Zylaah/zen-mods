@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name           Live Gmail Panel
-// @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential tabs
+// @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential or pinned tabs
 // @author         Bxth
-// @version        3.5.0
+// @version        3.6.0
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -75,23 +75,35 @@
   let compactPinTarget = null; // non-tab node with [open] while the panel is shown
 
   /**
+   * Firefox container id on a tab (default 0).
+   * Cookie jars and Atom fetches are isolated by this id.
+   */
+  function getTabUserContextId(tab) {
+    if (!tab) return 0;
+    if (typeof tab.userContextId === 'number' && !Number.isNaN(tab.userContextId)) {
+      return tab.userContextId;
+    }
+    return parseInt(tab.getAttribute('usercontextid') || '0', 10) || 0;
+  }
+
+  /**
    * Panel cache key: one panel state per Firefox container.
    * Zen shares essentials across workspaces that use the same container, so inbox
    * content only differs by container — not by workspace uuid.
    */
   function getPanelContextKey(tab = hoveredTab) {
-    let containerId = 0;
+    if (tab) return String(getTabUserContextId(tab) || 0);
 
     if (window.gZenWorkspaces?.containerSpecificEssentials) {
-      if (tab?.hasAttribute?.('zen-essential')) {
-        containerId = parseInt(tab.getAttribute('usercontextid') || '0', 10);
-      } else {
-        const active = window.gZenWorkspaces?.getActiveWorkspaceFromCache?.();
-        containerId = typeof active?.containerTabId === 'number' ? active.containerTabId : 0;
+      const active = window.gZenWorkspaces?.getActiveWorkspaceFromCache?.();
+      if (typeof active?.containerTabId === 'number') {
+        return String(active.containerTabId || 0);
       }
     }
 
-    return String(containerId || 0);
+    const selected = gBrowser?.selectedTab;
+    if (selected) return String(getTabUserContextId(selected) || 0);
+    return '0';
   }
 
   /**
@@ -107,17 +119,15 @@
   }
 
   /**
-   * Whether an essential belongs to the container of a panel context key.
+   * Whether a tab belongs to the Firefox container of a panel context key.
    */
   function tabMatchesContainerContext(tab, contextKey) {
-    if (!tab?.hasAttribute('zen-essential')) return false;
-    if (!window.gZenWorkspaces?.containerSpecificEssentials) return true;
+    if (!tab) return false;
+    return getTabUserContextId(tab) === getContextContainerId(contextKey);
+  }
 
-    const containerId = getContextContainerId(contextKey);
-    if (!containerId) return true;
-
-    const tabContainerId = parseInt(tab.getAttribute('usercontextid') || '0', 10);
-    return tabContainerId === containerId;
+  function isEssentialOrPinnedTab(tab) {
+    return !!(tab && (tab.hasAttribute('zen-essential') || tab.pinned));
   }
 
   function normalizeDiskCacheEntry(entry) {
@@ -289,10 +299,10 @@
   }
 
   /**
-   * Check if a tab is a Gmail essential tab for the given container context
+   * Gmail essential or pinned tab for the given Firefox container.
    */
-  function isGmailEssentialTab(tab, contextKey = getPanelContextKey(tab)) {
-    if (!tab || !tab.hasAttribute('zen-essential')) return false;
+  function isGmailAnchorTab(tab, contextKey = getPanelContextKey(tab)) {
+    if (!isEssentialOrPinnedTab(tab)) return false;
     if (!tabMatchesContainerContext(tab, contextKey)) return false;
     return tabMatchesGmailPattern(tab);
   }
@@ -309,11 +319,11 @@
    * Resolve the Gmail essential tab to use for navigation (hovered, existing, or new)
    */
   function resolveGmailTargetTab(contextKey = activePanelContextKey || getPanelContextKey()) {
-    if (hoveredTab && isGmailEssentialTab(hoveredTab, contextKey)) {
+    if (hoveredTab && isGmailAnchorTab(hoveredTab, contextKey)) {
       return hoveredTab;
     }
 
-    const existing = findGmailEssentialTab(contextKey);
+    const existing = findGmailAnchorTab(contextKey);
     if (existing) return existing;
 
     if (!gBrowser) return null;
@@ -330,15 +340,7 @@
         addTabArgs.userContextId = containerId;
       }
 
-      const tab = gBrowser.addTab(gmailUrl, addTabArgs);
-      if (tab && !tab.hasAttribute('zen-essential')) {
-        if (window.gZenPinnedTabManager?.addToEssentials) {
-          window.gZenPinnedTabManager.addToEssentials(tab);
-        } else {
-          tab.setAttribute('zen-essential', 'true');
-        }
-      }
-      return tab;
+      return gBrowser.addTab(gmailUrl, addTabArgs);
     } catch (err) {
       console.warn('[Live Gmail] Could not create Gmail tab:', err);
       return null;
@@ -398,7 +400,7 @@
   }
 
   function performLoadScan(tab) {
-    if (!tab || tab.closing || !isGmailEssentialTab(tab)) return;
+    if (!tab || tab.closing || !isGmailAnchorTab(tab)) return;
 
     const browser = tab.linkedBrowser;
     if (browser && !isTabPendingOrDiscarded(tab) && !activeLoadScanTabs.has(tab)) {
@@ -453,10 +455,10 @@
     return false;
   }
 
-  function findLoadedGmailEssentialTab(contextKey = activePanelContextKey || getPanelContextKey()) {
+  function findLoadedGmailAnchorTab(contextKey = activePanelContextKey || getPanelContextKey()) {
     if (!gBrowser?.tabs) return null;
     for (const tab of gBrowser.tabs) {
-      if (!isGmailEssentialTab(tab, contextKey)) continue;
+      if (!isGmailAnchorTab(tab, contextKey)) continue;
       if (isTabPendingOrDiscarded(tab)) continue;
       if (isBrowserNavigationComplete(tab.linkedBrowser)) return tab;
     }
@@ -472,18 +474,18 @@
   }
 
   /**
-   * Refresh unread mail for this container (Atom). Works with a discarded essential.
+   * Refresh unread mail for this container (Atom). Works with a discarded tab.
    */
   function scanLoadedGmailEssential(contextKey = activePanelContextKey || getPanelContextKey()) {
-    const essential =
-      findLoadedGmailEssentialTab(contextKey) || findGmailEssentialTab(contextKey);
-    if (!essential) return false;
-    performLoadScan(essential);
+    const anchor =
+      findLoadedGmailAnchorTab(contextKey) || findGmailAnchorTab(contextKey);
+    if (!anchor) return false;
+    performLoadScan(anchor);
     return true;
   }
 
   function checkGmailEssentialLoadState(tab) {
-    if (!isGmailEssentialTab(tab)) return;
+    if (!isGmailAnchorTab(tab)) return;
 
     const wasLoaded = tab.getAttribute('data-live-gmail-was-loaded') === 'true';
     const isLoaded =
@@ -517,7 +519,7 @@
   function scanAllLoadedGmailEssentials() {
     if (!gBrowser?.tabs) return;
     for (const tab of gBrowser.tabs) {
-      if (!isGmailEssentialTab(tab)) continue;
+      if (!isGmailAnchorTab(tab, getPanelContextKey(tab))) continue;
       attachGmailEssentialLoadListeners(tab);
       checkGmailEssentialLoadState(tab);
     }
@@ -622,15 +624,15 @@
   }
 
   /**
-   * Find the Gmail essential tab in the active container (loaded or discarded)
+   * Find the Gmail essential or pinned tab in the given container (loaded or discarded)
    */
-  function findGmailEssentialTab(contextKey = activePanelContextKey || getPanelContextKey()) {
-    const loaded = findLoadedGmailEssentialTab(contextKey);
+  function findGmailAnchorTab(contextKey = activePanelContextKey || getPanelContextKey()) {
+    const loaded = findLoadedGmailAnchorTab(contextKey);
     if (loaded) return loaded;
 
     if (!gBrowser?.tabs) return null;
     for (const tab of gBrowser.tabs) {
-      if (isGmailEssentialTab(tab, contextKey)) return tab;
+      if (isGmailAnchorTab(tab, contextKey)) return tab;
     }
     return null;
   }
@@ -910,7 +912,7 @@
     try {
       const { status, finalUrl, text } = await fetchAtomXml(
         feedUrl,
-        getContextContainerId(contextKey)
+        getTabUserContextId(tab)
       );
       if (status === 401 || status === 403) {
         const err = new Error('Sign-in required');
@@ -962,7 +964,7 @@
   }
 
   function onGmailReadStateChanged(tab) {
-    if (!tab || !isGmailEssentialTab(tab)) return;
+    if (!tab || !isGmailAnchorTab(tab)) return;
     const contextKey = getPanelContextKey(tab);
     if (readStateTimers.has(contextKey)) {
       clearTimeout(readStateTimers.get(contextKey));
@@ -1120,8 +1122,8 @@
     debugLog('Initializing Atom unread source');
     setupMessageListeners();
     scanAllLoadedGmailEssentials();
-    if (!findLoadedGmailEssentialTab()) {
-      const tab = findGmailEssentialTab();
+    if (!findLoadedGmailAnchorTab()) {
+      const tab = findGmailAnchorTab();
       if (tab) requestAtomScan(tab, { force: false });
     }
     return true;
@@ -1186,11 +1188,6 @@
     title.appendChild(gmailLogo);
     title.appendChild(document.createTextNode('Unread'));
     header.appendChild(title);
-
-    const cacheAge = document.createElement('span');
-    cacheAge.className = 'live-gmail-cache-age';
-    cacheAge.setAttribute('aria-live', 'polite');
-    header.appendChild(cacheAge);
     
     // Content
     const content = document.createElement('div');
@@ -1304,9 +1301,11 @@
       gBrowser.tabContainer.addEventListener('TabAttrModified', handleTabChange);
       gBrowser.tabContainer.addEventListener('TabOpen', handleTabChange);
       gBrowser.tabContainer.addEventListener('TabClose', handleTabChange);
+      gBrowser.tabContainer.addEventListener('TabPinned', handleTabChange);
+      gBrowser.tabContainer.addEventListener('TabUnpinned', handleTabChange);
     }
 
-    setupEssentialsHoverDelegation();
+    setupHoverDelegation();
     setupWorkspaceMonitoring();
 
     // Debounce for MutationObserver only — rapid tab attribute changes (favicon,
@@ -1325,13 +1324,18 @@
       observer.observe(essentials, {
         childList: true,
         attributes: true,
-        attributeFilter: ['zen-essential', 'data-url', 'pending', 'label', 'image']
+        attributeFilter: ['zen-essential', 'pinned', 'data-url', 'pending', 'label', 'image']
       });
     }
 
     const tabs = document.getElementById('tabbrowser-tabs');
     if (tabs) {
-      observer.observe(tabs, { childList: true, attributes: true, subtree: true, attributeFilter: ['zen-essential', 'data-url'] });
+      observer.observe(tabs, {
+        childList: true,
+        attributes: true,
+        subtree: true,
+        attributeFilter: ['zen-essential', 'pinned', 'data-url']
+      });
     }
   }
 
@@ -1354,9 +1358,9 @@
   }
 
   /**
-   * Attach hover listeners to a single essential tab (once).
+   * Attach hover listeners to a single essential or pinned tab (once).
    */
-  function attachEssentialHoverListener(tab) {
+  function attachHoverListener(tab) {
     if (!tab || tab.hasAttribute('data-live-gmail-listener')) return;
     tab.addEventListener('mouseenter', handleTabHover);
     tab.addEventListener('mouseleave', handleTabLeave);
@@ -1372,30 +1376,29 @@
     if (!gBrowser || !gBrowser.tabs) return;
 
     const pattern = getGmailUrlPattern();
-    const contextKey = getPanelContextKey();
 
     for (const tab of gBrowser.tabs) {
-      if (!tab.hasAttribute('zen-essential')) continue;
-
-      attachEssentialHoverListener(tab);
-
-      if (tabMatchesGmailPattern(tab)) {
-        attachGmailEssentialLoadListeners(tab);
-        checkGmailEssentialLoadState(tab);
+      if (tab.hasAttribute('zen-essential') || (tab.pinned && tabMatchesGmailPattern(tab))) {
+        attachHoverListener(tab);
       }
 
-      if (!tabMatchesGmailPattern(tab)) continue;
-      if (!tabMatchesContainerContext(tab, contextKey)) continue;
+      if (!isGmailAnchorTab(tab, getPanelContextKey(tab))) continue;
+
+      attachGmailEssentialLoadListeners(tab);
+      checkGmailEssentialLoadState(tab);
 
       const hints = getTabUrlHints(tab);
       const tabUrl = hints.find((h) => h.includes(pattern)) || hints[0] || '';
       gmailTabs.set(tab, tabUrl);
     }
 
-    // Also attach via the essentials DOM — on cold start tabs may appear here
-    // before all session metadata is reflected in gBrowser.tabs iteration.
-    for (const tab of document.querySelectorAll('#zen-essentials .tabbrowser-tab[zen-essential]')) {
-      attachEssentialHoverListener(tab);
+    // Cold start: tabs may appear in these strips before gBrowser.tabs is complete.
+    for (const tab of document.querySelectorAll(
+      '#zen-essentials .tabbrowser-tab[zen-essential], .zen-workspace-pinned-tabs-section .tabbrowser-tab[pinned]'
+    )) {
+      if (tab.hasAttribute('zen-essential') || tabMatchesGmailPattern(tab)) {
+        attachHoverListener(tab);
+      }
     }
   }
 
@@ -1412,26 +1415,28 @@
   }
 
   /**
-   * Fallback hover delegation on the essentials strip, for cases where the
+   * Fallback hover delegation for essentials and pinned tabs, for cases where the
    * per-tab mouseenter listener in updateGmailTabs was not yet attached.
    */
-  function setupEssentialsHoverDelegation() {
-    const root =
-      document.querySelector('.zen-essentials-container') ||
-      document.getElementById('zen-essentials');
-    if (!root || root.hasAttribute('data-live-gmail-hover-delegate')) return;
+  function setupHoverDelegation() {
+    const onHover = (event) => {
+      const tab = event.target.closest?.('.tabbrowser-tab');
+      if (!tab || !isGmailAnchorTab(tab, getPanelContextKey(tab))) return;
+      scheduleShow(tab);
+    };
 
-    root.setAttribute('data-live-gmail-hover-delegate', 'true');
-    root.addEventListener(
-      'mouseover',
-      (event) => {
-        const tab = event.target.closest('.tabbrowser-tab');
-        if (!tab?.hasAttribute('zen-essential')) return;
-        if (!isGmailEssentialTab(tab)) return;
-        scheduleShow(tab);
-      },
-      true
-    );
+    const roots = [
+      document.querySelector('.zen-essentials-container'),
+      document.getElementById('zen-essentials'),
+      document.querySelector('.zen-workspace-pinned-tabs-section'),
+      document.getElementById('tabbrowser-tabs')
+    ];
+
+    for (const root of roots) {
+      if (!root || root.hasAttribute('data-live-gmail-hover-delegate')) continue;
+      root.setAttribute('data-live-gmail-hover-delegate', 'true');
+      root.addEventListener('mouseover', onHover, true);
+    }
   }
 
   /**
@@ -1439,7 +1444,7 @@
    */
   function handleTabHover(event) {
     const tab = event.currentTarget;
-    if (!isGmailEssentialTab(tab)) {
+    if (!isGmailAnchorTab(tab)) {
       // Use the delayed hide rather than an instant one so the grace period
       // applies regardless of which side the cursor exits the Gmail tab from.
       // If the cursor continues on to the panel, its mouseenter cancels this.
@@ -1497,11 +1502,11 @@
   }
 
   /**
-   * Open the panel after the user has hovered a Gmail essential tab long enough.
+   * Open the panel after the user has hovered a Gmail essential or pinned tab long enough.
    * If the panel is already open, switch context immediately.
    */
   function scheduleShow(tab) {
-    if (!tab || !isGmailEssentialTab(tab)) return;
+    if (!tab || !isGmailAnchorTab(tab, getPanelContextKey(tab))) return;
 
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
 
@@ -1532,11 +1537,14 @@
     if (tab) {
       const inner = tab.querySelector('.tab-content, .tab-icon-stack');
       if (inner) return inner;
-      const essentials = tab.closest('#zen-essentials, .zen-essentials-container');
-      if (essentials) return essentials;
+      const strip = tab.closest(
+        '#zen-essentials, .zen-essentials-container, .zen-workspace-pinned-tabs-section'
+      );
+      if (strip) return strip;
     }
     return document.getElementById('zen-essentials')
-      || document.querySelector('.zen-essentials-container');
+      || document.querySelector('.zen-essentials-container')
+      || document.querySelector('.zen-workspace-pinned-tabs-section');
   }
 
   function pinCompactChrome(tab) {
@@ -1567,18 +1575,17 @@
 
     activatePanelContext(contextKey);
 
-    const isEssentialHover = tab && isGmailEssentialTab(tab);
+    const isAnchorHover = tab && isGmailAnchorTab(tab, contextKey);
 
-    if (tab && tab.hasAttribute('zen-essential') && !isEssentialHover) {
+    if (tab && isEssentialOrPinnedTab(tab) && !isAnchorHover) {
       hidePanel();
       return;
     }
 
-    // Gmail essential hover always opens the panel
-    if (!isEssentialHover) {
+    if (!isAnchorHover) {
       const hasCachedData = cachedEmails.length > 0 || currentEmails.length > 0;
       if (!hasCachedData && !hasGmailTab()) {
-        debugLog('No Gmail essential hover, tab, or cached data; not showing panel');
+        debugLog('No Gmail hover, tab, or cached data; not showing panel');
         hidePanel();
         return;
       }
@@ -1594,7 +1601,7 @@
     pinCompactChrome(tab);
     panelElement.openPopup(tab || document.documentElement, 'end_before', 4, tabHeight);
     updateEmailDisplay();
-    if (isEssentialHover) requestAtomScan(tab, { force: false });
+    if (isAnchorHover) requestAtomScan(tab, { force: false });
   }
 
   /**
@@ -1651,65 +1658,6 @@
   }
 
   /**
-   * Format a cache timestamp for the panel header.
-   */
-  function formatCacheAge(timestamp) {
-    if (!timestamp) return '';
-
-    const diffMs = Math.max(0, Date.now() - timestamp);
-    const sec = Math.floor(diffMs / 1000);
-
-    if (sec < 60) return 'Updated just now';
-
-    const min = Math.floor(sec / 60);
-    if (min < 60) return min === 1 ? 'Updated 1 min ago' : `Updated ${min} min ago`;
-
-    const hr = Math.floor(min / 60);
-    if (hr < 24) return hr === 1 ? 'Updated 1 hr ago' : `Updated ${hr} hr ago`;
-
-    const days = Math.floor(hr / 24);
-    if (days < 7) return days === 1 ? 'Updated 1 day ago' : `Updated ${days} days ago`;
-
-    return 'Updated ' + new Date(timestamp).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric'
-    });
-  }
-
-  /**
-   * Show cache age in the header when the essential tab is unloaded.
-   */
-  function updateCacheAgeLabel() {
-    const ageEl = panelElement?.querySelector('.live-gmail-cache-age');
-    if (!ageEl) return;
-
-    const contextKey = activePanelContextKey;
-    if (!contextKey) {
-      ageEl.textContent = '';
-      ageEl.hidden = true;
-      return;
-    }
-
-    const essential = findGmailEssentialTab(contextKey);
-    const isUnloaded = essential && isTabDiscardedOrUnloaded(essential);
-    if (!isUnloaded) {
-      ageEl.textContent = '';
-      ageEl.hidden = true;
-      return;
-    }
-
-    const ctx = getOrCreatePanelContext(contextKey);
-    if (!ctx.hasScanned || !ctx.lastScanTs) {
-      ageEl.textContent = '';
-      ageEl.hidden = true;
-      return;
-    }
-
-    ageEl.textContent = formatCacheAge(ctx.lastScanTs);
-    ageEl.hidden = false;
-  }
-
-  /**
    * Update email display
    */
   function updateEmailDisplay() {
@@ -1720,10 +1668,6 @@
     const composeBtn = panelElement.querySelector('.live-gmail-compose-btn');
 
     if (!emailsContainer) return;
-
-    const finishDisplay = () => {
-      updateCacheAgeLabel();
-    };
 
     // Always prefer showing cached data over a blank loading spinner
     const emailsToShow = currentEmails.length > 0
@@ -1740,7 +1684,6 @@
       if (loadingContainer) loadingContainer.style.display = 'block';
       emailsContainer.innerHTML = '';
       setComposeVisible(false);
-      finishDisplay();
       return;
     }
 
@@ -1748,15 +1691,14 @@
     emailsContainer.innerHTML = '';
 
     if (emailsToShow.length === 0) {
-      const contextEssential = findGmailEssentialTab(activePanelContextKey);
-      const isUnloaded = !contextEssential || isTabDiscardedOrUnloaded(contextEssential);
+      const contextAnchor = findGmailAnchorTab(activePanelContextKey);
+      const isUnloaded = !contextAnchor || isTabDiscardedOrUnloaded(contextAnchor);
       const hasScanned = getOrCreatePanelContext(activePanelContextKey).hasScanned;
       const emptyMessage = isUnloaded && !hasScanned
         ? 'Sign in to Gmail to see unread mail'
         : 'No unread emails';
       emailsContainer.innerHTML = `<div class="live-gmail-empty">${emptyMessage}</div>`;
       setComposeVisible(false);
-      finishDisplay();
       return;
     }
 
@@ -1785,7 +1727,7 @@
         e.preventDefault();
         e.stopPropagation();
 
-        const targetTab = (hoveredTab && isGmailEssentialTab(hoveredTab))
+        const targetTab = (hoveredTab && isGmailAnchorTab(hoveredTab))
           ? hoveredTab
           : resolveGmailTargetTab(activePanelContextKey);
 
@@ -1834,8 +1776,6 @@
 
       emailsContainer.appendChild(el);
     });
-
-    finishDisplay();
   }
 
   /**
@@ -1938,7 +1878,7 @@
     },
     hidePanel,
     scan: () => {
-      const tab = findGmailEssentialTab();
+      const tab = findGmailAnchorTab();
       if (tab) requestAtomScan(tab, { force: true });
     },
     rescan: () => scanAllLoadedGmailEssentials(),

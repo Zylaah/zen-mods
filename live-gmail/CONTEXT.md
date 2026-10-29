@@ -2,7 +2,7 @@
 
 > **Purpose:** Hand this file to a fresh LLM conversation when working on this mod. It describes what the mod does, how it is built, and how it integrates with Zen Browser / Firefox internals.
 >
-> **Current version:** `3.5.0` (see `theme.json` and `@version` in `live-gmail.uc.js`)
+> **Current version:** `3.6.0` (see `theme.json` and `@version` in `live-gmail.uc.js`)
 >
 > **Last updated:** 2026-10-29
 
@@ -10,16 +10,16 @@
 
 ## What this mod does
 
-**Live Gmail Panel** is a **Zen Browser mod** (loaded via **Sine**) that shows a floating preview of **unread Gmail** when the user hovers a **Gmail essential tab**.
+**Live Gmail Panel** is a **Zen Browser mod** (loaded via **Sine**) that shows a floating preview of **unread Gmail** when the user hovers a **Gmail essential or pinned tab**.
 
 User-facing behavior:
 
-1. User pins Gmail as a **Zen essential** tab (`zen-essential` attribute).
+1. User pins Gmail as a **Zen essential** (`zen-essential`) or **pinned** (`tab.pinned`) tab.
 2. Hovering that tab opens a native-style **XUL popup panel** beside the tab.
 3. The panel lists unread emails (sender, subject, snippet, date).
 4. Clicking an email selects the Gmail tab and opens that thread.
 5. A floating **+** button opens Gmail compose.
-6. Unread mail comes from Gmail's **Atom feed** (`https://mail.google.com/mail/u/N/feed/atom`) using the essential's container cookies. The tab does not need to be loaded.
+6. Unread mail comes from Gmail's **Atom feed** (`https://mail.google.com/mail/u/N/feed/atom`) using that tab's Firefox container cookies (`userContextId`). The tab does not need to be loaded.
 7. Cached results persist across browser restarts via a profile JSON file.
 8. If a Gmail tab **is** loaded, a small frame script watches inbox **read-state** only and forces a fresh Atom fetch when it changes.
 
@@ -101,7 +101,7 @@ Two layers communicate via **frame script messages**:
 ┌─────────────────────────────────────────────────────────────┐
 │  CHROME LAYER (live-gmail.uc.js in browser.xhtml)           │
 │                                                             │
-│  • Hover detection on essential tabs                        │
+│  • Hover detection on essential and pinned Gmail tabs       │
 │  • XUL popup panel UI                                       │
 │  • Tab load/unload orchestration                            │
 │  • Cache read/write (live-gmail-cache.json)                 │
@@ -214,26 +214,24 @@ Skipped if tab is selected or user opened Gmail (compose click, email click call
 
 ## Zen Browser integration
 
-### Essential tabs
+### Essential and pinned tabs
 
-Gmail must be a **Zen essential** tab:
+Gmail must be a **Zen essential** or **pinned** tab:
 
-- DOM attribute: `zen-essential="true"`
-- Detected via `isGmailEssentialTab(tab)` which also checks URL pattern and active workspace container
-
-Creating essentials uses Zen API when available:
-
-```js
-window.gZenPinnedTabManager.addToEssentials(tab);
-```
+- Essentials: DOM attribute `zen-essential="true"`
+- Pinned: Firefox/Zen `tab.pinned` (workspace pinned-tabs strip)
+- Detected via `isGmailAnchorTab(tab)` which also checks URL pattern and the tab's `userContextId`
 
 ### Workspaces & containers
 
-If `gZenWorkspaces.containerSpecificEssentials` is enabled, only essentials in the **active workspace container** (`usercontextid`) are tracked.
+Atom fetches use `Services.scriptSecurityManager.createContentPrincipal(uri, { userContextId })` so cookies come from that Firefox container, not from whatever workspace is active.
 
-Relevant globals:
+Panel cache keys are container ids (`"0"`, `"2"`, …). Hovering Gmail in Work vs Personal loads that container's unread list.
 
-- `window.gZenWorkspaces.getActiveWorkspaceFromCache()`
+Relevant helpers:
+
+- `getTabUserContextId(tab)`
+- `window.gZenWorkspaces.getActiveWorkspaceFromCache()` (fallback when no hovered tab)
 - `activeWorkspace.containerTabId`
 
 ### Tab states (critical for loading)
@@ -412,8 +410,8 @@ Frame script logs as `[Live Gmail Frame]` when debug is enabled.
 | `handleFrameScriptData` | Process scan results, cache, trigger unload |
 | `unloadGmailEssentialTab` | `explicitUnloadTabs` wrapper |
 | `updateEmailDisplay` | Render panel content from emails / loading state |
-| `isGmailEssentialTab` | Essential + container + URL match |
-| `findGmailEssentialTab` | Prefer loaded, else any matching essential |
+| `isGmailAnchorTab` | Essential or pinned + container + URL match |
+| `findGmailAnchorTab` | Prefer loaded, else any matching essential/pinned Gmail |
 | `resolveGmailTargetTab` | For compose/click: find or create essential |
 
 ---

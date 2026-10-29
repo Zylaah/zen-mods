@@ -5,11 +5,11 @@
     </a>
 </div>
 
-A Zen Browser mod for Sine that shows your unread Gmail in a quick hover panel on your Gmail essential tab.
+A Zen Browser mod for Sine that shows your unread Gmail in a quick hover panel on your Gmail essential or pinned tab.
 
 ## Features
 
-- Hover your Gmail essential tab to open an unread mail panel
+- Hover your Gmail essential or pinned tab to open an unread mail panel
 - See sender, subject, snippet, and date at a glance
 - Click an item to open the conversation in Gmail
 - Floating **+** button to start a new message in Gmail
@@ -23,8 +23,8 @@ A Zen Browser mod for Sine that shows your unread Gmail in a quick hover panel o
 
 ## Usage
 
-1. Pin Gmail as an **essential** tab.
-2. Hover the Gmail essential tab.
+1. Pin Gmail as an **essential** or **pinned** tab.
+2. Hover that tab.
 3. Read unread previews in the panel.
 4. Click an email to open it in Gmail.
 
@@ -37,6 +37,6 @@ A Zen Browser mod for Sine that shows your unread Gmail in a quick hover panel o
 
 ## Notes
 
-- Works best with a signed-in Gmail session in the same profile/container.
-- Unread mail comes from Gmail's Atom feed (`/mail/u/N/feed/atom`) using that tab's cookies. The inbox page is only watched to refresh after you mark mail read.
+- Works best with a signed-in Gmail session in the same profile. Each Firefox container has its own cookies, so a Gmail pin in Work and one in Personal show that container's inbox.
+- Unread mail comes from Gmail's Atom feed (`/mail/u/N/feed/atom`) using that tab's container cookies. The inbox page is only watched to refresh after you mark mail read.
 - Clicking an item opens Gmail's permalink for that conversation.
