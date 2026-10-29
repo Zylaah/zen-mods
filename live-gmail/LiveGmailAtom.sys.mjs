@@ -114,6 +114,7 @@ export class LiveGmailAtom {
         Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_SEC_CONTEXT_IS_NULL |
         Ci.nsILoadInfo.SEC_COOKIES_INCLUDE
     }).QueryInterface(Ci.nsIHttpChannel);
+    channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE | Ci.nsIRequest.INHIBIT_CACHING;
     channel.notificationCallbacks = cancelAuthPrompt();
 
     const win = this.app.window;
@@ -213,6 +214,19 @@ export class LiveGmailAtom {
     }
   }
 
+  async fetchViaTab(tab, feedUrl) {
+    const browser = tab?.linkedBrowser;
+    if (!browser?.browsingContext || this.app.tabs.isPendingOrDiscarded(tab)) return null;
+    let actor;
+    try {
+      actor = browser.browsingContext.currentWindowGlobal?.getActor('LiveGmail');
+    } catch (e) {
+      return null;
+    }
+    if (!actor?.sendQuery) return null;
+    return actor.sendQuery('LiveGmail:FetchAtom', { feedUrl });
+  }
+
   async requestScan(tab, { force = false } = {}) {
     if (!tab) return;
     const app = this.app;
@@ -245,7 +259,19 @@ export class LiveGmailAtom {
     }
 
     try {
-      const { status, finalUrl, text } = await this.fetchXml(feedUrl, getTabUserContextId(tab));
+      let via = 'tab';
+      let fetched = null;
+      try {
+        fetched = await this.fetchViaTab(tab, feedUrl);
+      } catch (e) {
+        debugLog('Tab Atom fetch failed', e && e.message ? e.message : e);
+      }
+      if (!fetched) {
+        via = 'chrome';
+        fetched = await this.fetchXml(feedUrl, getTabUserContextId(tab));
+      }
+      debugLog('Atom via', via);
+      const { status, finalUrl, text } = fetched;
       if (status === 401 || status === 403) {
         const err = new Error('Sign-in required');
         err.signin = true;
