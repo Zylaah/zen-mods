@@ -337,6 +337,7 @@ export class LiveGmailAtom {
     capture.teed = true;
 
     let original = null;
+    const atom = this;
     const sink = {
       onStartRequest(request) {
         original.onStartRequest(request);
@@ -354,17 +355,8 @@ export class LiveGmailAtom {
         original.onDataAvailable(request, storage.newInputStream(0), 0, count);
       },
       onStopRequest(request, requestStatus) {
-        original.onStopRequest(request, requestStatus);
-        const bytes = Uint8Array.from(capture.chunks.join(''), (ch) => ch.charCodeAt(0));
-        const text = new TextDecoder('utf-8').decode(bytes);
-        let finalUrl = spec;
-        let httpStatus = status;
-        try { finalUrl = channel.URI.spec; } catch (e) {}
-        try { httpStatus = channel.responseStatus; } catch (e) {}
-        debugLog('Atom document body', httpStatus, text.trim().slice(0, 1) === '<' ? 'xml' : 'not-xml', text.length);
-        if (text.includes('<feed')) {
-          capture.finish({ status: httpStatus, finalUrl, text });
-        }
+        try { original.onStopRequest(request, requestStatus); } catch (e) {}
+        atom.#finishCapturedBody(channel, capture.chunks.slice(), spec, status, capture);
       }
     };
     try {
@@ -373,6 +365,123 @@ export class LiveGmailAtom {
       capture.teed = false;
       debugLog('Atom document tee failed', e && e.message ? e.message : e);
     }
+  }
+
+  #finishCapturedBody(channel, chunks, spec, status, capture) {
+    this.#decodeFeedText(channel, chunks).then(({ text, encoding, used }) => {
+      if (capture.settled) return;
+      let finalUrl = spec;
+      let httpStatus = status;
+      try { finalUrl = channel.URI.spec; } catch (e) {}
+      try { httpStatus = channel.responseStatus; } catch (e) {}
+      const kind = text.includes('<feed') ? 'xml' : 'not-xml';
+      debugLog('Atom document body', httpStatus, kind, used || encoding || 'identity', text.length);
+      if (text.includes('<feed')) {
+        capture.finish({ status: httpStatus, finalUrl, text });
+      }
+    }).catch((e) => {
+      debugLog('Atom document decode failed', e && e.message ? e.message : e);
+    });
+  }
+
+  async #decodeFeedText(channel, chunks) {
+    const bytes = Uint8Array.from(chunks.join(''), (ch) => ch.charCodeAt(0) & 0xff);
+    let encoding = '';
+    try { encoding = channel.getResponseHeader('Content-Encoding') || ''; } catch (e) {}
+    let payload = bytes;
+    let used = 'identity';
+    if (!this.#looksLikeMarkup(bytes)) {
+      for (const format of this.#compressionFormats(encoding, bytes)) {
+        try {
+          const inflated = await this.#inflate(bytes, format);
+          if (!inflated || !this.#looksLikeMarkup(inflated)) continue;
+          payload = inflated;
+          used = format;
+          break;
+        } catch (e) {}
+      }
+    }
+    const text = new TextDecoder('utf-8').decode(payload).replace(/^\uFEFF/, '');
+    return { text, encoding, used };
+  }
+
+  #looksLikeMarkup(bytes) {
+    let i = 0;
+    if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) i = 3;
+    while (i < bytes.length && (bytes[i] === 0x20 || bytes[i] === 0x09 || bytes[i] === 0x0a || bytes[i] === 0x0d)) i++;
+    return bytes[i] === 0x3c;
+  }
+
+  #compressionFormats(encoding, bytes) {
+    const enc = String(encoding || '').toLowerCase();
+    const ordered = [];
+    const add = (name) => { if (name && !ordered.includes(name)) ordered.push(name); };
+    if (enc.includes('zstd')) add('zstd');
+    if (/\bbr\b/.test(enc)) add('brotli');
+    if (enc.includes('gzip')) add('gzip');
+    if (enc.includes('deflate')) add('deflate');
+    if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) add('gzip');
+    if (bytes.length >= 4 && bytes[0] === 0x28 && bytes[1] === 0xb5 && bytes[2] === 0x2f && bytes[3] === 0xfd) add('zstd');
+    add('gzip');
+    add('brotli');
+    add('zstd');
+    add('deflate');
+    return ordered;
+  }
+
+  async #inflate(bytes, format) {
+    const converted = this.#inflateWithConverter(bytes, format === 'brotli' ? 'br' : format);
+    if (converted && this.#looksLikeMarkup(converted)) return converted;
+    const win = this.app.window;
+    const names = format === 'brotli' ? ['brotli', 'br'] : [format];
+    const DS = win.DecompressionStream || globalThis.DecompressionStream;
+    const BlobCtor = win.Blob || globalThis.Blob;
+    const ResponseCtor = win.Response || globalThis.Response;
+    let last = null;
+    for (const name of names) {
+      try {
+        const stream = new BlobCtor([bytes]).stream().pipeThrough(new DS(name));
+        const buf = await new ResponseCtor(stream).arrayBuffer();
+        return new Uint8Array(buf);
+      } catch (e) {
+        last = e;
+      }
+    }
+    if (converted) return converted;
+    throw last || new Error('inflate failed');
+  }
+
+  #inflateWithConverter(bytes, from) {
+    let converter;
+    try {
+      converter = Cc['@mozilla.org/streamconv;1?from=' + from + '&to=uncompressed'].createInstance(Ci.nsIStreamConverter);
+    } catch (e) {
+      return null;
+    }
+    const chunks = [];
+    const listener = {
+      onStartRequest() {},
+      onDataAvailable(_request, stream, _offset, count) {
+        const binary = Cc['@mozilla.org/binaryinputstream;1'].createInstance(Ci.nsIBinaryInputStream);
+        binary.setInputStream(stream);
+        chunks.push(binary.readBytes(count));
+      },
+      onStopRequest() {}
+    };
+    try {
+      const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join('');
+      const input = Cc['@mozilla.org/io/string-input-stream;1'].createInstance(Ci.nsIStringInputStream);
+      input.setByteStringData(binary);
+      converter.asyncConvertData(from, 'uncompressed', listener, null);
+      converter.onStartRequest(null, null);
+      converter.onDataAvailable(null, input, 0, input.available());
+      converter.onStopRequest(null, null, Cr.NS_OK);
+    } catch (e) {
+      return null;
+    }
+    const out = chunks.join('');
+    if (!out) return null;
+    return Uint8Array.from(out, (ch) => ch.charCodeAt(0) & 0xff);
   }
 
   async requestScan(tab, { force = false } = {}) {
