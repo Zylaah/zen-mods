@@ -2,7 +2,7 @@
 // @name           Live Gmail Panel
 // @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential or pinned tabs
 // @author         Bxth
-// @version        3.6.0
+// @version        3.6.1
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -1567,6 +1567,45 @@
     compactPinTarget = null;
   }
 
+  function isPinnedGmailTab(tab) {
+    return !!(tab?.pinned && !tab.hasAttribute('zen-essential'));
+  }
+
+  /**
+   * Same placement as zen-folder-tabs-popup: beside the pinned row, not below it.
+   */
+  function getFolderStylePopupOptions() {
+    const isRightSide = !!window.gZenVerticalTabsManager?._prefsRightSide;
+    const rows = Math.min(
+      Math.max((currentEmails.length || cachedEmails.length || 0) + 1, 1),
+      6
+    );
+    return {
+      position: isRightSide ? 'topleft topright' : 'topright topleft',
+      x: isRightSide ? -10 : 10,
+      y: (rows * 48) / -2
+    };
+  }
+
+  function getPinnedPopupAnchor(tab) {
+    return tab?.querySelector('.tab-content, .tab-icon-stack') || tab;
+  }
+
+  function openGmailPanel(tab) {
+    if (!panelElement) return;
+
+    if (isPinnedGmailTab(tab)) {
+      const isRightSide = !!window.gZenVerticalTabsManager?._prefsRightSide;
+      panelElement.setAttribute('side', isRightSide ? 'right' : 'left');
+      panelElement.openPopup(getPinnedPopupAnchor(tab) || document.documentElement, getFolderStylePopupOptions());
+      return;
+    }
+
+    panelElement.setAttribute('side', 'left');
+    const tabHeight = tab ? tab.getBoundingClientRect().height : 0;
+    panelElement.openPopup(tab || document.documentElement, 'end_before', 4, tabHeight);
+  }
+
   /**
    * Show panel
    */
@@ -1597,9 +1636,8 @@
     updatePanelTheme();
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
 
-    const tabHeight = tab ? tab.getBoundingClientRect().height : 0;
     pinCompactChrome(tab);
-    panelElement.openPopup(tab || document.documentElement, 'end_before', 4, tabHeight);
+    openGmailPanel(tab);
     updateEmailDisplay();
     if (isAnchorHover) requestAtomScan(tab, { force: false });
   }
