@@ -216,14 +216,22 @@ export class LiveGmailAtom {
 
   async fetchViaTab(tab, feedUrl) {
     const browser = tab?.linkedBrowser;
-    if (!browser?.browsingContext || this.app.tabs.isPendingOrDiscarded(tab)) return null;
-    let actor;
-    try {
-      actor = browser.browsingContext.currentWindowGlobal?.getActor('LiveGmail');
-    } catch (e) {
+    const windowGlobal = browser?.browsingContext?.currentWindowGlobal;
+    if (!windowGlobal) {
+      debugLog('Tab Atom unavailable: no current window global');
       return null;
     }
-    if (!actor?.sendQuery) return null;
+    let actor;
+    try {
+      actor = windowGlobal.getActor('LiveGmail');
+    } catch (e) {
+      debugLog('Tab Atom unavailable: actor lookup failed', e?.message || e);
+      return null;
+    }
+    if (!actor?.sendQuery) {
+      debugLog('Tab Atom unavailable: actor has no query channel');
+      return null;
+    }
     return actor.sendQuery('LiveGmail:FetchAtom', { feedUrl });
   }
 
