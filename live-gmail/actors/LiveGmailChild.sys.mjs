@@ -6,9 +6,42 @@ export class LiveGmailChild extends JSWindowActorChild {
   #lastReadKey = '';
 
   handleEvent(event) {
-    if (event.type === 'DOMContentLoaded' || event.type === 'pageshow') {
-      this.#setupObserver();
+    if (event.type !== 'DOMContentLoaded' && event.type !== 'pageshow') return;
+    if (this.#reportFeed()) return;
+    this.#setupObserver();
+  }
+
+  #reportFeed() {
+    const doc = this.document;
+    const win = this.contentWindow;
+    if (!doc || !win) return false;
+    let href = '';
+    try {
+      href = win.location.href || '';
+    } catch (e) {
+      return false;
     }
+    if (!/\/feed\/atom/i.test(href)) return false;
+
+    const root = doc.documentElement?.localName || '';
+    const contentType = doc.contentType || '';
+    const isFeed = root === 'feed';
+    let text = '';
+    if (isFeed) {
+      try {
+        text = new win.XMLSerializer().serializeToString(doc);
+      } catch (e) {}
+    }
+    try {
+      this.sendAsyncMessage('LiveGmail:FeedDocument', {
+        href,
+        text,
+        contentType,
+        root,
+        signin: !isFeed || /accounts\.google\.com|ServiceLogin/i.test(href)
+      });
+    } catch (e) {}
+    return true;
   }
 
   didDestroy() {

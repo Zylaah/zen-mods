@@ -62,6 +62,10 @@ export class LiveGmail {
     this.atom.onReadStateChanged(tab);
   }
 
+  onFeedDocument(browser, data) {
+    this.atom.onFeedDocument(browser, data);
+  }
+
   init() {
     debugLog('Initializing Live Gmail...');
     this.cache.load();

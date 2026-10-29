@@ -235,6 +235,99 @@ export class LiveGmailAtom {
     return actor.sendQuery('LiveGmail:FetchAtom', { feedUrl });
   }
 
+  onFeedDocument(browser, data) {
+    const pending = this.pendingFeedBrowsers?.get(browser);
+    if (!pending) return;
+    debugLog(
+      'Feed document',
+      data?.root || '',
+      data?.contentType || '',
+      (data?.text || '').length,
+      data?.href || ''
+    );
+    pending.resolve({
+      status: data?.signin || !data?.text ? 401 : 200,
+      finalUrl: data?.href || '',
+      text: data?.text || ''
+    });
+  }
+
+  fetchViaDocument(feedUrl, userContextId) {
+    const win = this.app.window;
+    const doc = win.document;
+    const browser = doc.createXULElement('browser');
+    browser.setAttribute('type', 'content');
+    browser.setAttribute('remote', 'true');
+    browser.setAttribute('maychangeremoteness', 'true');
+    browser.setAttribute('disableglobalhistory', 'true');
+    browser.setAttribute('nodefaultsrc', 'true');
+    browser.setAttribute('usercontextid', String(userContextId || 0));
+    browser.style.cssText = 'position:fixed;left:-10000px;width:16px;height:16px;opacity:0;pointer-events:none;';
+    doc.documentElement.appendChild(browser);
+    if (!this.pendingFeedBrowsers) this.pendingFeedBrowsers = new Map();
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let listener = null;
+      const timer = win.setTimeout(() => finish(reject, new Error('Timeout')), CONFIG.ATOM_TIMEOUT_MS);
+
+      const cleanup = () => {
+        win.clearTimeout(timer);
+        this.pendingFeedBrowsers.delete(browser);
+        if (listener) {
+          try { browser.removeProgressListener(listener); } catch (e) {}
+          listener = null;
+        }
+        try { browser.remove(); } catch (e) {}
+      };
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        fn(value);
+      };
+
+      this.pendingFeedBrowsers.set(browser, {
+        resolve: (result) => finish(resolve, result)
+      });
+
+      listener = {
+        QueryInterface: ChromeUtils.generateQI(['nsIWebProgressListener', 'nsISupportsWeakReference']),
+        onLocationChange(_progress, _request, location) {
+          const spec = location?.spec || '';
+          if (/accounts\.google\.com|ServiceLogin/i.test(spec)) {
+            finish(resolve, { status: 401, finalUrl: spec, text: '' });
+          }
+        },
+        onStateChange() {},
+        onProgressChange() {},
+        onStatusChange() {},
+        onSecurityChange() {},
+        onContentBlockingEvent() {}
+      };
+
+      const start = () => {
+        try {
+          browser.addProgressListener(listener, Ci.nsIWebProgress.NOTIFY_LOCATION);
+        } catch (e) {}
+        try {
+          const loadFlags = Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_HISTORY | Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_CACHE;
+          const triggeringPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
+          if (browser.fixupAndLoadURIString) {
+            browser.fixupAndLoadURIString(feedUrl, { triggeringPrincipal, loadFlags });
+          } else {
+            browser.loadURI(Services.io.newURI(feedUrl), { triggeringPrincipal, loadFlags });
+          }
+        } catch (e) {
+          finish(reject, e);
+        }
+      };
+
+      if (browser.browsingContext) start();
+      else browser.addEventListener('XULFrameLoaderCreated', start, { once: true });
+    });
+  }
+
   async requestScan(tab, { force = false } = {}) {
     if (!tab) return;
     const app = this.app;
@@ -267,18 +360,8 @@ export class LiveGmailAtom {
     }
 
     try {
-      let via = 'tab';
-      let fetched = null;
-      try {
-        fetched = await this.fetchViaTab(tab, feedUrl);
-      } catch (e) {
-        debugLog('Tab Atom fetch failed', e && e.message ? e.message : e);
-      }
-      if (!fetched) {
-        via = 'chrome';
-        fetched = await this.fetchXml(feedUrl, getTabUserContextId(tab));
-      }
-      debugLog('Atom via', via);
+      debugLog('Atom via document');
+      const fetched = await this.fetchViaDocument(feedUrl, getTabUserContextId(tab));
       const { status, finalUrl, text } = fetched;
       if (status === 401 || status === 403) {
         const err = new Error('Sign-in required');
