@@ -257,7 +257,9 @@ export class LiveGmailOAuth {
   async fetchUnread() {
     if (!this.isConnected()) throw new Error('OAuth is not connected');
     return this.#withToken(async (token) => {
-      const query = new URLSearchParams({ q: 'is:unread', maxResults: String(CONFIG.MAX_EMAILS) });
+      const query = new URLSearchParams({ maxResults: String(CONFIG.MAX_EMAILS) });
+      query.append('labelIds', 'INBOX');
+      query.append('labelIds', 'UNREAD');
       const list = await this.#apiGet(token, API_ROOT + '/messages?' + query.toString());
       const ids = Array.isArray(list.messages) ? list.messages : [];
       const messages = await Promise.all(ids.map((item) => {

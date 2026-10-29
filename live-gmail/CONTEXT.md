@@ -2,7 +2,7 @@
 
 > **Purpose:** Hand this file to a fresh LLM conversation when working on this mod. It describes what the mod does, how it is built, and how it integrates with Zen Browser / Firefox internals.
 >
-> **Current version:** `4.1.2` (see `theme.json` and `@version` in `live-gmail.uc.js`)
+> **Current version:** `4.1.3` (see `theme.json` and `@version` in `live-gmail.uc.js`)
 >
 > **Last updated:** 2026-10-29
 
