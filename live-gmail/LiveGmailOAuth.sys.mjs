@@ -5,7 +5,7 @@ const { CONFIG, debugLog, getGmailUrlPattern } = ChromeUtils.importESModule(
 const { NetUtil } = ChromeUtils.importESModule('resource://gre/modules/NetUtil.sys.mjs');
 const Cr = Components.results;
 
-const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.metadata';
+const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const API_ROOT = 'https://gmail.googleapis.com/gmail/v1/users/me';
@@ -256,6 +256,12 @@ export class LiveGmailOAuth {
 
   async fetchUnread() {
     if (!this.isConnected()) throw new Error('OAuth is not connected');
+    const granted = String(this.tokens?.scope || '');
+    if (granted && !granted.includes('gmail.readonly')) {
+      const err = new Error('Reconnect Gmail to load message snippets');
+      err.reauth = true;
+      throw err;
+    }
     return this.#withToken(async (token) => {
       const query = new URLSearchParams({ maxResults: String(CONFIG.MAX_EMAILS) });
       query.append('labelIds', 'INBOX');
@@ -264,11 +270,9 @@ export class LiveGmailOAuth {
       const ids = Array.isArray(list.messages) ? list.messages : [];
       const messages = await Promise.all(ids.map((item) => {
         const detail = new URLSearchParams({
-          format: 'metadata',
-          metadataHeaders: 'From'
+          format: 'full',
+          fields: 'id,threadId,snippet,internalDate,payload/headers'
         });
-        detail.append('metadataHeaders', 'Subject');
-        detail.append('metadataHeaders', 'Date');
         return this.#apiGet(token, API_ROOT + '/messages/' + encodeURIComponent(item.id) + '?' + detail.toString());
       }));
       const host = getGmailUrlPattern();
