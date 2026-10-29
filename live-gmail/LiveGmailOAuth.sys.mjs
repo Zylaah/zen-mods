@@ -204,7 +204,8 @@ export class LiveGmailOAuth {
       triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
     });
     win.gBrowser.selectedTab = tab;
-    debugLog('OAuth consent opened');
+    this.#watchAuthTab(tab);
+    debugLog('OAuth consent opened', redirectUri);
 
     try {
       const code = await this.pendingCode;
@@ -402,15 +403,25 @@ export class LiveGmailOAuth {
     server.init(-1, true, 4);
     this.server = server;
     const redirectUri = 'http://127.0.0.1:' + server.port;
+    this.redirectUri = redirectUri;
+    this.expectedState = expectedState;
+    this._authDone = false;
+    this._lastAuthLocation = '';
     this.pendingCode = new Promise((resolve, reject) => {
       this._resolveCode = resolve;
       this._rejectCode = reject;
-      const win = this.app.window;
-      this._authTimer = win.setTimeout(() => {
-        reject(new Error('OAuth timed out'));
-        this.#closeServer();
+      this._authTimer = this.app.window.setTimeout(() => {
+        this.#failAuth(new Error('OAuth timed out'));
       }, 180000);
     });
+    this._redirectObserver = {
+      observe: (subject) => {
+        try {
+          this.#acceptRedirect(subject.QueryInterface(Ci.nsIHttpChannel).URI.spec);
+        } catch (e) {}
+      }
+    };
+    Services.obs.addObserver(this._redirectObserver, 'http-on-modify-request');
     server.asyncListen({
       onSocketAccepted: (_socket, transport) => {
         this.#readAuthRequest(transport, expectedState);
@@ -420,6 +431,81 @@ export class LiveGmailOAuth {
     return Promise.resolve(redirectUri);
   }
 
+  #watchAuthTab(tab) {
+    const browser = tab?.linkedBrowser;
+    if (!browser) return;
+    const listener = {
+      QueryInterface: ChromeUtils.generateQI(['nsIWebProgressListener', 'nsISupportsWeakReference']),
+      onLocationChange: (webProgress, _request, location) => {
+        if (webProgress && !webProgress.isTopLevel) return;
+        const spec = location?.spec || '';
+        this.#noteAuthLocation(spec);
+        this.#acceptRedirect(spec);
+      },
+      onStateChange() {},
+      onProgressChange() {},
+      onStatusChange() {},
+      onSecurityChange() {},
+      onContentBlockingEvent() {}
+    };
+    try {
+      browser.addProgressListener(listener, Ci.nsIWebProgress.NOTIFY_LOCATION);
+      this._authProgress = { browser, listener };
+    } catch (e) {}
+  }
+
+  #noteAuthLocation(spec) {
+    let url;
+    try { url = new URL(spec); } catch (e) { return; }
+    const where = url.origin + url.pathname;
+    if (where === this._lastAuthLocation) return;
+    this._lastAuthLocation = where;
+    debugLog('OAuth tab', where);
+    if (url.hostname !== 'accounts.google.com') return;
+    const error = url.searchParams.get('error') || url.searchParams.get('authError') || '';
+    if (/redirect_uri_mismatch|invalid_client|unauthorized_client|access_denied|invalid_scope/.test(error)) {
+      debugLog('OAuth page error', error);
+      this.#failAuth(new Error(error));
+    }
+  }
+
+  #acceptRedirect(spec) {
+    if (this._authDone) return;
+    let url;
+    try { url = new URL(spec); } catch (e) { return; }
+    if (url.origin !== new URL(this.redirectUri).origin) return;
+    const state = url.searchParams.get('state');
+    const error = url.searchParams.get('error');
+    const code = url.searchParams.get('code');
+    if (!state && !error && !code) return;
+    if (state !== this.expectedState) {
+      this.#failAuth(new Error(error || 'OAuth state mismatch'));
+      return;
+    }
+    if (error) {
+      debugLog('OAuth redirect error', error);
+      this.#failAuth(new Error(error));
+      return;
+    }
+    if (!code) return;
+    this.#completeAuth(code);
+  }
+
+  #completeAuth(code) {
+    if (this._authDone) return;
+    this._authDone = true;
+    debugLog('OAuth code received');
+    try { this.app.window.clearTimeout(this._authTimer); } catch (e) {}
+    this._resolveCode?.(code);
+  }
+
+  #failAuth(error) {
+    if (this._authDone) return;
+    this._authDone = true;
+    try { this.app.window.clearTimeout(this._authTimer); } catch (e) {}
+    this._rejectCode?.(error);
+  }
+
   #readAuthRequest(transport, expectedState) {
     const input = transport.openInputStream(0, 0, 0).QueryInterface(Ci.nsIAsyncInputStream);
     const output = transport.openOutputStream(0, 0, 0);
@@ -427,7 +513,11 @@ export class LiveGmailOAuth {
     const reader = {
       onInputStreamReady: (stream) => {
         try {
-          const available = stream.available();
+          let available = 0;
+          try { available = stream.available(); } catch (e) {
+            stream.asyncWait(reader, 0, 0, Services.tm.currentThread);
+            return;
+          }
           if (available > 0) {
             const binary = Cc['@mozilla.org/binaryinputstream;1'].createInstance(Ci.nsIBinaryInputStream);
             binary.setInputStream(stream);
@@ -450,37 +540,40 @@ export class LiveGmailOAuth {
   #finishAuthRequest(data, output, transport, expectedState) {
     const requestLine = data.split('\r\n', 1)[0] || '';
     const query = requestLine.match(/\?([^ ]*)/)?.[1] || '';
+    try { this.#acceptRedirect(this.redirectUri + '/?' + query); } catch (e) {}
     const params = new URLSearchParams(query);
     const isCallback = params.has('code') || params.has('error') || params.has('state');
     const page = isCallback
       ? '<!DOCTYPE html><title>Live Gmail</title><p>Live Gmail is connected. You can close this tab.</p>'
       : '<!DOCTYPE html><title>Live Gmail</title><p>Not found.</p>';
     const status = isCallback ? '200 OK' : '404 Not Found';
-    const bytes = new TextEncoder().encode(page);
     const header =
       'HTTP/1.1 ' + status + '\r\n' +
       'Content-Type: text/html; charset=utf-8\r\n' +
-      'Content-Length: ' + bytes.length + '\r\n' +
+      'Content-Length: ' + new TextEncoder().encode(page).length + '\r\n' +
       'Connection: close\r\n\r\n';
     try {
       output.write(header, header.length);
       output.write(page, page.length);
     } catch (e) {}
     try { transport.close(Cr.NS_OK); } catch (e) {}
-    if (!isCallback) return;
-
-    const finish = params.get('error')
-      ? () => this._rejectCode?.(new Error(params.get('error')))
-      : params.get('state') !== expectedState
-        ? () => this._rejectCode?.(new Error('OAuth state mismatch'))
-        : () => this._resolveCode?.(params.get('code'));
-    try { this.app.window.clearTimeout(this._authTimer); } catch (e) {}
-    finish();
+    if (params.get('state') === expectedState && params.get('code')) {
+      this.#completeAuth(params.get('code'));
+    }
   }
 
   #closeServer() {
     try { this.app.window.clearTimeout(this._authTimer); } catch (e) {}
+    if (this._redirectObserver) {
+      try { Services.obs.removeObserver(this._redirectObserver, 'http-on-modify-request'); } catch (e) {}
+      this._redirectObserver = null;
+    }
+    if (this._authProgress) {
+      try { this._authProgress.browser.removeProgressListener(this._authProgress.listener); } catch (e) {}
+      this._authProgress = null;
+    }
     try { this.server?.close(); } catch (e) {}
     this.server = null;
   }
 }
+
