@@ -28,15 +28,24 @@ A Zen Browser mod for Sine that shows your unread Gmail in a quick hover panel o
 3. Read unread previews in the panel.
 4. Click an email to open it in Gmail.
 
-## Preferences (`about:config`)
+## Preferences
+
+Open the mod's settings from Sine. **Unread source** chooses how the panel loads mail.
+
+| Source | Behavior |
+| ------ | -------- |
+| Atom | Unread mail comes from Gmail's Atom feed for that tab's container. |
+| OAuth | A **Google account** button appears. It opens a dialog where you connect or disconnect a Desktop OAuth client (client id and client secret). |
 
 | Preference | Default | Description |
 | ---------- | ------- | ----------- |
+| `live-gmail.source` | `atom` | `atom` or `oauth` |
 | `live-gmail.url` | `mail.google.com` | Gmail domain to detect |
 | `live-gmail.debug` | `false` | Enable debug logs in Browser Console |
 
 ## Notes
 
 - Works best with a signed-in Gmail session in the same profile. Each Firefox container has its own cookies, so a Gmail pin in Work and one in Personal show that container's inbox.
-- Unread mail comes from Gmail's Atom feed (`/mail/u/N/feed/atom`) using that tab's container cookies. The inbox page is only watched to refresh after you mark mail read.
+- With Atom selected, unread mail comes from Gmail's Atom feed (`/mail/u/N/feed/atom`) using that tab's container cookies. The inbox page is only watched to refresh after you mark mail read.
+- With OAuth selected, unread mail comes from the Gmail API for the account you connected. That token is not tied to a Firefox container.
 - Clicking an item opens Gmail's permalink for that conversation.

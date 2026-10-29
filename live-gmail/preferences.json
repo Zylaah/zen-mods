@@ -1,1 +1,33 @@
-[]
+[
+  {
+    "type": "dropdown",
+    "property": "live-gmail.source",
+    "label": "Unread source",
+    "defaultValue": "atom",
+    "placeholder": false,
+    "options": [
+      {
+        "value": "atom",
+        "label": "Atom"
+      },
+      {
+        "value": "oauth",
+        "label": "OAuth"
+      }
+    ]
+  },
+  {
+    "type": "button",
+    "id": "live-gmail-oauth",
+    "label": "Google account",
+    "margin": "8px 0 0 0",
+    "conditions": [
+      {
+        "if": {
+          "property": "live-gmail.source",
+          "value": "oauth"
+        }
+      }
+    ]
+  }
+]
