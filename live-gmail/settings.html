@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Live Gmail</title>
+    <link rel="stylesheet" href="settings.css" />
+    <script src="settings.js" type="module"></script>
+  </head>
+  <body>
+    <main>
+      <h1>Live Gmail</h1>
+      <p class="lead">Choose where unread mail comes from. The hover panel stays the same either way.</p>
+
+      <fieldset>
+        <legend>Unread source</legend>
+        <label class="choice">
+          <input type="radio" name="source" value="atom" />
+          <span>
+            <span class="choice-title">Atom</span>
+            <span class="choice-detail">Unread mail from the Gmail tab’s account.</span>
+          </span>
+        </label>
+        <label class="choice">
+          <input type="radio" name="source" value="oauth" />
+          <span>
+            <span class="choice-title">OAuth</span>
+            <span class="choice-detail">Unread mail from a Google account you connect.</span>
+          </span>
+        </label>
+      </fieldset>
+
+      <section id="account" hidden>
+        <div id="connected" hidden>
+          <p class="eyebrow">Connected</p>
+          <p id="email"></p>
+          <button id="disconnect" type="button">Disconnect</button>
+        </div>
+
+        <form id="connect-form">
+          <p class="eyebrow">Google account</p>
+          <p class="hint">Paste the client id and secret from your Google Desktop OAuth client.</p>
+          <label for="client-id">Client ID</label>
+          <input id="client-id" autocomplete="off" spellcheck="false" />
+          <label for="client-secret">Client secret</label>
+          <input id="client-secret" type="password" autocomplete="off" spellcheck="false" />
+          <p id="status" role="status"></p>
+          <button id="connect" type="submit">Connect</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

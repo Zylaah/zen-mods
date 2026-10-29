@@ -30,12 +30,12 @@ A Zen Browser mod for Sine that shows your unread Gmail in a quick hover panel o
 
 ## Preferences
 
-Open the mod's settings from Sine. **Unread source** chooses how the panel loads mail.
+The settings button on the Live Gmail mod opens a settings page. **Unread source** chooses how the panel loads mail.
 
 | Source | Behavior |
 | ------ | -------- |
 | Atom | Unread mail comes from Gmail's Atom feed for that tab's container. |
-| OAuth | A **Google account** button appears. It opens a dialog where you connect or disconnect a Desktop OAuth client (client id and client secret). |
+| OAuth | Connect a Desktop OAuth client with its client id and client secret. A connected account shows that account and a disconnect button. |
 
 | Preference | Default | Description |
 | ---------- | ------- | ----------- |
