@@ -292,10 +292,15 @@ export class LiveGmailAtom {
           triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
           userContextId: userContextId || 0,
           inBackground: true,
-          skipAnimation: true
+          skipAnimation: true,
+          skipBackgroundNotify: true,
+          skipRoute: true
         });
         tab.setAttribute(CONFIG.SCANNER_TAB_ATTR, 'true');
-        try { gBrowser.hideTab?.(tab); } catch (e) {}
+        tab.style.setProperty('display', 'none', 'important');
+        if (previous && previous !== tab && gBrowser.selectedTab === tab) {
+          try { gBrowser.selectedTab = previous; } catch (e) {}
+        }
         if (tab.linkedBrowser) {
           this.pendingFeedBrowsers.set(tab.linkedBrowser, {
             resolve: (result) => finish(resolve, result)

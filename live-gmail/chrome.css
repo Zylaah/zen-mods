@@ -1,5 +1,11 @@
 /* Live Gmail Panel Styling - Zen Native Theme */
 
+/* The Atom document load is a real tab. Zen's vertical strip ignores the
+   hidden attribute, so hide our scanner tab directly. */
+.tabbrowser-tab[data-live-gmail-scanner] {
+  display: none !important;
+}
+
 /* ============================================
    Panel shell — native Zen chrome
    ============================================ */
