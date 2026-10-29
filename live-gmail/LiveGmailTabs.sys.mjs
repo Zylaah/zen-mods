@@ -399,7 +399,7 @@ export class LiveGmailTabs {
 
     let timer = null;
     const debounced = () => {
-      if (timer) clearTimeout(timer);
+      if (timer) this.window.clearTimeout(timer);
       timer = this.window.setTimeout(() => this.refreshAnchors(), 150);
     };
     const observer = new this.window.MutationObserver(debounced);

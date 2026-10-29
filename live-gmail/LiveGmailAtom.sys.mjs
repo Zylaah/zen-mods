@@ -54,7 +54,7 @@ export class LiveGmailAtom {
   }
 
   parse(xml, feedUrl) {
-    const feed = new DOMParser().parseFromString(xml, 'application/xml');
+    const feed = new this.app.window.DOMParser().parseFromString(xml, 'application/xml');
     if (feed.documentElement?.localName !== 'feed' || feed.querySelector('parsererror')) {
       throw new Error('Not an Atom feed');
     }
@@ -116,6 +116,7 @@ export class LiveGmailAtom {
     }).QueryInterface(Ci.nsIHttpChannel);
     channel.notificationCallbacks = cancelAuthPrompt();
 
+    const win = this.app.window;
     return new Promise((resolve, reject) => {
       const chunks = [];
       let totalLength = 0;
@@ -124,11 +125,11 @@ export class LiveGmailAtom {
       const finish = (fn, value) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
+        win.clearTimeout(timer);
         fn(value);
       };
 
-      const timer = setTimeout(() => {
+      const timer = win.setTimeout(() => {
         try {
           channel.cancel(Cr.NS_BINDING_ABORTED);
         } catch (e) {}
@@ -297,12 +298,13 @@ export class LiveGmailAtom {
   onReadStateChanged(tab) {
     if (!tab || !this.app.tabs.isGmailAnchor(tab)) return;
     const contextKey = this.app.getPanelContextKey(tab);
+    const win = this.app.window;
     if (this.app.readStateTimers.has(contextKey)) {
-      clearTimeout(this.app.readStateTimers.get(contextKey));
+      win.clearTimeout(this.app.readStateTimers.get(contextKey));
     }
     this.app.readStateTimers.set(
       contextKey,
-      setTimeout(() => {
+      win.setTimeout(() => {
         this.app.readStateTimers.delete(contextKey);
         this.requestScan(tab, { force: true });
       }, 400)

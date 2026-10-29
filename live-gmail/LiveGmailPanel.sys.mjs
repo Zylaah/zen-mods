@@ -152,7 +152,7 @@ export class LiveGmailPanel {
 
     panel.addEventListener('mouseenter', () => {
       if (app.hideTimer) {
-        clearTimeout(app.hideTimer);
+        app.window.clearTimeout(app.hideTimer);
         app.hideTimer = null;
       }
     });
@@ -276,7 +276,7 @@ export class LiveGmailPanel {
 
   cancelShowTimer() {
     if (this.app.showTimer) {
-      clearTimeout(this.app.showTimer);
+      this.app.window.clearTimeout(this.app.showTimer);
       this.app.showTimer = null;
     }
     this.app.pendingShowTab = null;
@@ -285,7 +285,7 @@ export class LiveGmailPanel {
   scheduleShow(tab) {
     if (!tab || !this.app.tabs.isGmailAnchor(tab, this.app.getPanelContextKey(tab))) return;
     if (this.app.hideTimer) {
-      clearTimeout(this.app.hideTimer);
+      this.app.window.clearTimeout(this.app.hideTimer);
       this.app.hideTimer = null;
     }
     if (this.isOpen()) {
@@ -326,7 +326,7 @@ export class LiveGmailPanel {
     if (!app.panelElement) this.create();
     this.updateTheme();
     if (app.hideTimer) {
-      clearTimeout(app.hideTimer);
+      app.window.clearTimeout(app.hideTimer);
       app.hideTimer = null;
     }
     this.pinCompactChrome(tab);
@@ -336,7 +336,7 @@ export class LiveGmailPanel {
   }
 
   scheduleHide() {
-    if (this.app.hideTimer) clearTimeout(this.app.hideTimer);
+    if (this.app.hideTimer) this.app.window.clearTimeout(this.app.hideTimer);
     const delayMs = this.app.scanInProgress ? 350 : 200;
     this.app.hideTimer = this.app.window.setTimeout(() => {
       this.app.hideTimer = null;
@@ -348,7 +348,7 @@ export class LiveGmailPanel {
 
   hide() {
     if (this.app.hideTimer) {
-      clearTimeout(this.app.hideTimer);
+      this.app.window.clearTimeout(this.app.hideTimer);
       this.app.hideTimer = null;
     }
     this.cancelShowTimer();
