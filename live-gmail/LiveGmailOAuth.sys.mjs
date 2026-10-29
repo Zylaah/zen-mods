@@ -78,6 +78,16 @@ export class LiveGmailOAuth {
     return PathUtils.join(profileDir, CONFIG.OAUTH_FILE);
   }
 
+  clientSecret(explicit) {
+    const given = String(explicit || '').trim();
+    if (given) return given;
+    try {
+      return Services.prefs.getStringPref(CONFIG.OAUTH_CLIENT_SECRET_PREF, '').trim();
+    } catch (e) {
+      return '';
+    }
+  }
+
   clientId(explicit) {
     const given = String(explicit || '').trim();
     if (given) return given;
@@ -160,21 +170,25 @@ export class LiveGmailOAuth {
     debugLog('OAuth disconnected');
   }
 
-  async authorize(clientId) {
+  async authorize(clientId, clientSecret) {
     if (this.authPromise) return this.authPromise;
-    this.authPromise = this.#authorize(clientId).finally(() => {
+    this.authPromise = this.#authorize(clientId, clientSecret).finally(() => {
       this.authPromise = null;
     });
     return this.authPromise;
   }
 
-  async #authorize(clientId) {
+  async #authorize(clientId, clientSecret) {
     const id = this.clientId(clientId);
     if (!id) {
       throw new Error('Set ' + CONFIG.OAUTH_CLIENT_ID_PREF + ' to your Desktop OAuth client id');
     }
     if (clientId) {
       Services.prefs.setStringPref(CONFIG.OAUTH_CLIENT_ID_PREF, id);
+    }
+    const secret = this.clientSecret(clientSecret);
+    if (clientSecret) {
+      Services.prefs.setStringPref(CONFIG.OAUTH_CLIENT_SECRET_PREF, secret);
     }
 
     const win = this.app.window;
@@ -330,12 +344,18 @@ export class LiveGmailOAuth {
   }
 
   #tokenRequest(fields) {
-    const body = new URLSearchParams(fields).toString();
+    const secret = this.clientSecret();
+    const payload = secret ? { ...fields, client_secret: secret } : { ...fields };
+    const body = new URLSearchParams(payload).toString();
     return this.#request({ method: 'POST', url: TOKEN_URL, body }).then((result) => {
       let data = {};
       try { data = JSON.parse(result.text || '{}'); } catch (e) {}
       if (result.status < 200 || result.status >= 300 || data.error) {
-        const err = new Error(googleError(result.text, result.status));
+        let message = googleError(result.text, result.status);
+        if (/client_secret is missing/i.test(message)) {
+          message = 'Pass your OAuth client secret as the second argument to authorize()';
+        }
+        const err = new Error(message);
         err.status = result.status;
         err.code = typeof data.error === 'string' ? data.error : '';
         throw err;
