@@ -3,45 +3,11 @@ const {
   debugLog,
   fnv1a,
   getGmailUrlPattern,
-  getTabUserContextId,
   gmailAccountSlotFromHints,
   normalizeGmailOpenUrl
 } = ChromeUtils.importESModule(
   'chrome://sine/content/live-gmail/LiveGmailUtil.sys.mjs' + new URL(import.meta.url).search
 );
-
-const { NetUtil } = ChromeUtils.importESModule('resource://gre/modules/NetUtil.sys.mjs');
-const Cr = globalThis.Cr || Components.results;
-
-function cancelAuthPrompt() {
-  return {
-    QueryInterface: ChromeUtils.generateQI([
-      Ci.nsIInterfaceRequestor,
-      Ci.nsIAuthPrompt,
-      Ci.nsIAuthPrompt2
-    ]),
-    getInterface(iid) {
-      return this.QueryInterface(iid);
-    },
-    prompt() {
-      return false;
-    },
-    promptUsernameAndPassword() {
-      return false;
-    },
-    promptPassword() {
-      return false;
-    },
-    promptAuth() {
-      return false;
-    },
-    asyncPromptAuth(_channel, callback) {
-      try {
-        callback.onAuthCancelled(null, false);
-      } catch (e) {}
-    }
-  };
-}
 
 export class LiveGmailAtom {
   constructor(app) {
@@ -99,83 +65,6 @@ export class LiveGmailAtom {
     items.sort((a, b) => (b.ts || 0) - (a.ts || 0) || a.rowIndex - b.rowIndex);
     return items.slice(0, CONFIG.MAX_EMAILS);
   }
-
-  fetchXml(feedUrl, userContextId) {
-    const uri = Services.io.newURI(feedUrl);
-    const principal = Services.scriptSecurityManager.createContentPrincipal(uri, {
-      userContextId: userContextId || 0
-    });
-    const channel = NetUtil.newChannel({
-      uri,
-      contentPolicyType: Ci.nsIContentPolicy.TYPE_SAVEAS_DOWNLOAD,
-      loadingPrincipal: principal,
-      triggeringPrincipal: principal,
-      securityFlags:
-        Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_SEC_CONTEXT_IS_NULL |
-        Ci.nsILoadInfo.SEC_COOKIES_INCLUDE
-    }).QueryInterface(Ci.nsIHttpChannel);
-    channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE | Ci.nsIRequest.INHIBIT_CACHING;
-    channel.notificationCallbacks = cancelAuthPrompt();
-
-    const win = this.app.window;
-    return new Promise((resolve, reject) => {
-      const chunks = [];
-      let totalLength = 0;
-      let settled = false;
-
-      const finish = (fn, value) => {
-        if (settled) return;
-        settled = true;
-        win.clearTimeout(timer);
-        fn(value);
-      };
-
-      const timer = win.setTimeout(() => {
-        try {
-          channel.cancel(Cr.NS_BINDING_ABORTED);
-        } catch (e) {}
-        finish(reject, new Error('Timeout'));
-      }, CONFIG.ATOM_TIMEOUT_MS);
-
-      channel.asyncOpen({
-        onStartRequest() {},
-        onDataAvailable(request, stream, _offset, count) {
-          totalLength += count;
-          if (totalLength > CONFIG.ATOM_MAX_BYTES) {
-            request.cancel(Cr.NS_ERROR_FILE_TOO_BIG);
-            return;
-          }
-          chunks.push(NetUtil.readInputStream(stream, count));
-        },
-        onStopRequest(_request, status) {
-          if (!Components.isSuccessCode(status)) {
-            finish(reject, new Error('Network error'));
-            return;
-          }
-          const bytes = new Uint8Array(totalLength);
-          let offset = 0;
-          for (const chunk of chunks) {
-            bytes.set(new Uint8Array(chunk), offset);
-            offset += chunk.byteLength;
-          }
-          let httpStatus = 0;
-          let finalUrl = feedUrl;
-          try {
-            httpStatus = channel.responseStatus;
-          } catch (e) {}
-          try {
-            finalUrl = channel.URI.spec;
-          } catch (e) {}
-          finish(resolve, {
-            status: httpStatus,
-            finalUrl,
-            text: new TextDecoder('utf-8').decode(bytes)
-          });
-        }
-      });
-    });
-  }
-
   applyEmails(allEmails, targetKey) {
     const app = this.app;
     const viewKey = app.activePanelContextKey;
@@ -214,7 +103,7 @@ export class LiveGmailAtom {
     }
   }
 
-  async fetchViaTab(tab, feedUrl) {
+  async fetchViaTab(tab) {
     const browser = tab?.linkedBrowser;
     const windowGlobal = browser?.browsingContext?.currentWindowGlobal;
     if (!windowGlobal) {
@@ -232,262 +121,10 @@ export class LiveGmailAtom {
       debugLog('Tab Atom unavailable: actor has no query channel');
       return null;
     }
-    return actor.sendQuery('LiveGmail:FetchAtom', { feedUrl });
+    return actor.sendQuery('LiveGmail:FetchAtom', {});
   }
 
-  onFeedDocument(browser, data) {
-    const pending = this.pendingFeedBrowsers?.get(browser);
-    if (!pending || data?.root !== 'feed' || !data?.text) return;
-    debugLog('Feed document', data.contentType || '', data.text.length, data.href || '');
-    pending.resolve({ status: 200, finalUrl: data.href || '', text: data.text });
-  }
-
-  fetchViaDocument(feedUrl, userContextId) {
-    const win = this.app.window;
-    const gBrowser = win.gBrowser;
-    if (!gBrowser?.addTab) return Promise.reject(new Error('No tab browser'));
-    if (!this.pendingFeedBrowsers) this.pendingFeedBrowsers = new Map();
-
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      let teed = false;
-      const chunks = [];
-      let tab = null;
-      const previous = gBrowser.selectedTab;
-      const timer = win.setTimeout(() => finish(reject, new Error('Timeout')), CONFIG.ATOM_TIMEOUT_MS);
-
-      const observer = {
-        observe: (subject) => this.#captureFeedChannel(subject, feedUrl, userContextId, {
-          get settled() { return settled; },
-          get teed() { return teed; },
-          set teed(value) { teed = value; },
-          chunks,
-          finish: (result) => finish(resolve, result)
-        })
-      };
-
-      const cleanup = () => {
-        win.clearTimeout(timer);
-        if (tab?.linkedBrowser) this.pendingFeedBrowsers.delete(tab.linkedBrowser);
-        try { Services.obs.removeObserver(observer, 'http-on-examine-response'); } catch (e) {}
-        if (tab && previous && previous !== tab && !previous.closing && gBrowser.selectedTab === tab) {
-          try { gBrowser.selectedTab = previous; } catch (e) {}
-        }
-        if (tab) {
-          try { gBrowser.removeTab(tab, { animate: false, skipPermitUnload: true }); } catch (e) {
-            try { gBrowser.removeTab(tab); } catch (err) {}
-          }
-        }
-      };
-      const finish = (fn, value) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        fn(value);
-      };
-
-      Services.obs.addObserver(observer, 'http-on-examine-response');
-      try {
-        tab = gBrowser.addTab(feedUrl, {
-          triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-          userContextId: userContextId || 0,
-          inBackground: true,
-          skipAnimation: true,
-          skipBackgroundNotify: true,
-          skipRoute: true
-        });
-        tab.setAttribute(CONFIG.SCANNER_TAB_ATTR, 'true');
-        tab.style.setProperty('display', 'none', 'important');
-        if (previous && previous !== tab && gBrowser.selectedTab === tab) {
-          try { gBrowser.selectedTab = previous; } catch (e) {}
-        }
-        if (tab.linkedBrowser) {
-          this.pendingFeedBrowsers.set(tab.linkedBrowser, {
-            resolve: (result) => finish(resolve, result)
-          });
-        }
-        debugLog('Atom document tab', userContextId || 0, feedUrl);
-      } catch (e) {
-        finish(reject, e);
-      }
-    });
-  }
-
-  #captureFeedChannel(subject, feedUrl, userContextId, capture) {
-    if (capture.settled) return;
-    let channel;
-    try {
-      channel = subject.QueryInterface(Ci.nsIHttpChannel);
-    } catch (e) {
-      return;
-    }
-    let spec = '';
-    try { spec = channel.URI.spec; } catch (e) { return; }
-    let contextId = 0;
-    try { contextId = channel.loadInfo.originAttributes.userContextId || 0; } catch (e) {}
-    if (contextId !== (userContextId || 0)) return;
-
-    const isFeed = spec.startsWith(feedUrl) || /mail\.google\.com\/mail\/u\/\d+\/feed\/atom/i.test(spec);
-    const isLogin = /accounts\.google\.com|ServiceLogin/i.test(spec);
-    if (!isFeed && !isLogin) return;
-
-    let status = 0;
-    try { status = channel.responseStatus; } catch (e) {}
-    debugLog('Atom document response', status, spec);
-    if (isLogin || status === 401 || status === 403) {
-      capture.finish({ status: status || 401, finalUrl: spec, text: '' });
-      return;
-    }
-    if (!isFeed || status < 200 || status >= 300 || capture.teed) return;
-    capture.teed = true;
-
-    let original = null;
-    const atom = this;
-    const sink = {
-      onStartRequest(request) {
-        original.onStartRequest(request);
-      },
-      onDataAvailable(request, stream, _offset, count) {
-        const binary = Cc['@mozilla.org/binaryinputstream;1'].createInstance(Ci.nsIBinaryInputStream);
-        binary.setInputStream(stream);
-        const data = binary.readBytes(count);
-        capture.chunks.push(data);
-        const storage = Cc['@mozilla.org/storagestream;1'].createInstance(Ci.nsIStorageStream);
-        storage.init(8192, count, null);
-        const out = storage.getOutputStream(0);
-        out.write(data, count);
-        out.close();
-        original.onDataAvailable(request, storage.newInputStream(0), 0, count);
-      },
-      onStopRequest(request, requestStatus) {
-        try { original.onStopRequest(request, requestStatus); } catch (e) {}
-        atom.#finishCapturedBody(channel, capture.chunks.slice(), spec, status, capture);
-      }
-    };
-    try {
-      original = channel.QueryInterface(Ci.nsITraceableChannel).setNewListener(sink);
-    } catch (e) {
-      capture.teed = false;
-      debugLog('Atom document tee failed', e && e.message ? e.message : e);
-    }
-  }
-
-  #finishCapturedBody(channel, chunks, spec, status, capture) {
-    this.#decodeFeedText(channel, chunks).then(({ text, encoding, used }) => {
-      if (capture.settled) return;
-      let finalUrl = spec;
-      let httpStatus = status;
-      try { finalUrl = channel.URI.spec; } catch (e) {}
-      try { httpStatus = channel.responseStatus; } catch (e) {}
-      const kind = text.includes('<feed') ? 'xml' : 'not-xml';
-      debugLog('Atom document body', httpStatus, kind, used || encoding || 'identity', text.length);
-      if (text.includes('<feed')) {
-        capture.finish({ status: httpStatus, finalUrl, text });
-      }
-    }).catch((e) => {
-      debugLog('Atom document decode failed', e && e.message ? e.message : e);
-    });
-  }
-
-  async #decodeFeedText(channel, chunks) {
-    const bytes = Uint8Array.from(chunks.join(''), (ch) => ch.charCodeAt(0) & 0xff);
-    let encoding = '';
-    try { encoding = channel.getResponseHeader('Content-Encoding') || ''; } catch (e) {}
-    let payload = bytes;
-    let used = 'identity';
-    if (!this.#looksLikeMarkup(bytes)) {
-      for (const format of this.#compressionFormats(encoding, bytes)) {
-        try {
-          const inflated = await this.#inflate(bytes, format);
-          if (!inflated || !this.#looksLikeMarkup(inflated)) continue;
-          payload = inflated;
-          used = format;
-          break;
-        } catch (e) {}
-      }
-    }
-    const text = new TextDecoder('utf-8').decode(payload).replace(/^\uFEFF/, '');
-    return { text, encoding, used };
-  }
-
-  #looksLikeMarkup(bytes) {
-    let i = 0;
-    if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) i = 3;
-    while (i < bytes.length && (bytes[i] === 0x20 || bytes[i] === 0x09 || bytes[i] === 0x0a || bytes[i] === 0x0d)) i++;
-    return bytes[i] === 0x3c;
-  }
-
-  #compressionFormats(encoding, bytes) {
-    const enc = String(encoding || '').toLowerCase();
-    const ordered = [];
-    const add = (name) => { if (name && !ordered.includes(name)) ordered.push(name); };
-    if (enc.includes('zstd')) add('zstd');
-    if (/\bbr\b/.test(enc)) add('brotli');
-    if (enc.includes('gzip')) add('gzip');
-    if (enc.includes('deflate')) add('deflate');
-    if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) add('gzip');
-    if (bytes.length >= 4 && bytes[0] === 0x28 && bytes[1] === 0xb5 && bytes[2] === 0x2f && bytes[3] === 0xfd) add('zstd');
-    add('gzip');
-    add('brotli');
-    add('zstd');
-    add('deflate');
-    return ordered;
-  }
-
-  async #inflate(bytes, format) {
-    const converted = this.#inflateWithConverter(bytes, format === 'brotli' ? 'br' : format);
-    if (converted && this.#looksLikeMarkup(converted)) return converted;
-    const win = this.app.window;
-    const names = format === 'brotli' ? ['brotli', 'br'] : [format];
-    const DS = win.DecompressionStream || globalThis.DecompressionStream;
-    const BlobCtor = win.Blob || globalThis.Blob;
-    const ResponseCtor = win.Response || globalThis.Response;
-    let last = null;
-    for (const name of names) {
-      try {
-        const stream = new BlobCtor([bytes]).stream().pipeThrough(new DS(name));
-        const buf = await new ResponseCtor(stream).arrayBuffer();
-        return new Uint8Array(buf);
-      } catch (e) {
-        last = e;
-      }
-    }
-    if (converted) return converted;
-    throw last || new Error('inflate failed');
-  }
-
-  #inflateWithConverter(bytes, from) {
-    let converter;
-    try {
-      converter = Cc['@mozilla.org/streamconv;1?from=' + from + '&to=uncompressed'].createInstance(Ci.nsIStreamConverter);
-    } catch (e) {
-      return null;
-    }
-    const chunks = [];
-    const listener = {
-      onStartRequest() {},
-      onDataAvailable(_request, stream, _offset, count) {
-        const binary = Cc['@mozilla.org/binaryinputstream;1'].createInstance(Ci.nsIBinaryInputStream);
-        binary.setInputStream(stream);
-        chunks.push(binary.readBytes(count));
-      },
-      onStopRequest() {}
-    };
-    try {
-      const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join('');
-      const input = Cc['@mozilla.org/io/string-input-stream;1'].createInstance(Ci.nsIStringInputStream);
-      input.setByteStringData(binary);
-      converter.asyncConvertData(from, 'uncompressed', listener, null);
-      converter.onStartRequest(null, null);
-      converter.onDataAvailable(null, input, 0, input.available());
-      converter.onStopRequest(null, null, Cr.NS_OK);
-    } catch (e) {
-      return null;
-    }
-    const out = chunks.join('');
-    if (!out) return null;
-    return Uint8Array.from(out, (ch) => ch.charCodeAt(0) & 0xff);
-  }
+  onFeedDocument() {}
 
   async requestScan(tab, { force = false } = {}) {
     if (!tab) return;
@@ -521,9 +158,18 @@ export class LiveGmailAtom {
     }
 
     try {
-      debugLog('Atom via document');
-      const fetched = await this.fetchViaDocument(feedUrl, getTabUserContextId(tab));
+      debugLog('Atom via tab');
+      const fetched = await this.fetchViaTab(tab);
+      if (!fetched) {
+        debugLog('Atom via tab unavailable: Gmail page is not loaded');
+        app.scanInProgress = false;
+        app.loadScansInFlight.delete(contextKey);
+        if (app.scanContextKey === contextKey) app.scanContextKey = null;
+        app.panel.updateDisplay();
+        return;
+      }
       const { status, finalUrl, text } = fetched;
+      const usedFeedUrl = fetched.feedUrl || feedUrl;
       if (status === 401 || status === 403) {
         const err = new Error('Sign-in required');
         err.signin = true;
@@ -545,14 +191,15 @@ export class LiveGmailAtom {
       }
       if (
         finalUrl &&
-        finalUrl !== feedUrl &&
+        finalUrl !== usedFeedUrl &&
         !finalUrl.startsWith('https://mail.google.com/mail/')
       ) {
         throw new Error('Feed URL changed');
       }
+      if ((text || '').length > 500000) throw new Error('Feed too large');
 
-      const emails = this.parse(text, feedUrl);
-      app.atomMemCache[contextKey] = { ts: Date.now(), feedUrl, emails };
+      const emails = this.parse(text, usedFeedUrl);
+      app.atomMemCache[contextKey] = { ts: Date.now(), feedUrl: usedFeedUrl, emails };
       debugLog('Atom scan', emails.length, 'unread, context=', contextKey);
       this.applyEmails(emails, contextKey);
     } catch (e) {

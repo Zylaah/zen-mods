@@ -76,26 +76,30 @@ export class LiveGmailChild extends JSWindowActorChild {
 
   receiveMessage(message) {
     if (message.name !== 'LiveGmail:FetchAtom') return null;
-    return this.#fetchAtom(message.data?.feedUrl);
+    return this.#fetchAtom();
   }
 
-  #fetchAtom(feedUrl) {
+  #feedUrlFromDocument() {
     const win = this.contentWindow;
-    if (!win || !this.#isGmail()) {
+    const href = win?.location?.href || '';
+    const url = new win.URL(href);
+    if (url.protocol !== 'https:' || url.hostname !== 'mail.google.com') {
+      throw new Error('Gmail feed requires a paired Gmail tab');
+    }
+    const account = url.pathname.match(/\/mail\/u\/(\d+)(?:\/|$)/)?.[1] || '0';
+    return 'https://mail.google.com/mail/u/' + account + '/feed/atom';
+  }
+
+  #fetchAtom() {
+    const win = this.contentWindow;
+    if (!win?.XMLHttpRequest) {
       return Promise.reject(new Error('Gmail tab not ready'));
     }
-    let parsed;
+    let feedUrl;
     try {
-      parsed = new win.URL(String(feedUrl || ''));
+      feedUrl = this.#feedUrlFromDocument();
     } catch (e) {
-      return Promise.reject(new Error('Bad feed URL'));
-    }
-    if (
-      parsed.protocol !== 'https:' ||
-      parsed.hostname !== 'mail.google.com' ||
-      !/\/mail\/u\/\d+\/feed\/atom$/.test(parsed.pathname)
-    ) {
-      return Promise.reject(new Error('Bad feed URL'));
+      return Promise.reject(e);
     }
 
     return new Promise((resolve, reject) => {
@@ -106,37 +110,26 @@ export class LiveGmailChild extends JSWindowActorChild {
         reject(e);
         return;
       }
-      try {
-        xhr.mozBackgroundRequest = true;
-      } catch (e) {}
-      try {
-        xhr.open('GET', parsed.href, true);
-      } catch (e) {
-        reject(e);
-        return;
-      }
-      xhr.withCredentials = true;
-      xhr.timeout = 8000;
+      try { xhr.mozBackgroundRequest = true; } catch (e) {}
+      try { xhr.open('GET', feedUrl, true); } catch (e) { reject(e); return; }
+      try { xhr.withCredentials = true; } catch (e) {}
       xhr.onload = () => {
-        const text = String(xhr.responseText || '');
-        if (text.length > 500000) {
-          reject(new Error('Feed too large'));
-          return;
+        try {
+          resolve({
+            status: xhr.status,
+            finalUrl: xhr.responseURL || feedUrl,
+            text: xhr.responseText ?? '',
+            feedUrl
+          });
+        } catch (e) {
+          reject(e);
         }
-        resolve({
-          status: xhr.status,
-          finalUrl: xhr.responseURL || parsed.href,
-          text
-        });
       };
       xhr.onerror = () => reject(new Error('Network error'));
-      xhr.ontimeout = () => reject(new Error('Timeout'));
       xhr.onabort = () => reject(new Error('Aborted'));
-      try {
-        xhr.send();
-      } catch (e) {
-        reject(e);
-      }
+      xhr.ontimeout = () => reject(new Error('Timeout'));
+      try { xhr.timeout = 8000; } catch (e) {}
+      try { xhr.send(); } catch (e) { reject(e); }
     });
   }
 
