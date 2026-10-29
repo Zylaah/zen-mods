@@ -2,7 +2,7 @@
 
 > **Purpose:** Hand this file to a fresh LLM conversation when working on this mod. It describes what the mod does, how it is built, and how it integrates with Zen Browser / Firefox internals.
 >
-> **Current version:** `3.6.0` (see `theme.json` and `@version` in `live-gmail.uc.js`)
+> **Current version:** `4.0.0` (see `theme.json` and `@version` in `live-gmail.uc.js`)
 >
 > **Last updated:** 2026-10-29
 
@@ -21,9 +21,9 @@ User-facing behavior:
 5. A floating **+** button opens Gmail compose.
 6. Unread mail comes from Gmail's **Atom feed** (`https://mail.google.com/mail/u/N/feed/atom`) using that tab's Firefox container cookies (`userContextId`). The tab does not need to be loaded.
 7. Cached results persist across browser restarts via a profile JSON file.
-8. If a Gmail tab **is** loaded, a small frame script watches inbox **read-state** only and forces a fresh Atom fetch when it changes.
+8. If a Gmail tab **is** loaded, a **JSWindowActor** (`LiveGmailChild` / `LiveGmailParent`) watches inbox **read-state** only and forces a fresh Atom fetch when it changes.
 
-**Important:** This mod does **not** use the Gmail API and does **not** scrape inbox rows for the unread list. It fetches Atom in chrome (cookies via content principal + `userContextId`, same pattern as Zen live folders). XML is parsed in chrome, outside Gmail CSP. Never navigate a tab to `/feed/atom` (that triggers HTTP Basic auth). The frame script must not be used as the unread source.
+**Important:** This mod does **not** use the Gmail API and does **not** scrape inbox rows for the unread list. It fetches Atom in chrome (cookies via content principal + `userContextId`, same pattern as Zen live folders). XML is parsed in chrome, outside Gmail CSP. Never navigate a tab to `/feed/atom` (that triggers HTTP Basic auth). Do not inject a `data:` frame script as the unread source.
 
 ---
 
@@ -31,12 +31,23 @@ User-facing behavior:
 
 ```
 live-gmail/
-├── live-gmail.uc.js   # Main mod logic (~2000 lines) — runs in browser chrome
-├── chrome.css         # Panel styling (native Zen look, compose button)
-├── theme.json         # Sine manifest (version, include paths, metadata)
-├── README.md          # User-facing install/usage docs
-└── CONTEXT.md         # This file
+├── live-gmail.uc.js          # Window bootstrap: register actor, create LiveGmail
+├── LiveGmail.sys.mjs         # Per-window orchestrator / state
+├── LiveGmailUtil.sys.mjs     # Config, container ids, Gmail URL helpers
+├── LiveGmailAtom.sys.mjs     # Cookie Atom fetch + parse
+├── LiveGmailCache.sys.mjs    # Profile JSON + in-memory panel contexts
+├── LiveGmailPanel.sys.mjs    # XUL panel, hover timers, popup placement
+├── LiveGmailTabs.sys.mjs     # Essential/pinned targeting, compose, open
+├── actors/
+│   ├── LiveGmailParent.sys.mjs
+│   └── LiveGmailChild.sys.mjs
+├── chrome.css
+├── theme.json
+├── README.md
+└── CONTEXT.md
 ```
+
+Modules load from `chrome://sine/content/live-gmail/…` (Sine maps the mod id, not the git folder name). Bootstrap passes `?v=Date.now()` so Firefox does not keep a stale ES module after a Sine reload. Actor registration is process-wide; a second window hits `NotSupportedError` and reuses the existing actor.
 
 Parent repo: `zen-mods` on GitHub. Git root is the parent `zen-mods/` folder, not `live-gmail/` alone.
 
@@ -59,37 +70,51 @@ Parent repo: `zen-mods` on GitHub. Git root is the parent `zen-mods/` folder, no
 }
 ```
 
-The script is a **userChrome `.uc.js` file** injected into the main browser window. It runs in **privileged chrome context** with access to:
+`live-gmail.uc.js` is injected into the main browser window. It registers the `LiveGmail` JSWindowActor and constructs one `LiveGmail` instance per window (`window.liveGmail`). Chrome modules have `gBrowser`, `Services`, `IOUtils`, and XUL. The child actor runs in the Gmail content process.
 
-- `gBrowser`, `Services`, `Ci`, `Cu`, `IOUtils`, `PathUtils`
-- XUL/HTML DOM for creating the panel
-- `browser.messageManager` for talking to content processes
-
-It is **not** a WebExtension. There is no `manifest.json`, no `browser.*` polyfill, no WXT build.
+It is **not** a WebExtension.
 
 ### Initialization
 
-On `DOMContentLoaded` (or immediately if document is complete):
-
-```js
-UC_LIVE_GMAIL.init()
-  → loadCacheFromPrefs()
-  → cleanupScannerTabs()          // remove legacy scanner tabs
-  → createPanel()                 // XUL <panel> element
-  → setupTabMonitoring()          // hover listeners, tab observers
-  → initDomMode()                 // message listeners + background scan timer
-  → updatePanelContent()
+```
+start()
+  → registerWindowActor("LiveGmail")   // once per process
+  → createLiveGmail(window)
+  → cache.load()
+  → tabs.cleanupScannerTabs()
+  → panel.create()
+  → tabs.setupMonitoring()
+  → tabs.scanLoadedAnchors() / atom.requestScan()
 ```
 
 If `gBrowser` is not ready yet, init retries every 200ms.
 
 ---
 
-## Architecture overview (3.5.0)
+## Architecture overview (4.0.0)
 
-Chrome fetches Atom with the essential's `userContextId`, parses XML, and fills the panel. A frame script is optional: it only sends `LiveGmail:ReadState` so chrome can bust the 60s Atom cache. Clicking an item loads the Atom permalink with `fixupAndLoadURIString`.
+Per-window state lives on `LiveGmail`. Four chrome modules do the work: **atom**, **cache**, **panel**, **tabs**. Read-state uses a JSWindowActor, not a `data:` frame script.
 
-Older sections below that describe inbox-row scraping, `OpenThread`, `CheckReady`, or waking discarded tabs for a DOM scan are **obsolete**.
+```
+┌─────────────────────────────────────────────────────────────┐
+│  CHROME (browser.xhtml)                                     │
+│  live-gmail.uc.js → LiveGmail.sys.mjs                       │
+│    atom  cookie Atom fetch + XML parse                      │
+│    cache live-gmail-cache.json + container contexts         │
+│    panel XUL popup, hover timers, folder-style placement    │
+│    tabs  essential/pinned match, compose, open permalink    │
+└──────────────────────┬──────────────────────────────────────┘
+                       │ JSWindowActor "LiveGmail"
+                       │  LiveGmail:ReadState (child → parent)
+┌──────────────────────▼──────────────────────────────────────┐
+│  LiveGmailChild  (mail.google.com only)                     │
+│  MutationObserver on inbox rows → bust 60s Atom cache       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Clicking an item loads the Atom permalink with `fixupAndLoadURIString`.
+
+Older sections below that describe inbox-row scraping, `OpenThread`, `CheckReady`, `GMAIL_FRAME_SCRIPT`, or waking discarded tabs for a DOM scan are **obsolete**.
 
 ---
 
@@ -382,37 +407,30 @@ Enable: `live-gmail.debug` = `true` in `about:config`.
 
 Browser console shows `[Live Gmail]` logs.
 
-Debug API on `window.liveGmailDebug`:
+Debug API on `window.liveGmailDebug` (and `window.liveGmail` for the instance):
 
 ```js
-liveGmailDebug.scan()      // force hover-style scan
-liveGmailDebug.wake()      // wakeGmailForScan directly
+liveGmailDebug.scan()      // force Atom fetch
 liveGmailDebug.showPanel() // open panel manually
 liveGmailDebug.hidePanel()
 liveGmailDebug.emails()    // current email array
+liveGmailDebug.context()   // active Firefox container id
 liveGmailDebug.reInit()    // re-run init
 ```
 
-Frame script logs as `[Live Gmail Frame]` when debug is enabled.
-
 ---
 
-## Key functions reference
+## Key modules
 
-| Function | Role |
-|----------|------|
-| `showPanel` / `hidePanel` / `scheduleHide` | Panel visibility + hide delay |
-| `wakeGmailForScan` | Hover path: load if needed, scan, mark for unload |
-| `loadGmailInTab` | Background navigation to inbox URL |
-| `scheduleScanWhenTabReady` | Wait for load event, then scan |
-| `scanBrowser` | Inject frame script + send RequestScan |
-| `scanLoadedGmailTabs` | Scan already-loaded essential or any Gmail tab |
-| `handleFrameScriptData` | Process scan results, cache, trigger unload |
-| `unloadGmailEssentialTab` | `explicitUnloadTabs` wrapper |
-| `updateEmailDisplay` | Render panel content from emails / loading state |
-| `isGmailAnchorTab` | Essential or pinned + container + URL match |
-| `findGmailAnchorTab` | Prefer loaded, else any matching essential/pinned Gmail |
-| `resolveGmailTargetTab` | For compose/click: find or create essential |
+| Module | Role |
+|--------|------|
+| `LiveGmailPanel.show` / `hide` / `scheduleHide` | Panel visibility + hide delay |
+| `LiveGmailAtom.requestScan` | Cookie Atom fetch for a tab's container |
+| `LiveGmailCache.load` / `save` | Profile JSON + container contexts |
+| `LiveGmailPanel.updateDisplay` | Render panel from emails / loading state |
+| `LiveGmailTabs.isGmailAnchor` | Essential or pinned + container + URL match |
+| `LiveGmailTabs.findAnchor` | Prefer loaded, else any matching Gmail pin |
+| `LiveGmailTabs.openEmail` / `openCompose` | Select tab and load permalink / compose |
 
 ---
 
@@ -501,10 +519,5 @@ Reference files (outside this repo, on maintainer's machine):
 
 1. This file (overview + integration)
 2. `README.md` (user prefs and install)
-3. `live-gmail.uc.js` sections in order:
-   - CONFIG + state (lines ~15–70)
-   - Tab load/unload: `wakeGmailForScan`, `loadGmailInTab`, `unloadGmailEssentialTab` (~327–445)
-   - Frame script string `GMAIL_FRAME_SCRIPT` (~610–1010)
-   - Panel + hover: `showPanel`, `updateEmailDisplay` (~1530–1920)
-   - Init (~1990–2035)
+3. `live-gmail.uc.js` (bootstrap), then `LiveGmail.sys.mjs`, then the module that matches the task (`LiveGmailAtom`, `LiveGmailPanel`, `LiveGmailTabs`, `LiveGmailCache`, `actors/`).
 4. `chrome.css` for UI changes
