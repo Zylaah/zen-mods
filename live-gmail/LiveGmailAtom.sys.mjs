@@ -237,48 +237,47 @@ export class LiveGmailAtom {
 
   onFeedDocument(browser, data) {
     const pending = this.pendingFeedBrowsers?.get(browser);
-    if (!pending) return;
-    debugLog(
-      'Feed document',
-      data?.root || '',
-      data?.contentType || '',
-      (data?.text || '').length,
-      data?.href || ''
-    );
-    pending.resolve({
-      status: data?.signin || !data?.text ? 401 : 200,
-      finalUrl: data?.href || '',
-      text: data?.text || ''
-    });
+    if (!pending || data?.root !== 'feed' || !data?.text) return;
+    debugLog('Feed document', data.contentType || '', data.text.length, data.href || '');
+    pending.resolve({ status: 200, finalUrl: data.href || '', text: data.text });
   }
 
   fetchViaDocument(feedUrl, userContextId) {
     const win = this.app.window;
-    const doc = win.document;
-    const browser = doc.createXULElement('browser');
-    browser.setAttribute('type', 'content');
-    browser.setAttribute('remote', 'true');
-    browser.setAttribute('maychangeremoteness', 'true');
-    browser.setAttribute('disableglobalhistory', 'true');
-    browser.setAttribute('nodefaultsrc', 'true');
-    browser.setAttribute('usercontextid', String(userContextId || 0));
-    browser.style.cssText = 'position:fixed;left:-10000px;width:16px;height:16px;opacity:0;pointer-events:none;';
-    doc.documentElement.appendChild(browser);
+    const gBrowser = win.gBrowser;
+    if (!gBrowser?.addTab) return Promise.reject(new Error('No tab browser'));
     if (!this.pendingFeedBrowsers) this.pendingFeedBrowsers = new Map();
 
     return new Promise((resolve, reject) => {
       let settled = false;
-      let listener = null;
+      let teed = false;
+      const chunks = [];
+      let tab = null;
+      const previous = gBrowser.selectedTab;
       const timer = win.setTimeout(() => finish(reject, new Error('Timeout')), CONFIG.ATOM_TIMEOUT_MS);
+
+      const observer = {
+        observe: (subject) => this.#captureFeedChannel(subject, feedUrl, userContextId, {
+          get settled() { return settled; },
+          get teed() { return teed; },
+          set teed(value) { teed = value; },
+          chunks,
+          finish: (result) => finish(resolve, result)
+        })
+      };
 
       const cleanup = () => {
         win.clearTimeout(timer);
-        this.pendingFeedBrowsers.delete(browser);
-        if (listener) {
-          try { browser.removeProgressListener(listener); } catch (e) {}
-          listener = null;
+        if (tab?.linkedBrowser) this.pendingFeedBrowsers.delete(tab.linkedBrowser);
+        try { Services.obs.removeObserver(observer, 'http-on-examine-response'); } catch (e) {}
+        if (tab && previous && previous !== tab && !previous.closing && gBrowser.selectedTab === tab) {
+          try { gBrowser.selectedTab = previous; } catch (e) {}
         }
-        try { browser.remove(); } catch (e) {}
+        if (tab) {
+          try { gBrowser.removeTab(tab, { animate: false, skipPermitUnload: true }); } catch (e) {
+            try { gBrowser.removeTab(tab); } catch (err) {}
+          }
+        }
       };
       const finish = (fn, value) => {
         if (settled) return;
@@ -287,45 +286,93 @@ export class LiveGmailAtom {
         fn(value);
       };
 
-      this.pendingFeedBrowsers.set(browser, {
-        resolve: (result) => finish(resolve, result)
-      });
-
-      listener = {
-        QueryInterface: ChromeUtils.generateQI(['nsIWebProgressListener', 'nsISupportsWeakReference']),
-        onLocationChange(_progress, _request, location) {
-          const spec = location?.spec || '';
-          if (/accounts\.google\.com|ServiceLogin/i.test(spec)) {
-            finish(resolve, { status: 401, finalUrl: spec, text: '' });
-          }
-        },
-        onStateChange() {},
-        onProgressChange() {},
-        onStatusChange() {},
-        onSecurityChange() {},
-        onContentBlockingEvent() {}
-      };
-
-      const start = () => {
-        try {
-          browser.addProgressListener(listener, Ci.nsIWebProgress.NOTIFY_LOCATION);
-        } catch (e) {}
-        try {
-          const loadFlags = Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_HISTORY | Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_CACHE;
-          const triggeringPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
-          if (browser.fixupAndLoadURIString) {
-            browser.fixupAndLoadURIString(feedUrl, { triggeringPrincipal, loadFlags });
-          } else {
-            browser.loadURI(Services.io.newURI(feedUrl), { triggeringPrincipal, loadFlags });
-          }
-        } catch (e) {
-          finish(reject, e);
+      Services.obs.addObserver(observer, 'http-on-examine-response');
+      try {
+        tab = gBrowser.addTab(feedUrl, {
+          triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+          userContextId: userContextId || 0,
+          inBackground: true,
+          skipAnimation: true
+        });
+        tab.setAttribute(CONFIG.SCANNER_TAB_ATTR, 'true');
+        try { gBrowser.hideTab?.(tab); } catch (e) {}
+        if (tab.linkedBrowser) {
+          this.pendingFeedBrowsers.set(tab.linkedBrowser, {
+            resolve: (result) => finish(resolve, result)
+          });
         }
-      };
-
-      if (browser.browsingContext) start();
-      else browser.addEventListener('XULFrameLoaderCreated', start, { once: true });
+        debugLog('Atom document tab', userContextId || 0, feedUrl);
+      } catch (e) {
+        finish(reject, e);
+      }
     });
+  }
+
+  #captureFeedChannel(subject, feedUrl, userContextId, capture) {
+    if (capture.settled) return;
+    let channel;
+    try {
+      channel = subject.QueryInterface(Ci.nsIHttpChannel);
+    } catch (e) {
+      return;
+    }
+    let spec = '';
+    try { spec = channel.URI.spec; } catch (e) { return; }
+    let contextId = 0;
+    try { contextId = channel.loadInfo.originAttributes.userContextId || 0; } catch (e) {}
+    if (contextId !== (userContextId || 0)) return;
+
+    const isFeed = spec.startsWith(feedUrl) || /mail\.google\.com\/mail\/u\/\d+\/feed\/atom/i.test(spec);
+    const isLogin = /accounts\.google\.com|ServiceLogin/i.test(spec);
+    if (!isFeed && !isLogin) return;
+
+    let status = 0;
+    try { status = channel.responseStatus; } catch (e) {}
+    debugLog('Atom document response', status, spec);
+    if (isLogin || status === 401 || status === 403) {
+      capture.finish({ status: status || 401, finalUrl: spec, text: '' });
+      return;
+    }
+    if (!isFeed || status < 200 || status >= 300 || capture.teed) return;
+    capture.teed = true;
+
+    let original = null;
+    const sink = {
+      onStartRequest(request) {
+        original.onStartRequest(request);
+      },
+      onDataAvailable(request, stream, _offset, count) {
+        const binary = Cc['@mozilla.org/binaryinputstream;1'].createInstance(Ci.nsIBinaryInputStream);
+        binary.setInputStream(stream);
+        const data = binary.readBytes(count);
+        capture.chunks.push(data);
+        const storage = Cc['@mozilla.org/storagestream;1'].createInstance(Ci.nsIStorageStream);
+        storage.init(8192, count, null);
+        const out = storage.getOutputStream(0);
+        out.write(data, count);
+        out.close();
+        original.onDataAvailable(request, storage.newInputStream(0), 0, count);
+      },
+      onStopRequest(request, requestStatus) {
+        original.onStopRequest(request, requestStatus);
+        const bytes = Uint8Array.from(capture.chunks.join(''), (ch) => ch.charCodeAt(0));
+        const text = new TextDecoder('utf-8').decode(bytes);
+        let finalUrl = spec;
+        let httpStatus = status;
+        try { finalUrl = channel.URI.spec; } catch (e) {}
+        try { httpStatus = channel.responseStatus; } catch (e) {}
+        debugLog('Atom document body', httpStatus, text.trim().slice(0, 1) === '<' ? 'xml' : 'not-xml', text.length);
+        if (text.includes('<feed')) {
+          capture.finish({ status: httpStatus, finalUrl, text });
+        }
+      }
+    };
+    try {
+      original = channel.QueryInterface(Ci.nsITraceableChannel).setNewListener(sink);
+    } catch (e) {
+      capture.teed = false;
+      debugLog('Atom document tee failed', e && e.message ? e.message : e);
+    }
   }
 
   async requestScan(tab, { force = false } = {}) {
