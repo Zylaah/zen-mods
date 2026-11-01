@@ -13,6 +13,81 @@ const {
 const { NetUtil } = ChromeUtils.importESModule('resource://gre/modules/NetUtil.sys.mjs');
 const Cr = Components.results;
 
+function asArray(result) {
+  if (!result) return [];
+  try {
+    if (typeof result.length === 'number' || typeof result[Symbol.iterator] === 'function') {
+      return Array.from(result);
+    }
+  } catch (e) {}
+  return [];
+}
+
+function cookieList(host, originAttributes) {
+  try {
+    return asArray(Services.cookies.getCookiesFromHost(host, originAttributes));
+  } catch (e) {}
+  try {
+    return asArray(Services.cookies.getCookiesFromHost(host, originAttributes, false));
+  } catch (e) {}
+  return [];
+}
+
+function allCookies() {
+  try {
+    const cookies = Services.cookies.cookies;
+    if (cookies && typeof cookies.length === 'number') return Array.from(cookies);
+  } catch (e) {}
+  const list = [];
+  try {
+    const enumerator = Services.cookies.enumerator;
+    while (enumerator?.hasMoreElements()) {
+      list.push(enumerator.getNext().QueryInterface(Ci.nsICookie));
+    }
+  } catch (e) {}
+  return list;
+}
+
+function cookieSentToGmail(cookie, userContextId, requestPath) {
+  const host = String(cookie.host || cookie.rawHost || '').replace(/^\./, '');
+  if (host !== 'mail.google.com' && host !== 'google.com') return false;
+  const contextId = Number(cookie.originAttributes?.userContextId || 0);
+  if (contextId !== userContextId) return false;
+  if (!cookie.isSession && cookie.expiry && cookie.expiry * 1000 < Date.now()) return false;
+  const path = cookie.path || '/';
+  return path === '/' || requestPath.startsWith(path);
+}
+
+function gmailCookieHeader(userContextId, feedUrl) {
+  const uri = Services.io.newURI('https://mail.google.com/');
+  try {
+    const service = Cc['@mozilla.org/cookieService;1'].getService(Ci.nsICookieService);
+    const principal = Services.scriptSecurityManager.createContentPrincipal(uri, { userContextId });
+    const fromPrincipal = service.getCookieStringForPrincipal(principal);
+    if (fromPrincipal) return fromPrincipal;
+  } catch (e) {}
+
+  let requestPath = '/';
+  try { requestPath = new URL(feedUrl).pathname || '/'; } catch (e) {}
+  const jar = new Map();
+  const add = (cookie) => {
+    if (!cookieSentToGmail(cookie, userContextId, requestPath)) return;
+    const partitioned = !!cookie.originAttributes?.partitionKey;
+    const current = jar.get(cookie.name);
+    if (!current || (current.partitioned && !partitioned)) {
+      jar.set(cookie.name, { value: cookie.value, partitioned });
+    }
+  };
+
+  for (const host of ['mail.google.com', 'google.com']) {
+    for (const cookie of cookieList(host, { userContextId })) add(cookie);
+  }
+  if (!jar.size) {
+    for (const cookie of allCookies()) add(cookie);
+  }
+  return [...jar.entries()].map(([name, cookie]) => name + '=' + cookie.value).join('; ');
+}
+
 export class LiveGmailAtom {
   constructor(app) {
     this.app = app;
@@ -131,10 +206,7 @@ export class LiveGmailAtom {
     const userContextId = getTabUserContextId(tab);
     const uri = Services.io.newURI(feedUrl);
     const principal = Services.scriptSecurityManager.createContentPrincipal(uri, { userContextId });
-    let cookieString = '';
-    try {
-      cookieString = Services.cookies.getCookieStringForPrincipal(principal) || '';
-    } catch (e) {}
+    const cookieString = gmailCookieHeader(userContextId, feedUrl);
     debugLog(
       'Atom via cookies',
       feedUrl,
