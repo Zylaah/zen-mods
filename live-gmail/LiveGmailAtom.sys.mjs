@@ -3,15 +3,39 @@ const {
   debugLog,
   fnv1a,
   getGmailUrlPattern,
+  getTabUserContextId,
   gmailAccountSlotFromHints,
   normalizeGmailOpenUrl
 } = ChromeUtils.importESModule(
   'chrome://sine/content/live-gmail/LiveGmailUtil.sys.mjs' + new URL(import.meta.url).search
 );
 
+const { NetUtil } = ChromeUtils.importESModule('resource://gre/modules/NetUtil.sys.mjs');
+const Cr = Components.results;
+
 export class LiveGmailAtom {
   constructor(app) {
     this.app = app;
+    this.pollTimer = null;
+  }
+
+  startPoll() {
+    this.stopPoll();
+    if (this.app.oauth?.usesOAuth()) return;
+    this.pollTimer = this.app.window.setInterval(() => this.pollAnchors(), CONFIG.ATOM_POLL_MS);
+    this.pollAnchors();
+  }
+
+  stopPoll() {
+    if (!this.pollTimer) return;
+    try { this.app.window.clearInterval(this.pollTimer); } catch (e) {}
+    this.pollTimer = null;
+  }
+
+  pollAnchors() {
+    for (const tab of this.app.tabs.gmailAnchors()) {
+      this.requestScan(tab, { force: true });
+    }
   }
 
   getFeedUrl(tab) {
@@ -103,25 +127,51 @@ export class LiveGmailAtom {
     }
   }
 
-  async fetchViaTab(tab) {
-    const browser = tab?.linkedBrowser;
-    const windowGlobal = browser?.browsingContext?.currentWindowGlobal;
-    if (!windowGlobal) {
-      debugLog('Tab Atom unavailable: no current window global');
-      return null;
-    }
-    let actor;
+  fetchViaCookies(tab, feedUrl) {
+    const userContextId = getTabUserContextId(tab);
+    const uri = Services.io.newURI(feedUrl);
+    const principal = Services.scriptSecurityManager.createContentPrincipal(uri, { userContextId });
+    const channel = NetUtil.newChannel({
+      uri,
+      loadingPrincipal: principal,
+      contentPolicyType: Ci.nsIContentPolicy.TYPE_XMLHTTPREQUEST,
+      securityFlags: Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_INHERITS_SEC_CONTEXT
+    }).QueryInterface(Ci.nsIHttpChannel);
+    channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE | Ci.nsIRequest.INHIBIT_CACHING;
     try {
-      actor = windowGlobal.getActor('LiveGmail');
-    } catch (e) {
-      debugLog('Tab Atom unavailable: actor lookup failed', e?.message || e);
-      return null;
-    }
-    if (!actor?.sendQuery) {
-      debugLog('Tab Atom unavailable: actor has no query channel');
-      return null;
-    }
-    return actor.sendQuery('LiveGmail:FetchAtom', {});
+      channel.setRequestHeader('Accept', 'application/atom+xml,application/xml;q=0.9,*/*;q=0.8', false);
+    } catch (e) {}
+
+    debugLog('Atom via cookies', feedUrl, 'container', userContextId);
+    return new Promise((resolve, reject) => {
+      const timer = this.app.window.setTimeout(() => {
+        try { channel.cancel(Cr.NS_ERROR_NET_TIMEOUT); } catch (e) {}
+      }, CONFIG.ATOM_TIMEOUT_MS);
+      NetUtil.asyncFetch(channel, (input, requestStatus, request) => {
+        this.app.window.clearTimeout(timer);
+        if (!Components.isSuccessCode(requestStatus)) {
+          reject(new Error('Network error'));
+          return;
+        }
+        let text = '';
+        try {
+          const available = input.available();
+          if (available > 0) {
+            text = NetUtil.readInputStreamToString(input, Math.min(available, CONFIG.ATOM_MAX_BYTES), {
+              charset: 'UTF-8'
+            });
+          }
+        } catch (e) {}
+        let status = 0;
+        let finalUrl = feedUrl;
+        try {
+          const http = request.QueryInterface(Ci.nsIHttpChannel);
+          status = http.responseStatus;
+          finalUrl = http.URI?.spec || feedUrl;
+        } catch (e) {}
+        resolve({ status, finalUrl, text, feedUrl });
+      });
+    });
   }
 
   onFeedDocument() {}
@@ -217,16 +267,7 @@ export class LiveGmailAtom {
     }
 
     try {
-      debugLog('Atom via tab');
-      const fetched = await this.fetchViaTab(tab);
-      if (!fetched) {
-        debugLog('Atom via tab unavailable: Gmail page is not loaded');
-        app.scanInProgress = false;
-        app.loadScansInFlight.delete(contextKey);
-        if (app.scanContextKey === contextKey) app.scanContextKey = null;
-        app.panel.updateDisplay();
-        return;
-      }
+      const fetched = await this.fetchViaCookies(tab, feedUrl);
       const { status, finalUrl, text } = fetched;
       const usedFeedUrl = fetched.feedUrl || feedUrl;
       if (status === 401 || status === 403) {

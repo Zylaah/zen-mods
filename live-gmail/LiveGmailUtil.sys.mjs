@@ -9,6 +9,7 @@ export const CONFIG = {
   ATOM_CACHE_MS: 60000,
   ATOM_TIMEOUT_MS: 8000,
   ATOM_MAX_BYTES: 500000,
+  ATOM_POLL_MS: 60000,
   OAUTH_CLIENT_ID_PREF: 'live-gmail.oauth.client-id',
   OAUTH_CLIENT_SECRET_PREF: 'live-gmail.oauth.client-secret',
   SOURCE_PREF: 'live-gmail.source',

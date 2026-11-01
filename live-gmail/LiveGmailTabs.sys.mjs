@@ -2,6 +2,7 @@ const {
   CONFIG,
   debugLog,
   getContextContainerId,
+  getTabUserContextId,
   getGmailComposeUrl,
   getGmailInboxUrl,
   getGmailUrlPattern,
@@ -126,6 +127,19 @@ export class LiveGmailTabs {
       if (this.isNavigationComplete(tab.linkedBrowser)) return tab;
     }
     return null;
+  }
+
+  gmailAnchors() {
+    const byContext = new Map();
+    for (const tab of this.gBrowser?.tabs || []) {
+      if (!isEssentialOrPinnedTab(tab) || !this.matchesGmailPattern(tab)) continue;
+      const key = String(getTabUserContextId(tab) || 0);
+      const current = byContext.get(key);
+      if (!current || (this.isPendingOrDiscarded(current) && !this.isPendingOrDiscarded(tab))) {
+        byContext.set(key, tab);
+      }
+    }
+    return [...byContext.values()];
   }
 
   findAnchor(contextKey = this.app.activePanelContextKey || this.app.getPanelContextKey()) {

@@ -84,10 +84,16 @@ export class LiveGmail {
     }
     debugLog('Initialized successfully');
     this.oauth.startPoll();
+    this.atom.startPoll();
     this.sourceObserver = {
       observe: () => {
-        if (this.oauth.usesOAuth() && this.oauth.isConnected()) this.oauth.startPoll();
-        else this.oauth.stopPoll();
+        if (this.oauth.usesOAuth() && this.oauth.isConnected()) {
+          this.atom.stopPoll();
+          this.oauth.startPoll();
+        } else {
+          this.oauth.stopPoll();
+          this.atom.startPoll();
+        }
         this.panel.updateDisplay();
         const tab = this.tabs.findAnchor();
         if (tab) this.atom.requestScan(tab, { force: true });
@@ -102,6 +108,7 @@ export class LiveGmail {
       this.sourceObserver = null;
     }
     this.oauth.stopPoll();
+    this.atom.stopPoll();
     this.panel.hide();
     if (this.panelElement?.remove) {
       try {
