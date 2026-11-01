@@ -48,4 +48,4 @@ The settings button on the Live Gmail mod opens a settings panel. **Unread sourc
 - Works best with a signed-in Gmail session in the same profile. Each Firefox container has its own cookies, so a Gmail pin in Work and one in Personal show that container's inbox.
 - With Atom selected, unread mail comes from Gmail's Atom feed (`/mail/u/N/feed/atom`) using that tab's container cookies, including while the pin is unloaded. Opening a conversation in the Gmail tab removes it from the panel, and the inbox is still watched so mail you mark read drops off too.
 - With OAuth selected, unread mail comes from the Gmail API for the account you connected. That token is not tied to a Firefox container.
-- Clicking an item opens that conversation in the Gmail tab. When Gmail is already loaded, the tab stays on the same page and only the conversation changes.
+- Clicking an item selects the Gmail tab and waits until its inbox is ready, then opens that thread there.

@@ -7,8 +7,8 @@ const {
   getGmailComposeUrl,
   getGmailInboxUrl,
   getGmailUrlPattern,
+  gmailAccountSlotFromHints,
   gmailAccountSlotFromUrl,
-  gmailInPageHash,
   gmailSpaUrl,
   gmailThreadIdFromUrl,
   isEssentialOrPinnedTab,
@@ -274,32 +274,114 @@ export class LiveGmailTabs {
     } catch (e) {}
   }
 
-  tryOpenInPage(browser, gmailUrl) {
-    if (!this.isLoadedGmailBrowser(browser)) return false;
-    const hash = gmailInPageHash(gmailUrl);
-    if (!hash) return false;
-    let current = '';
+  gmailActor(browser) {
     try {
-      current = browser.currentURI?.spec || '';
-    } catch (e) {}
-    if (!current.includes(getGmailUrlPattern())) return false;
-    if (/\/feed\/atom/i.test(current)) return false;
-    if (/[?&](?:ui=html|view=pt|view=om)(?:&|$)/i.test(current)) return false;
-    const currentSlot = gmailAccountSlotFromUrl(current) || '0';
-    const targetSlot = gmailAccountSlotFromUrl(gmailUrl) || currentSlot;
-    if (currentSlot !== targetSlot) return false;
-    let actor = null;
-    try {
-      actor = browser.browsingContext?.currentWindowGlobal?.getActor('LiveGmail');
-    } catch (e) {}
-    if (!actor?.sendAsyncMessage) return false;
-    try {
-      actor.sendAsyncMessage('LiveGmail:OpenInPage', { hash });
-      debugLog('Opened email in page', hash);
-      return true;
+      return browser?.browsingContext?.currentWindowGlobal?.getActor('LiveGmail') || null;
     } catch (e) {
-      return false;
+      return null;
     }
+  }
+
+  threadPayload(email) {
+    const ids = [];
+    for (const value of [
+      email?.gmailThreadId,
+      email?.legacyThreadId,
+      email?.threadId,
+      gmailThreadIdFromUrl(email?.url || '')
+    ]) {
+      if (isGmailThreadToken(value) && !ids.includes(value)) ids.push(value);
+    }
+    return {
+      ids,
+      subject: email?.subject || '',
+      from: email?.from || ''
+    };
+  }
+
+  inboxUrlFor(email, tab) {
+    const slot = gmailAccountSlotFromUrl(email?.url || '') || gmailAccountSlotFromHints(this.getUrlHints(tab)) || '0';
+    return `https://${getGmailUrlPattern()}/mail/u/${slot}/#inbox`;
+  }
+
+  loadGmailUrl(browser, url) {
+    if (!browser?.fixupAndLoadURIString || !url) return;
+    browser.fixupAndLoadURIString(url, {
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
+    });
+  }
+
+  waitForInbox(tab, email) {
+    const win = this.app.window;
+    const started = Date.now();
+    let showedInbox = false;
+    let loadedInbox = false;
+    return new Promise((resolve) => {
+      const tick = () => {
+        if (Date.now() - started > 8000) {
+          resolve(false);
+          return;
+        }
+        const browser = tab?.linkedBrowser;
+        const loaded = this.isLoadedGmailBrowser(browser) && this.isNavigationComplete(browser);
+        if (!loaded) {
+          if (!loadedInbox && Date.now() - started > 1200 && browser && !this.isLoadedGmailBrowser(browser)) {
+            loadedInbox = true;
+            this.loadGmailUrl(browser, this.inboxUrlFor(email, tab));
+          }
+          win.setTimeout(tick, 150);
+          return;
+        }
+        const actor = this.gmailActor(browser);
+        if (!actor?.sendQuery) {
+          win.setTimeout(tick, 150);
+          return;
+        }
+        actor.sendQuery('LiveGmail:InboxReady').then((status) => {
+          if (status?.rows > 0) {
+            resolve(true);
+            return;
+          }
+          if (!showedInbox) {
+            showedInbox = true;
+            actor.sendQuery('LiveGmail:ShowInbox').catch(() => {}).then(() => {
+              win.setTimeout(tick, 250);
+            });
+            return;
+          }
+          win.setTimeout(tick, 200);
+        }).catch(() => {
+          win.setTimeout(tick, 200);
+        });
+      };
+      tick();
+    });
+  }
+
+  openThreadWhenReady(tab, email, gmailUrl) {
+    this.waitForInbox(tab, email).then((ready) => {
+      if (!ready) {
+        debugLog('Inbox was not ready, opening permalink');
+        this.loadGmailUrl(tab?.linkedBrowser, gmailSpaUrl(gmailUrl) || gmailUrl);
+        return;
+      }
+      const actor = this.gmailActor(tab.linkedBrowser);
+      if (!actor?.sendQuery) {
+        this.loadGmailUrl(tab.linkedBrowser, gmailSpaUrl(gmailUrl) || gmailUrl);
+        return;
+      }
+      actor.sendQuery('LiveGmail:OpenThread', this.threadPayload(email)).then((result) => {
+        if (result?.ok) {
+          debugLog('Opened thread from inbox row');
+          return;
+        }
+        debugLog('No inbox row matched, opening permalink');
+        this.loadGmailUrl(tab.linkedBrowser, gmailSpaUrl(gmailUrl) || gmailUrl);
+      }).catch((err) => {
+        console.warn('[Live Gmail] Could not open thread:', err);
+        this.loadGmailUrl(tab.linkedBrowser, gmailSpaUrl(gmailUrl) || gmailUrl);
+      });
+    });
   }
 
   noteOpenThread(tab, data) {
@@ -400,17 +482,7 @@ export class LiveGmailTabs {
 
     const gmailUrl = normalizeGmailOpenUrl(email.url) || getGmailInboxUrl();
     debugLog('Opening email', gmailUrl);
-    try {
-      const browser = targetTab.linkedBrowser;
-      if (!this.tryOpenInPage(browser, gmailUrl) && browser?.fixupAndLoadURIString) {
-        const loadUrl = gmailSpaUrl(gmailUrl) || gmailUrl;
-        browser.fixupAndLoadURIString(loadUrl, {
-          triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
-        });
-      }
-    } catch (err) {
-      console.warn('[Live Gmail] Could not open email:', err);
-    }
+    this.openThreadWhenReady(targetTab, email, gmailUrl);
 
     app.clickedEmailIds.add(email.id);
     const idx = app.currentEmails.findIndex((item) => item.id === email.id);

@@ -108,21 +108,105 @@ export class LiveGmailChild extends JSWindowActorChild {
   }
 
   receiveMessage(message) {
-    if (message.name === 'LiveGmail:OpenInPage') {
-      this.#openInPage(message.data?.hash);
-      return null;
-    }
+    if (message.name === 'LiveGmail:InboxReady') return this.#inboxStatus();
+    if (message.name === 'LiveGmail:ShowInbox') return this.#showInbox();
+    if (message.name === 'LiveGmail:OpenThread') return this.#clickMatchingThread(message.data || {});
     if (message.name !== 'LiveGmail:FetchAtom') return null;
     return this.#fetchAtom();
   }
 
-  #openInPage(hash) {
-    if (!this.#isTopFrame() || !this.#isGmail()) return;
-    if (!hash || typeof hash !== 'string' || !hash.startsWith('#')) return;
+  #inboxRows() {
+    const doc = this.document;
+    if (!doc) return [];
+    for (const selector of ['tr.zA', 'tr[role="row"]', 'div[role="row"]']) {
+      const rows = [...doc.querySelectorAll(selector)];
+      if (rows.length) return rows;
+    }
+    return [];
+  }
+
+  #inboxStatus() {
+    if (!this.#isTopFrame() || !this.#isGmail()) return { rows: 0, inboxReady: false };
+    const doc = this.document;
+    const rows = this.#inboxRows();
+    const main = !!doc?.querySelector('div[role="main"]');
+    const busy = !!doc?.querySelector('[aria-busy="true"], [role="progressbar"]');
+    return { rows: rows.length, inboxReady: rows.length > 0 || (main && !busy) };
+  }
+
+  #showInbox() {
+    if (!this.#isTopFrame() || !this.#isGmail()) return this.#inboxStatus();
     const win = this.contentWindow;
     try {
-      if ((win.location.hash || '') !== hash) win.location.hash = hash;
+      const hash = win?.location?.hash || '';
+      const onInbox = /^#inbox\/?$/i.test(hash);
+      if (!onInbox) win.location.hash = '#inbox';
     } catch (e) {}
+    return this.#inboxStatus();
+  }
+
+  #rowText(row, selector) {
+    return (row.querySelector(selector)?.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  #rowIds(row) {
+    const ids = new Set();
+    const add = (value) => {
+      if (value) ids.add(String(value));
+    };
+    add(row.getAttribute('data-legacy-thread-id'));
+    add(row.getAttribute('data-thread-id'));
+    add(row.getAttribute('data-thread-perm-id'));
+    for (const node of row.querySelectorAll('[data-legacy-thread-id], [data-thread-id], [data-thread-perm-id], a[href]')) {
+      add(node.getAttribute('data-legacy-thread-id'));
+      add(node.getAttribute('data-thread-id'));
+      add(node.getAttribute('data-thread-perm-id'));
+      add(node.getAttribute('href'));
+    }
+    return ids;
+  }
+
+  #rowMatches(row, data) {
+    const wanted = new Set((data.ids || []).map((id) => String(id)));
+    if (wanted.size) {
+      for (const value of this.#rowIds(row)) {
+        if (wanted.has(value)) return true;
+        for (const id of wanted) {
+          if (value.includes(id)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  #clickRow(row) {
+    const link = row.querySelector('a[href*="#"], a[role="link"], [role="link"]') || row.querySelector('a');
+    if (link && typeof link.click === 'function') link.click();
+    else row.click();
+  }
+
+  #clickMatchingThread(data) {
+    if (!this.#isTopFrame() || !this.#isGmail()) return { ok: false };
+    const rows = this.#inboxRows();
+    for (const row of rows) {
+      if (!this.#rowMatches(row, data)) continue;
+      this.#clickRow(row);
+      return { ok: true };
+    }
+    const subject = String(data.subject || '').replace(/^\s*((re|fwd|fw)\s*:\s*)+/i, '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (subject) {
+      const hits = rows.filter((row) => {
+        const text = this.#rowText(row, 'span[data-thread-id], span.bog, .y6 span')
+          .replace(/^\s*((re|fwd|fw)\s*:\s*)+/i, '')
+          .toLowerCase();
+        return text === subject;
+      });
+      if (hits.length === 1) {
+        this.#clickRow(hits[0]);
+        return { ok: true };
+      }
+    }
+    return { ok: false, rows: rows.length };
   }
 
   #hashLooksOpen() {
