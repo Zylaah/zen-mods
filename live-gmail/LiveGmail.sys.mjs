@@ -108,6 +108,7 @@ export class LiveGmail {
       try { Services.prefs.removeObserver(CONFIG.SOURCE_PREF, this.sourceObserver); } catch (e) {}
       this.sourceObserver = null;
     }
+    this.tabs.stopInboxWatch();
     this.oauth.stopPoll();
     this.atom.stopPoll();
     this.panel.hide();

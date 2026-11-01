@@ -226,6 +226,7 @@ export class LiveGmailTabs {
       this.isLoadedGmailBrowser(tab.linkedBrowser);
     if (isLoaded && !wasLoaded) {
       this.scheduleLoadScan(tab);
+      this.loadInboxWatcher(tab);
     } else if (!isLoaded && wasLoaded) {
       this.finishLoadScan(tab);
       tab.removeAttribute('data-live-gmail-was-loaded');
@@ -252,6 +253,7 @@ export class LiveGmailTabs {
       if (!this.isGmailAnchor(tab, this.app.getPanelContextKey(tab))) continue;
       this.attachLoadListeners(tab);
       this.wakeGmailActor(tab);
+      this.loadInboxWatcher(tab);
       this.checkLoadState(tab);
     }
   }
@@ -265,6 +267,60 @@ export class LiveGmailTabs {
         } catch (e) {}
       }
     }
+  }
+
+  loadInboxWatcher(tab) {
+    const browser = tab?.linkedBrowser;
+    if (!this.isLoadedGmailBrowser(browser) || !browser.messageManager) return;
+    try {
+      browser.messageManager.loadFrameScript('chrome://sine/content/live-gmail/LiveGmailFrame.js', true);
+    } catch (e) {
+      debugLog('Could not load inbox watcher', e);
+    }
+  }
+
+  tabForMessageTarget(target) {
+    if (!target || !this.gBrowser?.tabs) return null;
+    for (const tab of this.gBrowser.tabs) {
+      const browser = tab.linkedBrowser;
+      if (!browser) continue;
+      if (target === browser) return tab;
+      try {
+        if (browser.messageManager === target) return tab;
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  startInboxWatch() {
+    if (this.inboxWatchListener) return;
+    this.inboxWatchListener = (message) => {
+      try {
+        const tab = this.tabForMessageTarget(message?.target);
+        if (!tab || !this.isGmailAnchor(tab)) return;
+        const data = message.data || {};
+        this.noteOpenThread(tab, {
+          href: data.href || '',
+          threadIds: data.readIds || [],
+          subject: data.subject || ''
+        });
+      } catch (e) {
+        debugLog('Inbox watcher', e);
+      }
+    };
+    try {
+      Services.mm.addMessageListener('LiveGmail:InboxWatch', this.inboxWatchListener);
+    } catch (e) {
+      debugLog('Could not listen for inbox watcher', e);
+    }
+  }
+
+  stopInboxWatch() {
+    if (!this.inboxWatchListener) return;
+    try {
+      Services.mm.removeMessageListener('LiveGmail:InboxWatch', this.inboxWatchListener);
+    } catch (e) {}
+    this.inboxWatchListener = null;
   }
 
   wakeGmailActor(tab) {
@@ -526,6 +582,7 @@ export class LiveGmailTabs {
       if (!this.isGmailAnchor(tab, this.app.getPanelContextKey(tab))) continue;
       this.attachLoadListeners(tab);
       this.wakeGmailActor(tab);
+      this.loadInboxWatcher(tab);
       this.checkLoadState(tab);
     }
     for (const tab of document.querySelectorAll(
@@ -582,6 +639,7 @@ export class LiveGmailTabs {
 
   setupMonitoring() {
     const document = this.window.document;
+    this.startInboxWatch();
     this.refreshAnchors();
     if (this.gBrowser?.tabContainer) {
       const onChange = () => this.refreshAnchors();
