@@ -131,10 +131,24 @@ export class LiveGmailAtom {
     const userContextId = getTabUserContextId(tab);
     const uri = Services.io.newURI(feedUrl);
     const principal = Services.scriptSecurityManager.createContentPrincipal(uri, { userContextId });
+    let cookieString = '';
+    try {
+      cookieString = Services.cookies.getCookieStringForPrincipal(principal) || '';
+    } catch (e) {}
+    debugLog(
+      'Atom via cookies',
+      feedUrl,
+      'container',
+      userContextId,
+      'cookies',
+      cookieString ? cookieString.length : 0
+    );
+
     const channel = NetUtil.newChannel({
       uri,
       loadingPrincipal: principal,
-      contentPolicyType: Ci.nsIContentPolicy.TYPE_XMLHTTPREQUEST,
+      triggeringPrincipal: principal,
+      contentPolicyType: Ci.nsIContentPolicy.TYPE_DOCUMENT,
       securityFlags: Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_INHERITS_SEC_CONTEXT
     }).QueryInterface(Ci.nsIHttpChannel);
     channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE | Ci.nsIRequest.INHIBIT_CACHING;
@@ -142,13 +156,31 @@ export class LiveGmailAtom {
       channel.setRequestHeader('Accept', 'application/atom+xml,application/xml;q=0.9,*/*;q=0.8', false);
     } catch (e) {}
 
-    debugLog('Atom via cookies', feedUrl, 'container', userContextId);
+    let channelId = 0;
+    try { channelId = channel.QueryInterface(Ci.nsIIdentChannel).channelId; } catch (e) {}
+    const observer = {
+      observe(subject) {
+        if (!cookieString) return;
+        try {
+          const http = subject.QueryInterface(Ci.nsIHttpChannel);
+          const ident = subject.QueryInterface(Ci.nsIIdentChannel);
+          if (channelId && ident.channelId !== channelId) return;
+          http.setRequestHeader('Cookie', cookieString, false);
+        } catch (e) {}
+      }
+    };
+    Services.obs.addObserver(observer, 'http-on-modify-request');
+    const stopObserving = () => {
+      try { Services.obs.removeObserver(observer, 'http-on-modify-request'); } catch (e) {}
+    };
+
     return new Promise((resolve, reject) => {
       const timer = this.app.window.setTimeout(() => {
         try { channel.cancel(Cr.NS_ERROR_NET_TIMEOUT); } catch (e) {}
       }, CONFIG.ATOM_TIMEOUT_MS);
       NetUtil.asyncFetch(channel, (input, requestStatus, request) => {
         this.app.window.clearTimeout(timer);
+        stopObserving();
         if (!Components.isSuccessCode(requestStatus)) {
           reject(new Error('Network error'));
           return;
@@ -169,6 +201,7 @@ export class LiveGmailAtom {
           status = http.responseStatus;
           finalUrl = http.URI?.spec || feedUrl;
         } catch (e) {}
+        debugLog('Atom cookies response', status, finalUrl);
         resolve({ status, finalUrl, text, feedUrl });
       });
     });
