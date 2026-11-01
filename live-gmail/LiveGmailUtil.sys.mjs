@@ -162,9 +162,37 @@ export function urlHasThreadToken(url, threadId) {
   return false;
 }
 
+export function legacyIdFromAtomId(atomId) {
+  const match = String(atomId || '').match(/(\d{12,})$/);
+  if (!match) return '';
+  try {
+    const hex = BigInt(match[1]).toString(16);
+    return isGmailThreadToken(hex) ? hex : '';
+  } catch (e) {
+    return '';
+  }
+}
+
+export function subjectsMatch(left, right) {
+  const norm = (value) => String(value || '')
+    .replace(/^\s*((re|fwd|fw)\s*:\s*)+/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  const a = norm(left);
+  const b = norm(right);
+  return a.length > 0 && a === b;
+}
+
 export function emailMatchesThread(email, threadId) {
   if (!email || !threadId) return false;
-  if (email.threadId === threadId || email.gmailThreadId === threadId) return true;
+  if (
+    email.threadId === threadId ||
+    email.gmailThreadId === threadId ||
+    email.legacyThreadId === threadId
+  ) {
+    return true;
+  }
   return urlHasThreadToken(email.url, threadId);
 }
 

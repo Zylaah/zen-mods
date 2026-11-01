@@ -14,6 +14,7 @@ const {
   isEssentialOrPinnedTab,
   isGmailThreadToken,
   normalizeGmailOpenUrl,
+  subjectsMatch,
   tabMatchesContainerContext
 } = ChromeUtils.importESModule(
   'chrome://sine/content/live-gmail/LiveGmailUtil.sys.mjs' + new URL(import.meta.url).search
@@ -306,38 +307,65 @@ export class LiveGmailTabs {
     const ids = [];
     const fromUrl = gmailThreadIdFromUrl(data?.href || '');
     if (fromUrl) ids.push(fromUrl);
-    if (fromUrl && Array.isArray(data?.threadIds)) {
-      for (const id of data.threadIds) {
+    for (const list of [data?.threadIds, data?.readIds]) {
+      if (!Array.isArray(list)) continue;
+      for (const id of list) {
         if (isGmailThreadToken(id)) ids.push(id);
       }
     }
-    if (ids.length === 0) return;
+    const subject = String(data?.subject || '').trim();
+    if (ids.length === 0 && !subject) return;
 
     const app = this.app;
     const key = app.getPanelContextKey(tab);
     const ctx = app.cache.getOrCreateContext(key);
+    const active = String(key) === String(app.activePanelContextKey);
+    const lists = [ctx.currentEmails, ctx.cachedEmails];
+    if (active && app.currentEmails !== ctx.currentEmails) lists.push(app.currentEmails);
+    if (active && app.cachedEmails !== ctx.cachedEmails) lists.push(app.cachedEmails);
+    const remember = (id) => {
+      ctx.clickedEmailIds.add(id);
+      if (active) app.clickedEmailIds.add(id);
+    };
     const matches = (email) => ids.some((id) => emailMatchesThread(email, id));
     let removed = false;
-    const drop = (list) => {
+    const drop = (list, predicate) => {
       if (!Array.isArray(list)) return;
       for (let i = list.length - 1; i >= 0; i--) {
-        if (!matches(list[i])) continue;
-        ctx.clickedEmailIds.add(list[i].id);
+        if (!predicate(list[i])) continue;
+        remember(list[i].id);
         list.splice(i, 1);
         removed = true;
       }
     };
-    drop(ctx.currentEmails);
-    drop(ctx.cachedEmails);
-    if (!removed) return;
-    if (String(key) === String(app.activePanelContextKey)) {
-      app.currentEmails = ctx.currentEmails;
-      app.cachedEmails = ctx.cachedEmails;
+    for (const list of lists) drop(list, matches);
+    if (!removed && subject) {
+      const seen = new Set();
+      const hits = [];
+      for (const list of lists) {
+        for (const email of list || []) {
+          if (!email || seen.has(email.id) || !subjectsMatch(email.subject, subject)) continue;
+          seen.add(email.id);
+          hits.push(email.id);
+        }
+      }
+      if (hits.length === 1) {
+        const only = hits[0];
+        for (const list of lists) drop(list, (email) => email?.id === only);
+      }
+    }
+    if (!removed) {
+      if (ids.length || subject) debugLog('Open thread did not match list', ids.join(',') || subject);
+      return;
+    }
+    if (active) {
+      app.currentEmails = ctx.currentEmails === app.currentEmails ? app.currentEmails : ctx.currentEmails;
+      app.cachedEmails = ctx.cachedEmails === app.cachedEmails ? app.cachedEmails : ctx.cachedEmails;
       app.clickedEmailIds = ctx.clickedEmailIds;
       app.panel.updateDisplay();
     }
     app.cache.save();
-    debugLog('Hid opened thread', ids[0]);
+    debugLog('Hid opened thread', ids[0] || subject);
   }
 
   openCompose() {

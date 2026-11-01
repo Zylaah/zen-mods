@@ -110,6 +110,7 @@ export class LiveGmailCache {
             id: email.id,
             threadId: email.threadId || email.id,
             gmailThreadId: email.gmailThreadId || '',
+            legacyThreadId: email.legacyThreadId || '',
             url: email.url || '',
             from: email.from,
             subject: email.subject,

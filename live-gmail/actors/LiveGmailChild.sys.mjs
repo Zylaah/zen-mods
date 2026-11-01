@@ -3,7 +3,13 @@ const SCAN_DEBOUNCE_MS = 500;
 export class LiveGmailChild extends JSWindowActorChild {
   #observer = null;
   #scanTimeout = null;
+  #retryTimer = null;
+  #watchTimer = null;
   #lastReadKey = '';
+  #seenHref = '';
+  #retryCount = 0;
+  #hasRowBaseline = false;
+  #previousRows = new Map();
   #onHash = null;
 
   actorCreated() {
@@ -66,9 +72,12 @@ export class LiveGmailChild extends JSWindowActorChild {
       try { win.removeEventListener('hashchange', this.#onHash); } catch (e) {}
     }
     this.#onHash = null;
-    if (win && this.#scanTimeout) {
-      win.clearTimeout(this.#scanTimeout);
-    }
+    if (win && this.#scanTimeout) win.clearTimeout(this.#scanTimeout);
+    if (win && this.#retryTimer) win.clearTimeout(this.#retryTimer);
+    if (win && this.#watchTimer) win.clearInterval(this.#watchTimer);
+    this.#scanTimeout = null;
+    this.#retryTimer = null;
+    this.#watchTimer = null;
   }
 
   #isTopFrame() {
@@ -125,28 +134,74 @@ export class LiveGmailChild extends JSWindowActorChild {
     }
   }
 
-  #conversationThreadIds() {
-    if (!this.#hashLooksOpen()) return [];
+  #addId(ids, value) {
+    if (value) ids.add(String(value));
+  }
+
+  #openThreadIds() {
     const doc = this.document;
     if (!doc) return [];
     const ids = new Set();
-    const add = (node) => {
-      if (!node) return;
-      for (const attr of ['data-legacy-thread-id', 'data-thread-id']) {
-        const value = node.getAttribute(attr);
-        if (value) ids.add(value);
+    const messages = [...doc.querySelectorAll('[data-legacy-message-id], [data-message-id]')].filter(
+      (node) => !node.closest('tr, [role="row"]')
+    );
+    for (const node of messages) {
+      this.#addId(ids, node.getAttribute('data-legacy-message-id'));
+      this.#addId(ids, node.getAttribute('data-legacy-thread-id'));
+      this.#addId(ids, node.getAttribute('data-thread-perm-id'));
+      let parent = node.parentElement;
+      for (let depth = 0; depth < 8 && parent; depth++) {
+        const threadId = parent.getAttribute('data-legacy-thread-id');
+        const permId = parent.getAttribute('data-thread-perm-id');
+        this.#addId(ids, threadId);
+        this.#addId(ids, permId);
+        if (threadId || permId) break;
+        parent = parent.parentElement;
       }
-    };
-    add(doc.querySelector('tr.btb, tr.zA.aps, tr[aria-selected="true"], div[role="row"][aria-selected="true"]'));
-    const distinct = new Set();
-    for (const node of doc.querySelectorAll('[data-legacy-thread-id]')) {
-      const value = node.getAttribute('data-legacy-thread-id');
-      if (value) distinct.add(value);
     }
-    if (distinct.size === 1) {
-      for (const value of distinct) ids.add(value);
+    if (messages.length) {
+      for (const node of doc.querySelectorAll('h1[data-thread-perm-id], h2[data-thread-perm-id], [role="heading"][data-thread-perm-id]')) {
+        this.#addId(ids, node.getAttribute('data-thread-perm-id'));
+        this.#addId(ids, node.getAttribute('data-legacy-thread-id'));
+      }
     }
     return [...ids];
+  }
+
+  #openSubject() {
+    const doc = this.document;
+    if (!doc) return '';
+    const open = [...doc.querySelectorAll('[data-legacy-message-id], [data-message-id]')].some(
+      (node) => !node.closest('tr, [role="row"]')
+    );
+    if (!open) return '';
+    const heading = doc.querySelector('h2[data-thread-perm-id], h1[data-thread-perm-id], [role="heading"][data-thread-perm-id], h2.hP');
+    return (heading?.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  #rowStates() {
+    const states = new Map();
+    const rows = this.document?.querySelectorAll('tr.zA, tr[role="row"], div[role="row"], span[data-thread-id]') || [];
+    for (const row of rows) {
+      const id = row.getAttribute('data-legacy-thread-id') || row.getAttribute('data-thread-id') || '';
+      if (!id) continue;
+      const unread = row.classList.contains('zE') || row.getAttribute('data-is-read') === 'false';
+      const previous = states.get(id);
+      states.set(id, previous === undefined ? unread : previous || unread);
+    }
+    return states;
+  }
+
+  #newlyReadIds(states) {
+    const read = [];
+    if (this.#hasRowBaseline) {
+      for (const [id, wasUnread] of this.#previousRows) {
+        if (wasUnread && states.has(id) && !states.get(id)) read.push(id);
+      }
+    }
+    this.#previousRows = states;
+    this.#hasRowBaseline = true;
+    return read;
   }
 
   #feedUrlFromDocument() {
@@ -205,31 +260,76 @@ export class LiveGmailChild extends JSWindowActorChild {
 
   #maybeNotify() {
     if (!this.#isTopFrame() || !this.#isGmail()) return;
+    const win = this.contentWindow;
     let href = '';
     try {
-      href = this.contentWindow?.location?.href || '';
+      href = win?.location?.href || '';
     } catch (e) {}
-    const key = href + '|' + this.#readStateKey();
-    if (key === this.#lastReadKey) return;
+    const threadIds = this.#openThreadIds();
+    const readIds = this.#newlyReadIds(this.#rowStates());
+    const subject = this.#openSubject();
+    const key = href + '|' + this.#readStateKey() + '|' + threadIds.join(',') + '|' + readIds.join(',') + '|' + subject;
+    if (threadIds.length) this.#retryCount = 0;
+    if (key === this.#lastReadKey) {
+      if (this.#hashLooksOpen() && !threadIds.length) this.#scheduleRetry();
+      return;
+    }
     this.#lastReadKey = key;
+    this.#seenHref = href;
     try {
       this.sendAsyncMessage('LiveGmail:ReadState', {
         key,
         href,
-        threadIds: this.#conversationThreadIds()
+        threadIds,
+        readIds,
+        subject
       });
     } catch (e) {}
+    if (this.#hashLooksOpen() && !threadIds.length) this.#scheduleRetry();
+  }
+
+  #scheduleNotify(delay = SCAN_DEBOUNCE_MS) {
+    const win = this.contentWindow;
+    if (!win) return;
+    if (this.#scanTimeout) win.clearTimeout(this.#scanTimeout);
+    this.#scanTimeout = win.setTimeout(() => {
+      this.#scanTimeout = null;
+      this.#maybeNotify();
+    }, delay);
+  }
+
+  #scheduleRetry() {
+    const win = this.contentWindow;
+    if (!win || this.#retryTimer || this.#retryCount >= 4) return;
+    this.#retryCount += 1;
+    this.#retryTimer = win.setTimeout(() => {
+      this.#retryTimer = null;
+      this.#maybeNotify();
+    }, 800);
   }
 
   #ensureHashListener() {
     const win = this.contentWindow;
     if (!win || this.#onHash) return;
-    this.#onHash = () => this.#setupObserver();
+    this.#onHash = () => this.#scheduleNotify(200);
     try {
       win.addEventListener('hashchange', this.#onHash);
     } catch (e) {
       this.#onHash = null;
     }
+  }
+
+  #ensureLocationWatch() {
+    const win = this.contentWindow;
+    if (!win || this.#watchTimer) return;
+    this.#watchTimer = win.setInterval(() => {
+      let href = '';
+      try { href = win.location.href || ''; } catch (e) {}
+      if (!href || href === this.#seenHref) return;
+      this.#seenHref = href;
+      this.#retryCount = 0;
+      this.#scheduleNotify(200);
+    }, 400);
   }
 
   #setupObserver() {
@@ -238,35 +338,25 @@ export class LiveGmailChild extends JSWindowActorChild {
     const doc = this.document;
     if (!win || !doc) return;
     this.#ensureHashListener();
+    this.#ensureLocationWatch();
 
-    try {
-      this.#observer?.disconnect();
-    } catch (e) {}
-    this.#observer = null;
-
-    const target = doc.querySelector('div[role="main"]') || doc.body;
+    const target = doc.documentElement || doc.body;
     if (!target) {
-      this.#maybeNotify();
       win.setTimeout(() => this.#setupObserver(), 1000);
       return;
     }
+    if (this.#observer) {
+      this.#scheduleNotify(200);
+      return;
+    }
 
-    this.#observer = new win.MutationObserver(() => {
-      if (!target.isConnected) {
-        try { this.#observer?.disconnect(); } catch (e) {}
-        this.#observer = null;
-        this.#setupObserver();
-        return;
-      }
-      if (this.#scanTimeout) win.clearTimeout(this.#scanTimeout);
-      this.#scanTimeout = win.setTimeout(() => this.#maybeNotify(), SCAN_DEBOUNCE_MS);
-    });
+    this.#observer = new win.MutationObserver(() => this.#scheduleNotify());
     this.#observer.observe(target, {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['class']
+      attributeFilter: ['class', 'data-legacy-thread-id', 'data-legacy-message-id', 'data-thread-perm-id']
     });
-    this.#maybeNotify();
+    this.#scheduleNotify(200);
   }
 }
