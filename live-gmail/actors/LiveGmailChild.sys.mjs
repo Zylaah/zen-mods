@@ -4,8 +4,20 @@ export class LiveGmailChild extends JSWindowActorChild {
   #observer = null;
   #scanTimeout = null;
   #lastReadKey = '';
+  #onHash = null;
+
+  actorCreated() {
+    if (!this.#isTopFrame()) return;
+    if (this.#reportFeed()) return;
+    this.#setupObserver();
+  }
 
   handleEvent(event) {
+    if (!this.#isTopFrame()) return;
+    if (event.type === 'hashchange') {
+      this.#setupObserver();
+      return;
+    }
     if (event.type !== 'DOMContentLoaded' && event.type !== 'pageshow') return;
     if (this.#reportFeed()) return;
     this.#setupObserver();
@@ -50,8 +62,20 @@ export class LiveGmailChild extends JSWindowActorChild {
     } catch (e) {}
     this.#observer = null;
     const win = this.contentWindow;
+    if (win && this.#onHash) {
+      try { win.removeEventListener('hashchange', this.#onHash); } catch (e) {}
+    }
+    this.#onHash = null;
     if (win && this.#scanTimeout) {
       win.clearTimeout(this.#scanTimeout);
+    }
+  }
+
+  #isTopFrame() {
+    try {
+      return this.browsingContext.top === this.browsingContext;
+    } catch (e) {
+      return false;
     }
   }
 
@@ -75,8 +99,54 @@ export class LiveGmailChild extends JSWindowActorChild {
   }
 
   receiveMessage(message) {
+    if (message.name === 'LiveGmail:OpenInPage') {
+      this.#openInPage(message.data?.hash);
+      return null;
+    }
     if (message.name !== 'LiveGmail:FetchAtom') return null;
     return this.#fetchAtom();
+  }
+
+  #openInPage(hash) {
+    if (!this.#isTopFrame() || !this.#isGmail()) return;
+    if (!hash || typeof hash !== 'string' || !hash.startsWith('#')) return;
+    const win = this.contentWindow;
+    try {
+      if ((win.location.hash || '') !== hash) win.location.hash = hash;
+    } catch (e) {}
+  }
+
+  #hashLooksOpen() {
+    try {
+      const hash = this.contentWindow?.location?.hash || '';
+      return /[#/](?:[0-9a-f]{12,}|FMfc[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]{16,})(?:$|[/?#])/i.test(hash);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  #conversationThreadIds() {
+    if (!this.#hashLooksOpen()) return [];
+    const doc = this.document;
+    if (!doc) return [];
+    const ids = new Set();
+    const add = (node) => {
+      if (!node) return;
+      for (const attr of ['data-legacy-thread-id', 'data-thread-id']) {
+        const value = node.getAttribute(attr);
+        if (value) ids.add(value);
+      }
+    };
+    add(doc.querySelector('tr.btb, tr.zA.aps, tr[aria-selected="true"], div[role="row"][aria-selected="true"]'));
+    const distinct = new Set();
+    for (const node of doc.querySelectorAll('[data-legacy-thread-id]')) {
+      const value = node.getAttribute('data-legacy-thread-id');
+      if (value) distinct.add(value);
+    }
+    if (distinct.size === 1) {
+      for (const value of distinct) ids.add(value);
+    }
+    return [...ids];
   }
 
   #feedUrlFromDocument() {
@@ -134,32 +204,60 @@ export class LiveGmailChild extends JSWindowActorChild {
   }
 
   #maybeNotify() {
-    if (!this.#isGmail()) return;
-    const key = this.#readStateKey();
+    if (!this.#isTopFrame() || !this.#isGmail()) return;
+    let href = '';
+    try {
+      href = this.contentWindow?.location?.href || '';
+    } catch (e) {}
+    const key = href + '|' + this.#readStateKey();
     if (key === this.#lastReadKey) return;
     this.#lastReadKey = key;
     try {
-      this.sendAsyncMessage('LiveGmail:ReadState', { key });
+      this.sendAsyncMessage('LiveGmail:ReadState', {
+        key,
+        href,
+        threadIds: this.#conversationThreadIds()
+      });
     } catch (e) {}
   }
 
+  #ensureHashListener() {
+    const win = this.contentWindow;
+    if (!win || this.#onHash) return;
+    this.#onHash = () => this.#setupObserver();
+    try {
+      win.addEventListener('hashchange', this.#onHash);
+    } catch (e) {
+      this.#onHash = null;
+    }
+  }
+
   #setupObserver() {
-    if (!this.#isGmail()) return;
+    if (!this.#isTopFrame() || !this.#isGmail()) return;
     const win = this.contentWindow;
     const doc = this.document;
     if (!win || !doc) return;
+    this.#ensureHashListener();
 
     try {
       this.#observer?.disconnect();
     } catch (e) {}
+    this.#observer = null;
 
     const target = doc.querySelector('div[role="main"]') || doc.body;
     if (!target) {
+      this.#maybeNotify();
       win.setTimeout(() => this.#setupObserver(), 1000);
       return;
     }
 
     this.#observer = new win.MutationObserver(() => {
+      if (!target.isConnected) {
+        try { this.#observer?.disconnect(); } catch (e) {}
+        this.#observer = null;
+        this.#setupObserver();
+        return;
+      }
       if (this.#scanTimeout) win.clearTimeout(this.#scanTimeout);
       this.#scanTimeout = win.setTimeout(() => this.#maybeNotify(), SCAN_DEBOUNCE_MS);
     });

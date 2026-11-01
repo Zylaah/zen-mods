@@ -5,6 +5,7 @@ const {
   getGmailUrlPattern,
   getTabUserContextId,
   gmailAccountSlotFromHints,
+  gmailThreadIdFromUrl,
   normalizeGmailOpenUrl
 } = ChromeUtils.importESModule(
   'chrome://sine/content/live-gmail/LiveGmailUtil.sys.mjs' + new URL(import.meta.url).search
@@ -140,6 +141,7 @@ export class LiveGmailAtom {
         url = new URL(link?.getAttribute('href') || '', feedUrl).href;
       } catch (e) {}
       url = normalizeGmailOpenUrl(url);
+      const gmailThreadId = gmailThreadIdFromUrl(url);
       const date =
         value(entry, 'issued') ||
         value(entry, 'published') ||
@@ -150,6 +152,7 @@ export class LiveGmailAtom {
       return {
         id,
         threadId: id,
+        gmailThreadId,
         from: sender,
         subject,
         snippet,

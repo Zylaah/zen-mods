@@ -4,7 +4,7 @@ export class LiveGmailParent extends JSWindowActorParent {
     const win = browser?.ownerGlobal;
     try {
       if (message.name === 'LiveGmail:ReadState') {
-        win?.liveGmail?.onReadState?.(browser);
+        win?.liveGmail?.onReadState?.(browser, message.data);
       } else if (message.name === 'LiveGmail:FeedDocument') {
         win?.liveGmail?.onFeedDocument?.(browser, message.data);
       }

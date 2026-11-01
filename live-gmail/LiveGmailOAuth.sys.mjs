@@ -294,6 +294,7 @@ export class LiveGmailOAuth {
         return {
           id,
           threadId,
+          gmailThreadId: threadId,
           from,
           subject,
           snippet: String(message.snippet || '').slice(0, 200),

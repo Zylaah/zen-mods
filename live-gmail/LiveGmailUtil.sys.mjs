@@ -95,6 +95,79 @@ export function gmailAccountSlotFromHints(hints) {
   return '0';
 }
 
+export function gmailAccountSlotFromUrl(url) {
+  const match = String(url || '').match(/\/mail\/u\/(\d+)/);
+  return match ? match[1] : '';
+}
+
+export function isGmailThreadToken(value) {
+  const token = String(value || '');
+  if (/^[0-9a-f]{12,}$/i.test(token)) return true;
+  if (/^FMfc[A-Za-z0-9_-]{8,}$/.test(token)) return true;
+  if (/^[A-Za-z0-9_-]{16,}$/.test(token)) return true;
+  return false;
+}
+
+export function gmailThreadIdFromUrl(url) {
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    const parts = decodeURIComponent(parsed.hash || '')
+      .replace(/^#/, '')
+      .split('/')
+      .filter(Boolean);
+    for (let i = parts.length - 1; i >= 0; i--) {
+      if (isGmailThreadToken(parts[i])) return parts[i];
+    }
+    const th = parsed.searchParams.get('th') || '';
+    if (isGmailThreadToken(th)) return th;
+  } catch (e) {}
+  return '';
+}
+
+export function gmailInPageHash(url) {
+  const threadId = gmailThreadIdFromUrl(url);
+  if (!threadId) return '';
+  try {
+    const hash = new URL(url).hash || '';
+    if (hash.includes(threadId)) return hash;
+  } catch (e) {}
+  return '#inbox/' + threadId;
+}
+
+export function gmailSpaUrl(url) {
+  const hash = gmailInPageHash(url);
+  if (!hash) return '';
+  const slot = gmailAccountSlotFromUrl(url) || '0';
+  return `https://${getGmailUrlPattern()}/mail/u/${slot}/${hash}`;
+}
+
+export function urlHasThreadToken(url, threadId) {
+  if (!url || !isGmailThreadToken(threadId)) return false;
+  let decoded = String(url);
+  try {
+    decoded = decodeURIComponent(decoded);
+  } catch (e) {}
+  const token = String(threadId);
+  let from = 0;
+  while (from <= decoded.length) {
+    const at = decoded.indexOf(token, from);
+    if (at === -1) return false;
+    const before = at === 0 ? '' : decoded.charAt(at - 1);
+    const after = decoded.charAt(at + token.length);
+    const boundary = /[/#&=?]/;
+    if ((!before || boundary.test(before)) && (!after || boundary.test(after))) return true;
+    from = at + token.length;
+  }
+  return false;
+}
+
+export function emailMatchesThread(email, threadId) {
+  if (!email || !threadId) return false;
+  if (email.threadId === threadId || email.gmailThreadId === threadId) return true;
+  return urlHasThreadToken(email.url, threadId);
+}
+
 export function normalizeGmailOpenUrl(url) {
   if (!url || typeof url !== 'string') return '';
   try {

@@ -109,6 +109,7 @@ export class LiveGmailCache {
           emails: ctx.cachedEmails.slice(0, CONFIG.MAX_EMAILS).map((email) => ({
             id: email.id,
             threadId: email.threadId || email.id,
+            gmailThreadId: email.gmailThreadId || '',
             url: email.url || '',
             from: email.from,
             subject: email.subject,

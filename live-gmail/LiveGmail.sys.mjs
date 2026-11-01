@@ -61,8 +61,9 @@ export class LiveGmail {
     return '0';
   }
 
-  onReadState(browser) {
+  onReadState(browser, data) {
     const tab = this.tabs.tabForBrowser(browser);
+    this.tabs.noteOpenThread(tab, data);
     this.atom.onReadStateChanged(tab);
   }
 

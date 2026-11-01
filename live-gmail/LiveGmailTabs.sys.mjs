@@ -3,10 +3,16 @@ const {
   debugLog,
   getContextContainerId,
   getTabUserContextId,
+  emailMatchesThread,
   getGmailComposeUrl,
   getGmailInboxUrl,
   getGmailUrlPattern,
+  gmailAccountSlotFromUrl,
+  gmailInPageHash,
+  gmailSpaUrl,
+  gmailThreadIdFromUrl,
   isEssentialOrPinnedTab,
+  isGmailThreadToken,
   normalizeGmailOpenUrl,
   tabMatchesContainerContext
 } = ChromeUtils.importESModule(
@@ -244,6 +250,7 @@ export class LiveGmailTabs {
     for (const tab of this.gBrowser.tabs) {
       if (!this.isGmailAnchor(tab, this.app.getPanelContextKey(tab))) continue;
       this.attachLoadListeners(tab);
+      this.wakeGmailActor(tab);
       this.checkLoadState(tab);
     }
   }
@@ -257,6 +264,80 @@ export class LiveGmailTabs {
         } catch (e) {}
       }
     }
+  }
+
+  wakeGmailActor(tab) {
+    if (!this.isLoadedGmailBrowser(tab?.linkedBrowser)) return;
+    try {
+      tab.linkedBrowser.browsingContext?.currentWindowGlobal?.getActor('LiveGmail');
+    } catch (e) {}
+  }
+
+  tryOpenInPage(browser, gmailUrl) {
+    if (!this.isLoadedGmailBrowser(browser)) return false;
+    const hash = gmailInPageHash(gmailUrl);
+    if (!hash) return false;
+    let current = '';
+    try {
+      current = browser.currentURI?.spec || '';
+    } catch (e) {}
+    if (!current.includes(getGmailUrlPattern())) return false;
+    if (/\/feed\/atom/i.test(current)) return false;
+    if (/[?&](?:ui=html|view=pt|view=om)(?:&|$)/i.test(current)) return false;
+    const currentSlot = gmailAccountSlotFromUrl(current) || '0';
+    const targetSlot = gmailAccountSlotFromUrl(gmailUrl) || currentSlot;
+    if (currentSlot !== targetSlot) return false;
+    let actor = null;
+    try {
+      actor = browser.browsingContext?.currentWindowGlobal?.getActor('LiveGmail');
+    } catch (e) {}
+    if (!actor?.sendAsyncMessage) return false;
+    try {
+      actor.sendAsyncMessage('LiveGmail:OpenInPage', { hash });
+      debugLog('Opened email in page', hash);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  noteOpenThread(tab, data) {
+    if (!tab) return;
+    const ids = [];
+    const fromUrl = gmailThreadIdFromUrl(data?.href || '');
+    if (fromUrl) ids.push(fromUrl);
+    if (fromUrl && Array.isArray(data?.threadIds)) {
+      for (const id of data.threadIds) {
+        if (isGmailThreadToken(id)) ids.push(id);
+      }
+    }
+    if (ids.length === 0) return;
+
+    const app = this.app;
+    const key = app.getPanelContextKey(tab);
+    const ctx = app.cache.getOrCreateContext(key);
+    const matches = (email) => ids.some((id) => emailMatchesThread(email, id));
+    let removed = false;
+    const drop = (list) => {
+      if (!Array.isArray(list)) return;
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (!matches(list[i])) continue;
+        ctx.clickedEmailIds.add(list[i].id);
+        list.splice(i, 1);
+        removed = true;
+      }
+    };
+    drop(ctx.currentEmails);
+    drop(ctx.cachedEmails);
+    if (!removed) return;
+    if (String(key) === String(app.activePanelContextKey)) {
+      app.currentEmails = ctx.currentEmails;
+      app.cachedEmails = ctx.cachedEmails;
+      app.clickedEmailIds = ctx.clickedEmailIds;
+      app.panel.updateDisplay();
+    }
+    app.cache.save();
+    debugLog('Hid opened thread', ids[0]);
   }
 
   openCompose() {
@@ -293,8 +374,9 @@ export class LiveGmailTabs {
     debugLog('Opening email', gmailUrl);
     try {
       const browser = targetTab.linkedBrowser;
-      if (browser?.fixupAndLoadURIString) {
-        browser.fixupAndLoadURIString(gmailUrl, {
+      if (!this.tryOpenInPage(browser, gmailUrl) && browser?.fixupAndLoadURIString) {
+        const loadUrl = gmailSpaUrl(gmailUrl) || gmailUrl;
+        browser.fixupAndLoadURIString(loadUrl, {
           triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
         });
       }
@@ -343,6 +425,7 @@ export class LiveGmailTabs {
       }
       if (!this.isGmailAnchor(tab, this.app.getPanelContextKey(tab))) continue;
       this.attachLoadListeners(tab);
+      this.wakeGmailActor(tab);
       this.checkLoadState(tab);
     }
     for (const tab of document.querySelectorAll(
