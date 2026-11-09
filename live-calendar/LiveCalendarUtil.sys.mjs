@@ -4,6 +4,7 @@ export const CONFIG = {
   PANEL_ID: 'live-calendar-panel',
   HOVER_DELAY_MS: 200,
   SOON_MS: 10 * 60 * 1000,
+  PILL_WINDOW_MS: 5 * 60 * 1000,
   PILL_TICK_MS: 15000,
   FRAME_POLL_MS: 60000
 };
@@ -88,9 +89,7 @@ export function eventEndMs(event) {
 export function isSoonOrJustStarted(event, now = Date.now()) {
   const start = eventStartMs(event);
   if (!Number.isFinite(start)) return false;
-  const end = eventEndMs(event);
-  const until = Number.isFinite(end) ? Math.min(end, start + CONFIG.SOON_MS) : start + CONFIG.SOON_MS;
-  return now >= start - CONFIG.SOON_MS && now <= until;
+  return now >= start - CONFIG.PILL_WINDOW_MS && now <= start + CONFIG.PILL_WINDOW_MS;
 }
 
 export function canJoin(event, now = Date.now()) {
