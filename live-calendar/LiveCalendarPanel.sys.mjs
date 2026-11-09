@@ -293,9 +293,8 @@ export class LiveCalendarPanel {
       timed.push({ event, startMin: this.minutesOf(start, dayStart), endMin: this.minutesOf(end, dayStart) });
     }
 
-    if (!events.length) {
-      const message = this.app.day === localDay() ? 'Nothing on today' : 'Open Calendar to load today';
-      scroll.appendChild(this.html('div', 'live-calendar-empty', message));
+    if (this.app.day !== localDay()) {
+      scroll.appendChild(this.html('div', 'live-calendar-empty', 'Open Calendar to load today'));
       return;
     }
 
@@ -314,13 +313,13 @@ export class LiveCalendarPanel {
       scroll.appendChild(strip);
     }
 
-    if (!timed.length) return;
-
-    const firstHour = Math.floor(Math.min(...timed.map((item) => item.startMin)) / 60);
-    const lastHour = Math.ceil(Math.max(...timed.map((item) => item.endMin)) / 60);
-    const nowHour = Math.floor(nowMin / 60);
-    const startHour = Math.max(0, Math.min(firstHour, nowHour - 1));
-    const endHour = Math.min(24, Math.max(lastHour + 1, nowHour + 3, startHour + 5));
+    const nowHour = Math.max(0, Math.min(23, Math.floor(nowMin / 60)));
+    let startHour = Math.max(0, nowHour - 1);
+    let endHour = Math.min(24, nowHour + 5);
+    if (timed.length) {
+      startHour = Math.max(0, Math.min(startHour, Math.floor(Math.min(...timed.map((item) => item.startMin)) / 60)));
+      endHour = Math.min(24, Math.max(endHour, Math.ceil(Math.max(...timed.map((item) => item.endMin)) / 60) + 1));
+    }
     const totalPx = (endHour - startHour) * HOUR_PX;
 
     const grid = this.html('div', 'live-calendar-grid');

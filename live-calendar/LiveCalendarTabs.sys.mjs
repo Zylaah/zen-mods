@@ -106,12 +106,18 @@ export class LiveCalendarTabs {
   }
 
   onDay(tab, data) {
+    if (data?.debug) console.log('[Live Calendar] page', data.debug);
     if (!tab || !this.isCalendarAnchor(tab)) return;
     if (!data?.ok || data.day !== localDay()) return;
     const events = Array.isArray(data.events) ? data.events : [];
     const key = this.app.getContextKey(tab);
-    if (data.source !== 'api' && !events.length && this.app.cache.todayEvents(key).length) return;
-    debugLog('Calendar day', data.day, events.length, data.source || '');
+    if (data.source === 'dom' && !events.length && this.app.cache.todayEvents(key).length) return;
+    console.log(
+      '[Live Calendar]',
+      data.source || '',
+      data.day,
+      events.map((event) => `${event.title || '?'} ${event.allDay ? 'all-day' : event.start || ''}`)
+    );
     this.app.cache.applyDay(key, data.day, events);
     this.updatePills();
     if (this.app.panel.isOpen() && String(this.app.activeContextKey) === String(key)) {
