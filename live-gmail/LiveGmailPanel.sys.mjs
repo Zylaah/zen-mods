@@ -290,11 +290,12 @@ export class LiveGmailPanel {
       this.app.window.clearTimeout(this.app.hideTimer);
       this.app.hideTimer = null;
     }
-    if (this.isOpen()) {
+    if (this.isOpen() && this.app.hoveredTab === tab) {
       this.cancelShowTimer();
       this.show(tab);
       return;
     }
+    if (this.isOpen()) this.hide();
     if (this.app.pendingShowTab === tab && this.app.showTimer) return;
     this.cancelShowTimer();
     this.app.pendingShowTab = tab;
@@ -343,6 +344,7 @@ export class LiveGmailPanel {
     this.app.hideTimer = this.app.window.setTimeout(() => {
       this.app.hideTimer = null;
       if (this.app.hoveredTab?.matches(':hover')) return;
+      if (this.app.pendingShowTab?.matches(':hover')) return;
       if (this.app.panelElement?.matches(':hover')) return;
       this.hide();
     }, delayMs);
