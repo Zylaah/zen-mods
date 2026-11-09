@@ -69,9 +69,10 @@ export class LiveCalendarTabs {
     const browser = tab?.linkedBrowser;
     if (!browser) return false;
     try {
-      if (tab.hasAttribute('pending') || tab.hasAttribute('discarded')) return false;
+      if (tab.hasAttribute('discarded')) return false;
       if (browser.browsingContext?.discarded) return false;
-      return (browser.documentURI?.spec || '').includes(CONFIG.CALENDAR_URL);
+      const spec = `${browser.currentURI?.spec || ''} ${browser.documentURI?.spec || ''}`;
+      return spec.includes(CONFIG.CALENDAR_URL);
     } catch (e) {
       return false;
     }
@@ -88,9 +89,10 @@ export class LiveCalendarTabs {
       container.addEventListener('TabClose', onChange);
       container.addEventListener('TabPinned', onChange);
       container.addEventListener('TabUnpinned', onChange);
+      container.addEventListener('TabSelect', onChange);
     }
     this.delegateHover();
-    this.app.pillTimer = this.window.setInterval(() => this.updatePills(), CONFIG.PILL_TICK_MS);
+    this.app.pillTimer = this.window.setInterval(() => this.refreshAnchors(), CONFIG.PILL_TICK_MS);
   }
 
   stop() {
@@ -103,20 +105,26 @@ export class LiveCalendarTabs {
     this.watchListener = null;
   }
 
+  onDay(tab, data) {
+    if (!tab || !this.isCalendarAnchor(tab)) return;
+    if (!data?.ok || data.day !== localDay()) return;
+    const events = Array.isArray(data.events) ? data.events : [];
+    const key = this.app.getContextKey(tab);
+    if (data.source !== 'api' && !events.length && this.app.cache.todayEvents(key).length) return;
+    debugLog('Calendar day', data.day, events.length, data.source || '');
+    this.app.cache.applyDay(key, data.day, events);
+    this.updatePills();
+    if (this.app.panel.isOpen() && String(this.app.activeContextKey) === String(key)) {
+      this.app.panel.updateDisplay();
+    }
+  }
+
   startWatch() {
     if (this.watchListener) return;
     this.watchListener = (message) => {
       try {
         const tab = this.tabForTarget(message?.target);
-        if (!tab || !this.isCalendarAnchor(tab)) return;
-        const data = message.data || {};
-        if (!data.ok || data.day !== localDay()) return;
-        const key = this.app.getContextKey(tab);
-        this.app.cache.applyDay(key, data.day, Array.isArray(data.events) ? data.events : []);
-        this.updatePills();
-        if (this.app.panel.isOpen() && String(this.app.activeContextKey) === String(key)) {
-          this.app.panel.updateDisplay();
-        }
+        this.onDay(tab, message?.data || {});
       } catch (e) {
         debugLog('Calendar watch', e);
       }
@@ -170,8 +178,15 @@ export class LiveCalendarTabs {
   loadWatcher(tab) {
     const browser = tab?.linkedBrowser;
     if (!this.isLoaded(tab) || !browser?.messageManager) return;
+    const mm = browser.messageManager;
+    if (!tab.__liveCalendarListener) {
+      tab.__liveCalendarListener = (message) => {
+        try { this.onDay(tab, message?.data || {}); } catch (e) { debugLog('Calendar watch', e); }
+      };
+      try { mm.addMessageListener('LiveCalendar:Day', tab.__liveCalendarListener); } catch (e) {}
+    }
     try {
-      browser.messageManager.loadFrameScript('chrome://sine/content/live-calendar/LiveCalendarFrame.js', true);
+      mm.loadFrameScript('chrome://sine/content/live-calendar/LiveCalendarFrame.js', true);
     } catch (e) {
       debugLog('Could not load calendar watcher', e);
     }
@@ -239,9 +254,12 @@ export class LiveCalendarTabs {
   openEvent(event) {
     const tab = this.targetTab();
     if (!tab || !event) return;
-    const slot = this.calendarSlot(tab);
-    const url = event.htmlLink || `https://${CONFIG.CALENDAR_URL}/calendar/u/${slot}/r/eventedit/${encodeURIComponent(event.id || '')}`;
-    this.loadInTab(tab, url);
+    if (event.htmlLink) {
+      this.loadInTab(tab, event.htmlLink);
+      return;
+    }
+    this.select(tab);
+    this.app.panel.hide();
   }
 
   join(event) {

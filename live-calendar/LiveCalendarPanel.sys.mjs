@@ -53,12 +53,24 @@ export class LiveCalendarPanel {
     const list = document.createElement('div');
     list.className = 'live-calendar-list';
 
-    const add = document.createElement('button');
+    const add = document.createElementNS('http://www.w3.org/1999/xhtml', 'button');
     add.className = 'live-calendar-add';
     add.type = 'button';
     add.title = 'New event';
     add.setAttribute('aria-label', 'New event');
-    add.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v11M2.5 8h11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('width', '16');
+    icon.setAttribute('height', '16');
+    icon.setAttribute('viewBox', '0 0 16 16');
+    icon.setAttribute('aria-hidden', 'true');
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    line.setAttribute('d', 'M8 2.5v11M2.5 8h11');
+    line.setAttribute('fill', 'none');
+    line.setAttribute('stroke', 'currentColor');
+    line.setAttribute('stroke-width', '1.6');
+    line.setAttribute('stroke-linecap', 'round');
+    icon.appendChild(line);
+    add.appendChild(icon);
     add.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
