@@ -58,20 +58,23 @@
   position: absolute;
   left: 0;
   right: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
   pointer-events: none;
 }
 
 .live-calendar-hour-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
   height: 1px;
-  width: 100%;
   background: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
 }
 
 .live-calendar-hour-label {
-  padding: 4px 10px 0;
+  position: absolute;
+  top: 4px;
+  left: 0;
+  padding: 0 10px;
   font-size: 10px;
   letter-spacing: 0.02em;
   text-transform: uppercase;
