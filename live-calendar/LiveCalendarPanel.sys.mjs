@@ -13,9 +13,9 @@ const {
 
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const HOUR_PX = 44;
-const MIN_BLOCK_PX = 26;
-const VIEW_PX = 230;
+const HOUR_PX = 60;
+const MIN_BLOCK_PX = 32;
+const VIEW_PX = 360;
 
 export class LiveCalendarPanel {
   constructor(app) {
