@@ -208,8 +208,8 @@
   font-size: 9px;
   font-weight: 600;
   line-height: 13px;
-  background: light-dark(#0c0c0d, #f9f9fa);
-  color: light-dark(#f9f9fa, #0c0c0d);
+  background: light-dark(rgba(12, 12, 13, 0.4),rgba(249, 249, 250, 0.4));
+  color: light-dark(rgba(249, 249, 250, 0.4),rgba(12, 12, 13, 0.4));
 }
 
 .live-calendar-pill[hidden] {
