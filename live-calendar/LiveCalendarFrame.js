@@ -1,5 +1,5 @@
 (function () {
-  if (typeof content === 'undefined' || content.__liveCalendarWatch104) return;
+  if (typeof content === 'undefined' || content.__liveCalendarWatch105) return;
   let href = '';
   try {
     href = String(content.location.href || '');
@@ -7,7 +7,7 @@
     return;
   }
   if (!href.includes('calendar.google.com')) return;
-  content.__liveCalendarWatch104 = true;
+  content.__liveCalendarWatch105 = true;
 
   const BROWSER_KEY = 'AIzaSyBNlYH01_9Hc5S1J9vuFmu2nUqBZJNAXxs';
   let busy = false;
@@ -100,29 +100,68 @@
   }
 
   function dayColumns() {
-    const cols = [];
+    const raw = [];
     const nodes = content.document.querySelectorAll('[data-datekey], [data-date], [role="columnheader"], [role="gridcell"]');
     nodes.forEach((node) => {
       const key = columnKey(node);
       if (!/^\d{8}$/.test(key)) return;
       const rect = node.getBoundingClientRect();
-      if (rect.width < 48 || rect.width > 420 || rect.height < 12) return;
-      cols.push({ key, left: rect.left, right: rect.right, width: rect.width });
+      if (rect.width < 36 || rect.height < 12) return;
+      raw.push({ key, left: rect.left, right: rect.right, width: rect.width });
     });
-    return cols;
+    if (!raw.length) return [];
+    const min = Math.min(...raw.map((col) => col.width));
+    const narrow = raw.filter((col) => col.width <= min * 1.35);
+    const keys = new Set(narrow.map((col) => col.key));
+    if (keys.size === 1 && narrow[0].width >= 700 && !keys.has(todayKey())) return [];
+    return narrow;
+  }
+
+  function labelledText(node) {
+    const ids = `${node.getAttribute('aria-labelledby') || ''} ${node.getAttribute('aria-describedby') || ''}`.split(/\s+/);
+    const parts = [];
+    ids.forEach((id) => {
+      if (!id) return;
+      const el = content.document.getElementById(id);
+      if (el) parts.push(el.textContent || '');
+    });
+    return parts.join('\n');
+  }
+
+  function chipDateKey(node) {
+    const bits = [node.getAttribute('aria-label') || '', labelledText(node), node.textContent || ''];
+    for (const bit of bits) {
+      const key = dateKeyFromText(bit);
+      if (key) return key;
+    }
+    return '';
+  }
+
+  function chipBlob(node) {
+    const parts = [node.getAttribute('aria-label') || '', node.getAttribute('title') || '', labelledText(node)];
+    try { parts.push(node.innerText || ''); } catch (e) {}
+    parts.push(node.textContent || '');
+    try {
+      const root = node.openOrClosedShadowRoot || node.shadowRoot;
+      if (root) parts.push(root.textContent || '');
+    } catch (e) {}
+    node.querySelectorAll('[aria-label], [title], [data-text]').forEach((el) => {
+      parts.push(el.getAttribute('aria-label') || '', el.getAttribute('title') || '', el.getAttribute('data-text') || '');
+    });
+    return parts.map((part) => String(part || '').replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n');
   }
 
   function chipIsToday(node) {
     const rect = node.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) return false;
+    const own = chipDateKey(node);
+    if (own) return own === todayKey();
     const mid = (rect.left + rect.right) / 2;
     const cols = dayColumns().filter((col) => mid >= col.left - 2 && mid <= col.right + 2);
     if (cols.length) {
       cols.sort((a, b) => a.width - b.width);
       return cols[0].key === todayKey();
     }
-    const own = dateKeyFromText(node.getAttribute('aria-label') || '');
-    if (own) return own === todayKey();
     return /\/r\/day\b/.test(content.location.pathname || '');
   }
 
@@ -416,31 +455,42 @@
     const seen = new Set();
     const events = [];
     const nodes = chips();
+    let skipped = 0;
+    let undated = 0;
     nodes.forEach((node) => {
+      const rect = node.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) {
+        skipped++;
+        return;
+      }
+      const own = chipDateKey(node);
+      const mid = (rect.left + rect.right) / 2;
+      const cols = dayColumns().filter((col) => mid >= col.left - 2 && mid <= col.right + 2);
+      const dayView = /\/r\/day\b/.test(content.location.pathname || '');
+      if (!own && !cols.length && !dayView) {
+        undated++;
+        return;
+      }
       if (!chipIsToday(node)) return;
-      const yn = String(node.querySelector('.ynRLnc')?.textContent || '').replace(/\s+/g, ' ').trim();
-      const visible = String(node.querySelector('.FAxxKc, [data-text]')?.textContent || '').replace(/\s+/g, ' ').trim();
-      const aria = node.getAttribute('aria-label') || '';
-      const inner = String(node.textContent || '').replace(/\s+/g, ' ').trim();
-      const blob = [yn, aria, visible, inner].filter(Boolean).join('\n');
+      const blob = chipBlob(node);
       const allDay = isAllDay(blob);
       let range = allDay ? null : parseRange(blob);
-      if (!range && scale) {
-        const rect = node.getBoundingClientRect();
-        if (rect.height > 4) {
-          const startMin = Math.round((rect.top - scale.zeroY) / scale.pxPerMinute);
-          const endMin = startMin + Math.max(15, Math.round(rect.height / scale.pxPerMinute));
-          if (startMin >= 0 && startMin < 1440) {
-            const start = todayStart();
-            start.setMinutes(startMin);
-            const end = todayStart();
-            end.setMinutes(Math.min(1440, endMin));
-            range = { start: start.toISOString(), end: end.toISOString() };
-          }
+      if (!range && scale && rect.height > 4) {
+        const startMin = Math.round((rect.top - scale.zeroY) / scale.pxPerMinute);
+        const endMin = startMin + Math.max(15, Math.round(rect.height / scale.pxPerMinute));
+        if (startMin >= 0 && startMin < 1440) {
+          const start = todayStart();
+          start.setMinutes(startMin);
+          const end = todayStart();
+          end.setMinutes(Math.min(1440, endMin));
+          range = { start: start.toISOString(), end: end.toISOString() };
         }
       }
-      const title = cleanTitle(yn || aria, visible || inner.split(',')[0]);
-      if (!title) return;
+      const title = cleanTitle(blob, blob.split('\n')[0]);
+      if (!title || (!range && !allDay)) {
+        skipped++;
+        return;
+      }
       const decoded = decodeEventId(node.getAttribute('data-eventid'));
       const id = decoded.eventId || title + (range ? range.start : '');
       if (seen.has(id)) return;
@@ -448,8 +498,8 @@
       events.push({
         id,
         title,
-        start: range ? range.start : (allDay ? day : ''),
-        end: range ? range.end : (allDay ? day : ''),
+        start: range ? range.start : day,
+        end: range ? range.end : day,
         allDay: allDay && !range,
         joinUrl: findCallUrl(blob),
         htmlLink: decoded.eventId && decoded.calendarId
@@ -480,8 +530,11 @@
     }
     events.sort((a, b) => String(a.start).localeCompare(String(b.start)));
     const todayEvents = keepToday(events);
-    log('Today chips', todayEvents.length, 'columns', dayColumns().map((col) => col.key).filter((key, index, list) => list.indexOf(key) === index).join(','));
-    return { day, events: todayEvents.slice(0, 40), source: 'dom' };
+    const gridReady = dayColumns().some((col) => col.key === todayKey()) || /\/r\/day\b/.test(content.location.pathname || '');
+    const read = skipped === 0 && undated === 0 && (nodes.length > 0 || gridReady) ? 'complete' : 'partial';
+    const sample = nodes[0] ? String(nodes[0].getAttribute('aria-label') || nodes[0].textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120) : '';
+    log('Today chips', todayEvents.length, 'read', read, 'skipped', skipped, 'undated', undated, 'sample', sample);
+    return { day, events: todayEvents.slice(0, 40), source: 'dom', read };
   }
 
   function fromWireText(text, source) {
@@ -509,7 +562,7 @@
     urls.forEach((url) => {
       bodies.forEach((req) => {
         chain = chain.then((got) => {
-          if (got && got.events) return got;
+          if (got && Array.isArray(got.events) && got.events.length) return got;
           return content.fetch(url, {
             method: 'POST',
             credentials: 'include',
@@ -598,12 +651,14 @@
       if (!payload) return;
       const events = keepToday(payload.events);
       const titled = events.filter((event) => event.title).length;
-      if (!titled && lastPayload) return;
+      const read = payload.read || (titled ? 'complete' : 'partial');
+      if (!titled && read !== 'complete' && lastPayload) return;
       lastGood = titled;
       lastPayload = {
         ok: true,
         day: payload.day,
         source: payload.source,
+        read,
         events
       };
       sendAsyncMessage('LiveCalendar:Day', { ...lastPayload, debug });

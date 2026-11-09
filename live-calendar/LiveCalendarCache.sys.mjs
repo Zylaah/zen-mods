@@ -44,10 +44,10 @@ export class LiveCalendarCache {
     ctx.events = this.app.events;
   }
 
-  applyDay(key, day, events, source = '') {
+  applyDay(key, day, events, source = '', read = '') {
     const ctx = this.getOrCreateContext(key);
     const incoming = Array.isArray(events) ? events.slice() : [];
-    if (!incoming.length && ctx.day === day && ctx.events.length && source !== 'api' && source !== 'wire') {
+    if (!incoming.length && ctx.day === day && ctx.events.length && read !== 'complete') {
       return false;
     }
     ctx.day = day;
