@@ -1,5 +1,5 @@
 (function () {
-  if (typeof content === 'undefined' || content.__liveCalendarWatch103) return;
+  if (typeof content === 'undefined' || content.__liveCalendarWatch104) return;
   let href = '';
   try {
     href = String(content.location.href || '');
@@ -7,12 +7,14 @@
     return;
   }
   if (!href.includes('calendar.google.com')) return;
-  content.__liveCalendarWatch103 = true;
+  content.__liveCalendarWatch104 = true;
 
   const BROWSER_KEY = 'AIzaSyBNlYH01_9Hc5S1J9vuFmu2nUqBZJNAXxs';
   let busy = false;
   let lastAttempt = 0;
   let lastGood = 0;
+  let lastPayload = null;
+  let unloading = false;
   let timer = null;
   let hooked = false;
 
@@ -583,7 +585,7 @@
 
   function publish(force) {
     const now = Date.now();
-    if (busy) return;
+    if (unloading || busy) return;
     if (!force && now - lastAttempt < (lastGood ? 20000 : 2500)) return;
     busy = true;
     lastAttempt = now;
@@ -595,14 +597,16 @@
     }).then((payload) => {
       if (!payload) return;
       const events = keepToday(payload.events);
-      lastGood = events.filter((event) => event.title).length;
-      sendAsyncMessage('LiveCalendar:Day', {
+      const titled = events.filter((event) => event.title).length;
+      if (!titled && lastPayload) return;
+      lastGood = titled;
+      lastPayload = {
         ok: true,
         day: payload.day,
         source: payload.source,
-        events,
-        debug
-      });
+        events
+      };
+      sendAsyncMessage('LiveCalendar:Day', { ...lastPayload, debug });
     }).catch((error) => {
       log('Read failed', error && error.message ? error.message : error);
     }).then(() => {
@@ -655,6 +659,10 @@
 
   hookNetwork();
   addMessageListener('LiveCalendar:Refresh', () => publish(true));
+  content.addEventListener('pagehide', () => {
+    unloading = true;
+    if (timer) content.clearTimeout(timer);
+  }, true);
   if (content.document.documentElement) {
     new content.MutationObserver(() => {
       if (timer) content.clearTimeout(timer);

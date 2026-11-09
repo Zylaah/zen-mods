@@ -119,7 +119,7 @@ export class LiveCalendarTabs {
       data.day,
       events.map((event) => `${event.title || '?'} ${event.allDay ? 'all-day' : event.start || ''}`)
     );
-    this.app.cache.applyDay(key, data.day, events);
+    this.app.cache.applyDay(key, data.day, events, data.source || '');
     this.updatePills();
     if (this.app.panel.isOpen() && String(this.app.activeContextKey) === String(key)) {
       this.app.panel.updateDisplay();

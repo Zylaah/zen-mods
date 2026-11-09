@@ -44,16 +44,21 @@ export class LiveCalendarCache {
     ctx.events = this.app.events;
   }
 
-  applyDay(key, day, events) {
+  applyDay(key, day, events, source = '') {
     const ctx = this.getOrCreateContext(key);
+    const incoming = Array.isArray(events) ? events.slice() : [];
+    if (!incoming.length && ctx.day === day && ctx.events.length && source !== 'api' && source !== 'wire') {
+      return false;
+    }
     ctx.day = day;
-    ctx.events = events.slice();
+    ctx.events = incoming;
     ctx.fetchedAt = Date.now();
     if (String(key) === String(this.app.activeContextKey)) {
       this.app.day = ctx.day;
       this.app.events = ctx.events;
     }
     this.save();
+    return true;
   }
 
   todayEvents(key) {
@@ -85,7 +90,18 @@ export class LiveCalendarCache {
         .then((json) => {
           const parsed = JSON.parse(json);
           if (parsed && typeof parsed === 'object') this.app.diskStore = parsed;
-          for (const key of Object.keys(this.app.diskStore)) this.getOrCreateContext(key);
+          for (const key of Object.keys(this.app.diskStore)) {
+            const stored = this.app.diskStore[key];
+            const existing = this.app.contexts.get(String(key));
+            const storedEvents = Array.isArray(stored?.events) ? stored.events : [];
+            if (!existing || (!existing.events.length && storedEvents.length)) {
+              this.app.contexts.set(String(key), {
+                day: stored?.day || '',
+                events: storedEvents.slice(),
+                fetchedAt: stored?.fetchedAt || 0
+              });
+            }
+          }
           activate();
           this.app.tabs.updatePills();
           if (this.app.panel.isOpen()) this.app.panel.updateDisplay();

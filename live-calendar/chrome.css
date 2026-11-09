@@ -229,7 +229,7 @@
 .tabbrowser-tab[zen-essential] .live-calendar-pill {
   position: static;
   align-self: center;
-  margin: -6px 0 0;
+  margin: -4px 0 0;
   max-width: calc(100% - 8px);
   text-align: center;
   overflow: hidden;
