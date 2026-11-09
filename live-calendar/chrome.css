@@ -223,7 +223,7 @@
 }
 
 .tabbrowser-tab[zen-essential][data-live-calendar-pill] .tab-icon-stack {
-  transform: translateY(-2px);
+  transform: translateY(1px);
 }
 
 .tabbrowser-tab[zen-essential] .live-calendar-pill {
