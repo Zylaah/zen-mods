@@ -307,13 +307,8 @@ export class LiveCalendarPanel {
       scroll.appendChild(strip);
     }
 
-    const nowHour = Math.max(0, Math.min(23, Math.floor(nowMin / 60)));
-    let startHour = Math.max(0, nowHour - 1);
-    let endHour = Math.min(24, nowHour + 5);
-    if (timed.length) {
-      startHour = Math.max(0, Math.min(startHour, Math.floor(Math.min(...timed.map((item) => item.startMin)) / 60)));
-      endHour = Math.min(24, Math.max(endHour, Math.ceil(Math.max(...timed.map((item) => item.endMin)) / 60) + 1));
-    }
+    const startHour = 0;
+    const endHour = 24;
     const totalPx = (endHour - startHour) * HOUR_PX;
 
     const grid = this.html('div', 'live-calendar-grid');

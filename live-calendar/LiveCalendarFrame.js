@@ -69,103 +69,59 @@
     return (events || []).filter((event) => eventBelongsToToday(event));
   }
 
-  function nodeDateKey(node) {
-    let current = node;
-    for (let depth = 0; depth < 18 && current; depth++) {
-      const raw = current.getAttribute?.('data-datekey') || current.getAttribute?.('data-date') || '';
-      const compact = String(raw).replace(/-/g, '');
-      if (/^\d{8}$/.test(compact)) return compact;
-      current = current.parentElement;
-    }
-    return '';
-  }
-
-  function todayColumnRect() {
-    const key = todayKey();
-    const dashed = localDay(todayStart());
-    let best = null;
-    content.document.querySelectorAll('[data-datekey], [data-date]').forEach((node) => {
-      const compact = String(node.getAttribute('data-datekey') || node.getAttribute('data-date') || '').replace(/-/g, '');
-      if (compact !== key && compact !== dashed.replace(/-/g, '')) return;
-      const rect = node.getBoundingClientRect();
-      if (rect.width < 36 || rect.height < 36) return;
-      if (!best || rect.width * rect.height > best.width * best.height) best = rect;
-    });
-    if (best) return best;
-    const headers = content.document.querySelectorAll('[role="columnheader"], [aria-label]');
-    for (const node of headers) {
-      const label = node.getAttribute('aria-label') || '';
-      if (!/today|aujourd.?hui|heute|hoy/i.test(label) || label.length > 90) continue;
-      const rect = node.getBoundingClientRect();
-      if (rect.width >= 36 && rect.width < 500) return rect;
-    }
-    return null;
-  }
-
-  function labelIsOtherDay(text) {
+  function dateKeyFromText(text) {
     const lower = String(text || '').toLowerCase();
-    const today = todayStart();
     const months = [
-      ['january', 0], ['januar', 0], ['janvier', 0],
-      ['february', 1], ['februar', 1], ['février', 1], ['fevrier', 1],
-      ['march', 2], ['märz', 2], ['mars', 2],
-      ['april', 3], ['avril', 3],
-      ['may', 4], ['mai', 4],
-      ['june', 5], ['juni', 5], ['juin', 5],
-      ['july', 6], ['juli', 6], ['juillet', 6],
-      ['august', 7], ['août', 7], ['aout', 7],
-      ['september', 8], ['septembre', 8],
-      ['october', 9], ['oktober', 9], ['octobre', 9],
-      ['november', 10], ['novembre', 10],
-      ['december', 11], ['dezember', 11], ['décembre', 11], ['decembre', 11]
+      ['january', 0], ['janvier', 0], ['february', 1], ['février', 1], ['fevrier', 1],
+      ['march', 2], ['mars', 2], ['april', 3], ['avril', 3], ['may', 4], ['mai', 4],
+      ['june', 5], ['juin', 5], ['july', 6], ['juillet', 6], ['august', 7], ['août', 7], ['aout', 7],
+      ['september', 8], ['septembre', 8], ['october', 9], ['octobre', 9],
+      ['november', 10], ['novembre', 10], ['december', 11], ['décembre', 11], ['decembre', 11]
     ];
+    const yearNow = todayStart().getFullYear();
     for (const [name, month] of months) {
-      if (!lower.includes(name)) continue;
-      const found = lower.match(new RegExp('(?:' + name + '\\s+(\\d{1,2})|(\\d{1,2})\\s+' + name + ')'));
+      const found = lower.match(new RegExp('(?:' + name + '\\s+(\\d{1,2})|(\\d{1,2})\\s+' + name + ')(?:\\s+(20\\d{2}))?'));
       if (!found) continue;
       const dayNum = Number(found[1] || found[2]);
-      if (month !== today.getMonth() || dayNum !== today.getDate()) return true;
+      const year = found[3] ? Number(found[3]) : yearNow;
+      if (dayNum < 1 || dayNum > 31) continue;
+      return `${year}${String(month + 1).padStart(2, '0')}${String(dayNum).padStart(2, '0')}`;
     }
-    const compact = lower.match(/\b(20\d{2})[-\/](\d{1,2})[-\/](\d{1,2})\b/);
-    if (compact) {
-      const stamp = `${compact[1]}-${String(compact[2]).padStart(2, '0')}-${String(compact[3]).padStart(2, '0')}`;
-      if (stamp !== localDay(today)) return true;
-    }
-    const weekdays = [
-      ['sunday', 0], ['dimanche', 0], ['sonntag', 0],
-      ['monday', 1], ['lundi', 1], ['montag', 1],
-      ['tuesday', 2], ['mardi', 2], ['dienstag', 2],
-      ['wednesday', 3], ['mercredi', 3], ['mittwoch', 3],
-      ['thursday', 4], ['jeudi', 4], ['donnerstag', 4],
-      ['friday', 5], ['vendredi', 5], ['freitag', 5],
-      ['saturday', 6], ['samedi', 6], ['samstag', 6]
-    ];
-    for (const [name, index] of weekdays) {
-      if (lower.includes(name) && today.getDay() !== index) return true;
-    }
-    return false;
+    const iso = lower.match(/(20\d{2})-(\d{2})-(\d{2})/);
+    return iso ? iso[1] + iso[2] + iso[3] : '';
+  }
+
+  function columnKey(node) {
+    const attr = String(node.getAttribute('data-datekey') || node.getAttribute('data-date') || '').replace(/\D/g, '');
+    if (/^\d{8}$/.test(attr)) return attr;
+    return dateKeyFromText(node.getAttribute('aria-label') || '');
+  }
+
+  function dayColumns() {
+    const cols = [];
+    const nodes = content.document.querySelectorAll('[data-datekey], [data-date], [role="columnheader"], [role="gridcell"]');
+    nodes.forEach((node) => {
+      const key = columnKey(node);
+      if (!/^\d{8}$/.test(key)) return;
+      const rect = node.getBoundingClientRect();
+      if (rect.width < 48 || rect.width > 420 || rect.height < 12) return;
+      cols.push({ key, left: rect.left, right: rect.right, width: rect.width });
+    });
+    return cols;
   }
 
   function chipIsToday(node) {
-    const key = nodeDateKey(node);
-    if (key) return key === todayKey();
-    const blob = [
-      node.getAttribute?.('aria-label') || '',
-      node.querySelector?.('.ynRLnc')?.textContent || '',
-      node.textContent || ''
-    ].join('\n');
-    if (labelIsOtherDay(blob)) return false;
-    const column = todayColumnRect();
-    if (column && column.width >= 36) {
-      const rect = node.getBoundingClientRect();
-      if (rect.width < 2 || rect.height < 2) return false;
-      const mid = (rect.left + rect.right) / 2;
-      return mid >= column.left - 4 && mid <= column.right + 4;
+    const rect = node.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return false;
+    const mid = (rect.left + rect.right) / 2;
+    const cols = dayColumns().filter((col) => mid >= col.left - 2 && mid <= col.right + 2);
+    if (cols.length) {
+      cols.sort((a, b) => a.width - b.width);
+      return cols[0].key === todayKey();
     }
-    const path = content.location.pathname || '';
-    if (/\/r\/day\b/.test(path)) return true;
-    if (/\/r\/(week|month|customweek)/.test(path)) return false;
-    return true;
+    const own = dateKeyFromText(node.getAttribute('aria-label') || '');
+    if (own) return own === todayKey();
+    return /\/r\/day\b/.test(content.location.pathname || '');
   }
 
   function accountSlot() {
@@ -503,7 +459,6 @@
       Array.from(content.document.querySelectorAll('.ynRLnc')).forEach((node) => {
         if (!chipIsToday(node.parentElement || node)) return;
         const blob = String(node.textContent || '').replace(/\s+/g, ' ').trim();
-        if (labelIsOtherDay(blob)) return;
         const title = cleanTitle(blob);
         const range = isAllDay(blob) ? null : parseRange(blob);
         if (!title) return;
@@ -522,7 +477,9 @@
       });
     }
     events.sort((a, b) => String(a.start).localeCompare(String(b.start)));
-    return { day, events: keepToday(events).slice(0, 40), source: 'dom' };
+    const todayEvents = keepToday(events);
+    log('Today chips', todayEvents.length, 'columns', dayColumns().map((col) => col.key).filter((key, index, list) => list.indexOf(key) === index).join(','));
+    return { day, events: todayEvents.slice(0, 40), source: 'dom' };
   }
 
   function fromWireText(text, source) {

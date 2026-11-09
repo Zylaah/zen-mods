@@ -18,8 +18,9 @@
 .live-calendar-scroll {
   position: relative;
   height: 360px;
+  min-height: 0;
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow-y: scroll;
   scrollbar-width: none;
 }
 
