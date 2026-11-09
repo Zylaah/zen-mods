@@ -2,14 +2,20 @@ const {
   CONFIG,
   XUL_NS,
   canJoin,
-  escapeHtml,
+  eventEndMs,
+  eventStartMs,
   formatClock,
-  formatDayTitle,
   isPinnedCalendarTab,
   localDay
 } = ChromeUtils.importESModule(
   'chrome://sine/content/live-calendar/LiveCalendarUtil.sys.mjs' + new URL(import.meta.url).search
 );
+
+const HTML_NS = 'http://www.w3.org/1999/xhtml';
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const HOUR_PX = 44;
+const MIN_BLOCK_PX = 26;
+const VIEW_PX = 230;
 
 export class LiveCalendarPanel {
   constructor(app) {
@@ -28,6 +34,42 @@ export class LiveCalendarPanel {
     }
   }
 
+  html(tag, className, text) {
+    const node = this.document.createElementNS(HTML_NS, tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = text;
+    return node;
+  }
+
+  iconButton(className, title, paths, onClick) {
+    const button = this.html('button', className);
+    button.type = 'button';
+    button.title = title;
+    button.setAttribute('aria-label', title);
+    const svg = this.document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('aria-hidden', 'true');
+    for (const d of paths) {
+      const path = this.document.createElementNS(SVG_NS, 'path');
+      path.setAttribute('d', d);
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', 'currentColor');
+      path.setAttribute('stroke-width', '1.5');
+      path.setAttribute('stroke-linecap', 'round');
+      path.setAttribute('stroke-linejoin', 'round');
+      svg.appendChild(path);
+    }
+    button.appendChild(svg);
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onClick();
+    });
+    return button;
+  }
+
   create() {
     if (this.app.panelElement) return;
     const document = this.document;
@@ -40,45 +82,26 @@ export class LiveCalendarPanel {
     panel.setAttribute('noautohide', 'true');
     panel.setAttribute('level', 'top');
 
-    const wrapper = document.createElement('div');
-    wrapper.className = 'live-calendar-wrapper';
-
-    const header = document.createElement('div');
-    header.className = 'live-calendar-header';
-    const title = document.createElement('span');
-    title.className = 'live-calendar-title';
-    title.textContent = 'Calendar';
-    header.appendChild(title);
-
-    const list = document.createElement('div');
-    list.className = 'live-calendar-list';
-
-    const add = document.createElementNS('http://www.w3.org/1999/xhtml', 'button');
-    add.className = 'live-calendar-add';
-    add.type = 'button';
-    add.title = 'New event';
-    add.setAttribute('aria-label', 'New event');
-    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    icon.setAttribute('width', '16');
-    icon.setAttribute('height', '16');
-    icon.setAttribute('viewBox', '0 0 16 16');
-    icon.setAttribute('aria-hidden', 'true');
-    const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    line.setAttribute('d', 'M8 2.5v11M2.5 8h11');
-    line.setAttribute('fill', 'none');
-    line.setAttribute('stroke', 'currentColor');
-    line.setAttribute('stroke-width', '1.6');
-    line.setAttribute('stroke-linecap', 'round');
-    icon.appendChild(line);
-    add.appendChild(icon);
-    add.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      this.app.tabs.createEvent();
-    });
-
-    wrapper.append(header, list, add);
+    const wrapper = this.html('div', 'live-calendar-wrapper');
+    const scroll = this.html('div', 'live-calendar-scroll');
+    const footer = this.html('div', 'live-calendar-footer');
+    footer.append(
+      this.iconButton(
+        'live-calendar-gear',
+        'Calendar settings',
+        ['M8 5.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8z', 'M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1'],
+        () => this.app.tabs.openSettings()
+      ),
+      this.iconButton(
+        'live-calendar-add',
+        'New event',
+        ['M8 2.5v11M2.5 8h11'],
+        () => this.app.tabs.createEvent()
+      )
+    );
+    wrapper.append(scroll, footer);
     panel.appendChild(wrapper);
+
     panel.addEventListener('mouseenter', () => {
       if (this.app.hideTimer) {
         this.app.window.clearTimeout(this.app.hideTimer);
@@ -136,6 +159,7 @@ export class LiveCalendarPanel {
 
   show(tab) {
     const key = this.app.getContextKey(tab);
+    const wasOpen = this.isOpen();
     this.app.cache.activate(key);
     this.app.hoveredTab = tab;
     if (!this.app.panelElement) this.create();
@@ -144,8 +168,8 @@ export class LiveCalendarPanel {
       this.app.hideTimer = null;
     }
     this.pinCompactChrome(tab);
+    this.updateDisplay(!wasOpen);
     this.openAt(tab);
-    this.updateDisplay();
     this.app.tabs.refreshLoaded(tab);
   }
 
@@ -187,11 +211,10 @@ export class LiveCalendarPanel {
     if (isPinnedCalendarTab(tab)) {
       const right = !!this.app.window.gZenVerticalTabsManager?._prefsRightSide;
       panel.setAttribute('side', right ? 'right' : 'left');
-      const rows = Math.min(Math.max(this.visibleEvents().length || 1, 1), 6);
       panel.openPopup(anchor, {
         position: right ? 'topleft topright' : 'topright topleft',
         x: right ? -10 : 10,
-        y: (rows * 52) / -2
+        y: -(VIEW_PX / 2)
       });
       return;
     }
@@ -205,49 +228,165 @@ export class LiveCalendarPanel {
     return this.app.events || [];
   }
 
-  updateDisplay() {
-    const panel = this.app.panelElement;
-    if (!panel) return;
-    const title = panel.querySelector('.live-calendar-title');
-    const list = panel.querySelector('.live-calendar-list');
-    if (!list) return;
-    const day = localDay();
-    if (title) title.textContent = formatDayTitle(day);
-    const events = this.visibleEvents();
-    if (!events.length) {
-      const empty = this.app.day === day ? 'Nothing on today' : 'Open Calendar to load today';
-      list.innerHTML = `<div class="live-calendar-empty">${escapeHtml(this.document, empty)}</div>`;
-      return;
-    }
-    const now = Date.now();
-    list.innerHTML = events.map((event) => this.renderEvent(event, now)).join('');
-    list.querySelectorAll('[data-calendar-action]').forEach((node) => {
-      node.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const card = node.closest('[data-event-id]');
-        const item = events.find((entry) => entry.id === card?.getAttribute('data-event-id'));
-        if (!item) return;
-        if (node.getAttribute('data-calendar-action') === 'join') this.app.tabs.join(item);
-        else this.app.tabs.openEvent(item);
-      });
-    });
+  dayStartMs() {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return start.getTime();
   }
 
-  renderEvent(event, now) {
-    const doc = this.document;
-    const start = formatClock(event.start);
-    const end = formatClock(event.end);
-    const when = event.allDay ? 'All day' : (start && end ? `${start} – ${end}` : 'Today');
-    const join = canJoin(event, now)
-      ? `<button type="button" class="live-calendar-join" data-calendar-action="join">Join</button>`
-      : '';
-    return `<div class="live-calendar-event" data-event-id="${escapeHtml(doc, event.id)}">
-      <button type="button" class="live-calendar-open" data-calendar-action="open">
-        <span class="live-calendar-when">${escapeHtml(doc, when)}</span>
-        <span class="live-calendar-name">${escapeHtml(doc, event.title || '(No title)')}</span>
-      </button>
-      ${join}
-    </div>`;
+  minutesOf(ms, dayStart) {
+    return Math.max(0, Math.min(1440, (ms - dayStart) / 60000));
+  }
+
+  hourLabel(hour) {
+    return new Date(2000, 0, 1, hour % 24).toLocaleTimeString([], { hour: 'numeric' });
+  }
+
+  layoutColumns(blocks) {
+    blocks.sort((a, b) => a.top - b.top || b.bottom - a.bottom);
+    let cluster = [];
+    let clusterEnd = -1;
+    const finish = () => {
+      const cols = Math.max(1, ...cluster.map((block) => block.col + 1));
+      cluster.forEach((block) => { block.cols = cols; });
+      cluster = [];
+    };
+    const ends = [];
+    for (const block of blocks) {
+      if (cluster.length && block.top >= clusterEnd) {
+        finish();
+        ends.length = 0;
+      }
+      let col = ends.findIndex((end) => end <= block.top);
+      if (col === -1) col = ends.length;
+      ends[col] = block.bottom;
+      block.col = col;
+      cluster.push(block);
+      clusterEnd = Math.max(clusterEnd, block.bottom);
+    }
+    if (cluster.length) finish();
+  }
+
+  updateDisplay(scrollToNow = false) {
+    const panel = this.app.panelElement;
+    if (!panel) return;
+    const scroll = panel.querySelector('.live-calendar-scroll');
+    if (!scroll) return;
+    const previousTop = scroll.scrollTop;
+    scroll.replaceChildren();
+
+    const events = this.visibleEvents();
+    const now = Date.now();
+    const dayStart = this.dayStartMs();
+    const nowMin = (now - dayStart) / 60000;
+
+    const timed = [];
+    const loose = [];
+    for (const event of events) {
+      const start = eventStartMs(event);
+      if (event.allDay || !Number.isFinite(start)) {
+        loose.push(event);
+        continue;
+      }
+      let end = eventEndMs(event);
+      if (!Number.isFinite(end) || end <= start) end = start + 30 * 60000;
+      timed.push({ event, startMin: this.minutesOf(start, dayStart), endMin: this.minutesOf(end, dayStart) });
+    }
+
+    if (!events.length) {
+      const message = this.app.day === localDay() ? 'Nothing on today' : 'Open Calendar to load today';
+      scroll.appendChild(this.html('div', 'live-calendar-empty', message));
+      return;
+    }
+
+    if (loose.length) {
+      const strip = this.html('div', 'live-calendar-loose');
+      for (const event of loose) {
+        const chip = this.html('button', 'live-calendar-chip', event.title || 'Event');
+        chip.type = 'button';
+        chip.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.app.tabs.openEvent(event);
+        });
+        strip.appendChild(chip);
+      }
+      scroll.appendChild(strip);
+    }
+
+    if (!timed.length) return;
+
+    const firstHour = Math.floor(Math.min(...timed.map((item) => item.startMin)) / 60);
+    const lastHour = Math.ceil(Math.max(...timed.map((item) => item.endMin)) / 60);
+    const nowHour = Math.floor(nowMin / 60);
+    const startHour = Math.max(0, Math.min(firstHour, nowHour - 1));
+    const endHour = Math.min(24, Math.max(lastHour + 1, nowHour + 3, startHour + 5));
+    const totalPx = (endHour - startHour) * HOUR_PX;
+
+    const grid = this.html('div', 'live-calendar-grid');
+    grid.style.height = `${totalPx}px`;
+
+    for (let hour = startHour; hour < endHour; hour++) {
+      const row = this.html('div', 'live-calendar-hour');
+      row.style.top = `${(hour - startHour) * HOUR_PX}px`;
+      row.style.height = `${HOUR_PX}px`;
+      row.appendChild(this.html('span', 'live-calendar-hour-label', this.hourLabel(hour)));
+      row.appendChild(this.html('span', 'live-calendar-hour-line'));
+      grid.appendChild(row);
+    }
+
+    const blocks = timed.map((item) => {
+      const top = (item.startMin / 60 - startHour) * HOUR_PX;
+      const height = Math.max(MIN_BLOCK_PX, ((item.endMin - item.startMin) / 60) * HOUR_PX - 2);
+      return { ...item, top, bottom: top + height, height };
+    });
+    this.layoutColumns(blocks);
+
+    for (const block of blocks) {
+      const { event } = block;
+      const node = this.html('div', 'live-calendar-block');
+      const colWidth = 100 / block.cols;
+      node.style.top = `${block.top + 1}px`;
+      node.style.height = `${block.height}px`;
+      node.style.left = `calc(var(--lc-gutter) + (100% - var(--lc-gutter) - 8px) * ${block.col / block.cols})`;
+      node.style.width = `calc((100% - var(--lc-gutter) - 8px) * ${colWidth / 100} - 3px)`;
+      if (now >= eventStartMs(event) && now <= (eventEndMs(event) || 0)) node.setAttribute('data-live', 'true');
+
+      const title = this.html('span', 'live-calendar-block-title', event.title || 'Event');
+      node.appendChild(title);
+      if (block.height >= 40) {
+        const when = `${formatClock(event.start)} – ${formatClock(event.end)}`;
+        node.appendChild(this.html('span', 'live-calendar-block-time', when));
+      }
+      if (canJoin(event, now)) {
+        const join = this.html('button', 'live-calendar-join', 'Join');
+        join.type = 'button';
+        join.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.app.tabs.join(event);
+        });
+        node.appendChild(join);
+      }
+      node.addEventListener('click', () => this.app.tabs.openEvent(event));
+      grid.appendChild(node);
+    }
+
+    if (nowMin >= startHour * 60 && nowMin <= endHour * 60) {
+      const line = this.html('div', 'live-calendar-now');
+      line.style.top = `${(nowMin / 60 - startHour) * HOUR_PX}px`;
+      line.appendChild(this.html('span', 'live-calendar-now-dot'));
+      grid.appendChild(line);
+    }
+
+    scroll.appendChild(grid);
+
+    const nowTop = (nowMin / 60 - startHour) * HOUR_PX;
+    this.app.window.requestAnimationFrame(() => {
+      const target = scrollToNow
+        ? Math.max(0, nowTop - HOUR_PX * 1.2 + (loose.length ? 0 : 0))
+        : previousTop;
+      scroll.scrollTop = target;
+    });
   }
 }

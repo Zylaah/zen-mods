@@ -244,6 +244,12 @@ export class LiveCalendarTabs {
     });
   }
 
+  openSettings() {
+    const tab = this.targetTab();
+    if (!tab) return;
+    this.loadInTab(tab, `https://${CONFIG.CALENDAR_URL}/calendar/u/${this.calendarSlot(tab)}/r/settings`);
+  }
+
   createEvent() {
     const tab = this.targetTab();
     if (!tab) return;
