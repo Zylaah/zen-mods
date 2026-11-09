@@ -84,14 +84,8 @@ export class LiveCalendarPanel {
 
     const wrapper = this.html('div', 'live-calendar-wrapper');
     const scroll = this.html('div', 'live-calendar-scroll');
-    const footer = this.html('div', 'live-calendar-footer');
-    footer.append(
-      this.iconButton(
-        'live-calendar-gear',
-        'Calendar settings',
-        ['M8 5.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8z', 'M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1'],
-        () => this.app.tabs.openSettings()
-      ),
+    wrapper.append(
+      scroll,
       this.iconButton(
         'live-calendar-add',
         'New event',
@@ -99,7 +93,6 @@ export class LiveCalendarPanel {
         () => this.app.tabs.createEvent()
       )
     );
-    wrapper.append(scroll, footer);
     panel.appendChild(wrapper);
 
     panel.addEventListener('mouseenter', () => {
