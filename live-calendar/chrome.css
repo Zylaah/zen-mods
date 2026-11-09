@@ -216,17 +216,22 @@
   display: none !important;
 }
 
-.tabbrowser-tab[zen-essential]:has(.live-calendar-pill) {
-  position: relative;
+.tabbrowser-tab[zen-essential][data-live-calendar-pill] > .tab-stack > .tab-content {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.tabbrowser-tab[zen-essential][data-live-calendar-pill] .tab-icon-stack {
+  transform: translateY(-5px);
 }
 
 .tabbrowser-tab[zen-essential] .live-calendar-pill {
-  position: absolute;
-  left: 50%;
-  bottom: 1px;
-  z-index: 5;
-  transform: translateX(-50%);
-  max-width: calc(100% - 2px);
+  position: static;
+  align-self: center;
+  margin: -8px 0 0;
+  max-width: calc(100% - 8px);
+  text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
 }

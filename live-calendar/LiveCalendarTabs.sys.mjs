@@ -301,6 +301,7 @@ export class LiveCalendarTabs {
   }
 
   clearPill(tab) {
+    tab?.removeAttribute('data-live-calendar-pill');
     tab?.querySelectorAll('.live-calendar-pill').forEach((pill) => pill.remove());
   }
 
@@ -346,11 +347,13 @@ export class LiveCalendarTabs {
     this.clearSublabel(tab);
     const pill = this.ensurePill(tab);
     if (!text) {
+      tab.removeAttribute('data-live-calendar-pill');
       pill.setAttribute('hidden', 'true');
       pill.textContent = '';
       pill.removeAttribute('value');
       return;
     }
+    tab.setAttribute('data-live-calendar-pill', 'true');
     pill.removeAttribute('hidden');
     pill.textContent = '';
     pill.setAttribute('value', text);
