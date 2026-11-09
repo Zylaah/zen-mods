@@ -2,7 +2,7 @@
 // @name           Live Calendar
 // @description    Today's Google Calendar when hovering a Calendar essential or pinned tab
 // @author         Bxth
-// @version        1.0.4
+// @version        1.0.5
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 

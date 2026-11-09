@@ -13,8 +13,8 @@ const {
 
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const HOUR_PX = 60;
-const MIN_BLOCK_PX = 32;
+const HOUR_PX = 50;
+const MIN_BLOCK_PX = 28;
 const VIEW_PX = 360;
 
 export class LiveCalendarPanel {
@@ -322,8 +322,8 @@ export class LiveCalendarPanel {
       const row = this.html('div', 'live-calendar-hour');
       row.style.top = `${(hour - startHour) * HOUR_PX}px`;
       row.style.height = `${HOUR_PX}px`;
-      row.appendChild(this.html('span', 'live-calendar-hour-label', this.hourLabel(hour)));
       row.appendChild(this.html('span', 'live-calendar-hour-line'));
+      row.appendChild(this.html('span', 'live-calendar-hour-label', this.hourLabel(hour)));
       grid.appendChild(row);
     }
 

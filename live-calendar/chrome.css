@@ -59,25 +59,24 @@
   left: 0;
   right: 0;
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: stretch;
   pointer-events: none;
 }
 
+.live-calendar-hour-line {
+  height: 1px;
+  width: 100%;
+  background: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
+}
+
 .live-calendar-hour-label {
-  width: var(--lc-gutter);
-  padding: 0 8px 0 10px;
-  box-sizing: border-box;
-  transform: translateY(-7px);
+  padding: 4px 10px 0;
   font-size: 10px;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+  text-align: start;
   color: light-dark(#6b6b6b, #a8a8a8);
-}
-
-.live-calendar-hour-line {
-  flex: 1;
-  height: 1px;
-  background: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
 }
 
 .live-calendar-block {
@@ -147,7 +146,7 @@
 
 .live-calendar-now-dot {
   position: absolute;
-  left: calc(var(--lc-gutter) - 5px);
+  left: 8px;
   top: -4.5px;
   width: 7px;
   height: 7px;
