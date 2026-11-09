@@ -206,7 +206,7 @@
   padding: 0 4px;
   border-radius: 999px;
   font-size: 9px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 13px;
   background: light-dark(#0c0c0d, #f9f9fa);
   color: light-dark(#f9f9fa, #0c0c0d);
@@ -227,9 +227,10 @@
 }
 
 .tabbrowser-tab[zen-essential] .live-calendar-pill {
-  position: static;
+  position: relative;
   align-self: center;
   margin: -4px 0 0;
+  transform: translateY(4px);
   max-width: calc(100% - 8px);
   text-align: center;
   overflow: hidden;
