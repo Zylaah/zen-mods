@@ -56,6 +56,23 @@ export function localDay(date = new Date()) {
   return `${y}-${m}-${d}`;
 }
 
+export function eventBelongsToToday(event, now = new Date()) {
+  const today = localDay(now);
+  const begin = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const end = begin + 86400000;
+  const startMs = Date.parse(event?.start);
+  if (event?.allDay) {
+    if (typeof event.start === 'string' && /^\d{4}-\d{2}-\d{2}/.test(event.start)) {
+      return event.start.slice(0, 10) === today;
+    }
+    return Number.isFinite(startMs) && localDay(new Date(startMs)) === today;
+  }
+  if (!Number.isFinite(startMs)) return false;
+  if (startMs >= begin && startMs < end) return true;
+  const endMs = Date.parse(event?.end);
+  return Number.isFinite(endMs) && startMs < begin && endMs > begin;
+}
+
 export function eventStartMs(event) {
   if (!event || event.allDay) return NaN;
   const ms = Date.parse(event.start);

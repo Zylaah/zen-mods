@@ -1,5 +1,5 @@
 {
-  "version": "1.0.6",
+  "version": "1.0.7",
   "id": "live-calendar",
   "name": "Live Calendar",
   "description": "Today's Google Calendar on hover, with a join pill when a meeting is close",

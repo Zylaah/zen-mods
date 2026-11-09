@@ -1,5 +1,5 @@
 (function () {
-  if (typeof content === 'undefined' || content.__liveCalendarWatch102) return;
+  if (typeof content === 'undefined' || content.__liveCalendarWatch103) return;
   let href = '';
   try {
     href = String(content.location.href || '');
@@ -7,7 +7,7 @@
     return;
   }
   if (!href.includes('calendar.google.com')) return;
-  content.__liveCalendarWatch102 = true;
+  content.__liveCalendarWatch103 = true;
 
   const BROWSER_KEY = 'AIzaSyBNlYH01_9Hc5S1J9vuFmu2nUqBZJNAXxs';
   let busy = false;
@@ -42,6 +42,130 @@
 
   function epochDay(date) {
     return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400000);
+  }
+
+  function todayKey() {
+    return localDay(todayStart()).replace(/-/g, '');
+  }
+
+  function eventBelongsToToday(event) {
+    const today = localDay(todayStart());
+    const begin = todayStart().getTime();
+    const end = begin + 86400000;
+    const startMs = Date.parse(event?.start);
+    if (event?.allDay) {
+      if (typeof event.start === 'string' && /^\d{4}-\d{2}-\d{2}/.test(event.start)) {
+        return event.start.slice(0, 10) === today;
+      }
+      return Number.isFinite(startMs) && localDay(new Date(startMs)) === today;
+    }
+    if (!Number.isFinite(startMs)) return false;
+    if (startMs >= begin && startMs < end) return true;
+    const endMs = Date.parse(event?.end);
+    return Number.isFinite(endMs) && startMs < begin && endMs > begin;
+  }
+
+  function keepToday(events) {
+    return (events || []).filter((event) => eventBelongsToToday(event));
+  }
+
+  function nodeDateKey(node) {
+    let current = node;
+    for (let depth = 0; depth < 18 && current; depth++) {
+      const raw = current.getAttribute?.('data-datekey') || current.getAttribute?.('data-date') || '';
+      const compact = String(raw).replace(/-/g, '');
+      if (/^\d{8}$/.test(compact)) return compact;
+      current = current.parentElement;
+    }
+    return '';
+  }
+
+  function todayColumnRect() {
+    const key = todayKey();
+    const dashed = localDay(todayStart());
+    let best = null;
+    content.document.querySelectorAll('[data-datekey], [data-date]').forEach((node) => {
+      const compact = String(node.getAttribute('data-datekey') || node.getAttribute('data-date') || '').replace(/-/g, '');
+      if (compact !== key && compact !== dashed.replace(/-/g, '')) return;
+      const rect = node.getBoundingClientRect();
+      if (rect.width < 36 || rect.height < 36) return;
+      if (!best || rect.width * rect.height > best.width * best.height) best = rect;
+    });
+    if (best) return best;
+    const headers = content.document.querySelectorAll('[role="columnheader"], [aria-label]');
+    for (const node of headers) {
+      const label = node.getAttribute('aria-label') || '';
+      if (!/today|aujourd.?hui|heute|hoy/i.test(label) || label.length > 90) continue;
+      const rect = node.getBoundingClientRect();
+      if (rect.width >= 36 && rect.width < 500) return rect;
+    }
+    return null;
+  }
+
+  function labelIsOtherDay(text) {
+    const lower = String(text || '').toLowerCase();
+    const today = todayStart();
+    const months = [
+      ['january', 0], ['januar', 0], ['janvier', 0],
+      ['february', 1], ['februar', 1], ['février', 1], ['fevrier', 1],
+      ['march', 2], ['märz', 2], ['mars', 2],
+      ['april', 3], ['avril', 3],
+      ['may', 4], ['mai', 4],
+      ['june', 5], ['juni', 5], ['juin', 5],
+      ['july', 6], ['juli', 6], ['juillet', 6],
+      ['august', 7], ['août', 7], ['aout', 7],
+      ['september', 8], ['septembre', 8],
+      ['october', 9], ['oktober', 9], ['octobre', 9],
+      ['november', 10], ['novembre', 10],
+      ['december', 11], ['dezember', 11], ['décembre', 11], ['decembre', 11]
+    ];
+    for (const [name, month] of months) {
+      if (!lower.includes(name)) continue;
+      const found = lower.match(new RegExp('(?:' + name + '\\s+(\\d{1,2})|(\\d{1,2})\\s+' + name + ')'));
+      if (!found) continue;
+      const dayNum = Number(found[1] || found[2]);
+      if (month !== today.getMonth() || dayNum !== today.getDate()) return true;
+    }
+    const compact = lower.match(/\b(20\d{2})[-\/](\d{1,2})[-\/](\d{1,2})\b/);
+    if (compact) {
+      const stamp = `${compact[1]}-${String(compact[2]).padStart(2, '0')}-${String(compact[3]).padStart(2, '0')}`;
+      if (stamp !== localDay(today)) return true;
+    }
+    const weekdays = [
+      ['sunday', 0], ['dimanche', 0], ['sonntag', 0],
+      ['monday', 1], ['lundi', 1], ['montag', 1],
+      ['tuesday', 2], ['mardi', 2], ['dienstag', 2],
+      ['wednesday', 3], ['mercredi', 3], ['mittwoch', 3],
+      ['thursday', 4], ['jeudi', 4], ['donnerstag', 4],
+      ['friday', 5], ['vendredi', 5], ['freitag', 5],
+      ['saturday', 6], ['samedi', 6], ['samstag', 6]
+    ];
+    for (const [name, index] of weekdays) {
+      if (lower.includes(name) && today.getDay() !== index) return true;
+    }
+    return false;
+  }
+
+  function chipIsToday(node) {
+    const key = nodeDateKey(node);
+    if (key) return key === todayKey();
+    const blob = [
+      node.getAttribute?.('aria-label') || '',
+      node.querySelector?.('.ynRLnc')?.textContent || '',
+      node.textContent || ''
+    ].join('\n');
+    if (labelIsOtherDay(blob)) return false;
+    const column = todayColumnRect();
+    if (column && column.width >= 36) {
+      const rect = node.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) return false;
+      const mid = (rect.left + rect.right) / 2;
+      return mid >= column.left - 4 && mid <= column.right + 4;
+    }
+    const path = content.location.pathname || '';
+    if (/\/r\/day\b/.test(path)) return true;
+    if (/\/r\/(week|month|customweek)/.test(path)) return false;
+    return true;
   }
 
   function accountSlot() {
@@ -250,21 +374,16 @@
     const start = parseTimestamp(arr[35]);
     const end = parseTimestamp(arr[36]);
     if (!Number.isFinite(start.ms)) return null;
-    const allDay = start.allDay;
-    const day = allDay ? utcDay(new Date(start.ms)) : localDay(new Date(start.ms));
-    if (day !== localDay(todayStart()) && day !== utcDay(todayStart()) && day !== localDay(new Date())) return null;
-    if (allDay && utcDay(new Date(start.ms)) !== localDay(todayStart())) return null;
-    if (!allDay && localDay(new Date(start.ms)) !== localDay(todayStart())) return null;
-    const title = String(arr[5] || '').trim();
-    return {
+    const event = {
       id: String(arr[0]),
-      title: title || 'Event',
+      title: String(arr[5] || '').trim() || 'Event',
       start: new Date(start.ms).toISOString(),
       end: Number.isFinite(end.ms) ? new Date(end.ms).toISOString() : '',
-      allDay,
+      allDay: start.allDay,
       joinUrl: joinFromTuple(arr) || '',
       htmlLink: typeof arr[2] === 'string' ? arr[2] : ''
     };
+    return eventBelongsToToday(event) ? event : null;
   }
 
   function eventsFromWire(text) {
@@ -340,6 +459,7 @@
     const events = [];
     const nodes = chips();
     nodes.forEach((node) => {
+      if (!chipIsToday(node)) return;
       const yn = String(node.querySelector('.ynRLnc')?.textContent || '').replace(/\s+/g, ' ').trim();
       const visible = String(node.querySelector('.FAxxKc, [data-text]')?.textContent || '').replace(/\s+/g, ' ').trim();
       const aria = node.getAttribute('aria-label') || '';
@@ -381,7 +501,9 @@
     });
     if (!events.length) {
       Array.from(content.document.querySelectorAll('.ynRLnc')).forEach((node) => {
+        if (!chipIsToday(node.parentElement || node)) return;
         const blob = String(node.textContent || '').replace(/\s+/g, ' ').trim();
+        if (labelIsOtherDay(blob)) return;
         const title = cleanTitle(blob);
         const range = isAllDay(blob) ? null : parseRange(blob);
         if (!title) return;
@@ -400,7 +522,7 @@
       });
     }
     events.sort((a, b) => String(a.start).localeCompare(String(b.start)));
-    return { day, events: events.slice(0, 40), source: 'dom' };
+    return { day, events: keepToday(events).slice(0, 40), source: 'dom' };
   }
 
   function fromWireText(text, source) {
@@ -492,8 +614,9 @@
           });
         } catch (e) {}
       }
-      log('API events', events.length);
-      return { day: localDay(start), events, source: 'api' };
+      const todayEvents = keepToday(events);
+      log('API events', todayEvents.length);
+      return { day: localDay(start), events: todayEvents, source: 'api' };
     }).catch(() => null);
   }
 
@@ -510,16 +633,17 @@
     const debug = snapshot();
     log('Scan', debug);
     postRange(debug.calendars).then((wire) => {
-      if (usable(wire)) return wire;
-      return fromApi().then((api) => (usable(api) ? api : fromDom()));
+      if (usable(wire)) return { ...wire, events: keepToday(wire.events) };
+      return fromApi().then((api) => (usable(api) ? { ...api, events: keepToday(api.events) } : fromDom()));
     }).then((payload) => {
       if (!payload) return;
-      lastGood = payload.events.filter((event) => event.title).length;
+      const events = keepToday(payload.events);
+      lastGood = events.filter((event) => event.title).length;
       sendAsyncMessage('LiveCalendar:Day', {
         ok: true,
         day: payload.day,
         source: payload.source,
-        events: payload.events,
+        events,
         debug
       });
     }).catch((error) => {
@@ -532,14 +656,15 @@
   function inspectResponse(url, text) {
     if (!/prefetcheventrange|fetcheventrange/i.test(String(url || ''))) return;
     const parsed = fromWireText(text, 'wire');
-    if (!usable(parsed)) return;
-    lastGood = parsed.events.length;
-    log('Intercepted', parsed.events.length);
+    const events = keepToday(parsed?.events);
+    if (!events.length) return;
+    lastGood = events.length;
+    log('Intercepted', events.length);
     sendAsyncMessage('LiveCalendar:Day', {
       ok: true,
       day: parsed.day,
       source: 'wire',
-      events: parsed.events
+      events
     });
   }
 

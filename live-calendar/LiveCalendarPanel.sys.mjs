@@ -2,6 +2,7 @@ const {
   CONFIG,
   XUL_NS,
   canJoin,
+  eventBelongsToToday,
   eventEndMs,
   eventStartMs,
   formatClock,
@@ -218,7 +219,7 @@ export class LiveCalendarPanel {
 
   visibleEvents() {
     if (this.app.day !== localDay()) return [];
-    return this.app.events || [];
+    return (this.app.events || []).filter((event) => eventBelongsToToday(event));
   }
 
   dayStartMs() {

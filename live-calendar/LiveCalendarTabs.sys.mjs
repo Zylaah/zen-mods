@@ -1,6 +1,7 @@
 const {
   CONFIG,
   debugLog,
+  eventBelongsToToday,
   getTabUserContextId,
   isEssentialOrPinnedTab,
   localDay,
@@ -109,9 +110,8 @@ export class LiveCalendarTabs {
     if (data?.debug) console.log('[Live Calendar] page', data.debug);
     if (!tab || !this.isCalendarAnchor(tab)) return;
     if (!data?.ok || data.day !== localDay()) return;
-    const events = Array.isArray(data.events) ? data.events : [];
+    const events = (Array.isArray(data.events) ? data.events : []).filter((event) => eventBelongsToToday(event));
     const key = this.app.getContextKey(tab);
-    if (data.source === 'dom' && !events.length && this.app.cache.todayEvents(key).length) return;
     console.log(
       '[Live Calendar]',
       data.source || '',
