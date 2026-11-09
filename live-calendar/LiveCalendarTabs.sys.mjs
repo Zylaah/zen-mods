@@ -4,6 +4,7 @@ const {
   eventBelongsToToday,
   getTabUserContextId,
   isEssentialOrPinnedTab,
+  isPinnedCalendarTab,
   localDay,
   pickPillEvent,
   pillText
@@ -147,6 +148,7 @@ export class LiveCalendarTabs {
     for (const tab of this.gBrowser.tabs) {
       if (!this.isCalendarAnchor(tab)) {
         this.clearPill(tab);
+        this.clearSublabel(tab);
         continue;
       }
       this.loadWatcher(tab);
@@ -302,12 +304,47 @@ export class LiveCalendarTabs {
     tab?.querySelectorAll('.live-calendar-pill').forEach((pill) => pill.remove());
   }
 
+  setSublabel(tab, text) {
+    const label = tab.querySelector('.zen-tab-sublabel');
+    if (!label) return;
+    if (!text) {
+      this.clearSublabel(tab);
+      return;
+    }
+    tab.setAttribute('data-live-calendar-sublabel', 'true');
+    tab.setAttribute('zen-show-sublabel', text);
+    try {
+      this.document.l10n.setArgs(label, { tabSubtitle: text });
+    } catch (e) {
+      label.setAttribute('value', text);
+    }
+  }
+
+  clearSublabel(tab) {
+    if (!tab?.hasAttribute('data-live-calendar-sublabel')) return;
+    tab.removeAttribute('data-live-calendar-sublabel');
+    tab.removeAttribute('zen-show-sublabel');
+    const label = tab.querySelector('.zen-tab-sublabel');
+    if (!label) return;
+    try {
+      this.document.l10n.setArgs(label, { tabSubtitle: 'zen-default-pinned' });
+    } catch (e) {
+      label.setAttribute('value', '');
+    }
+  }
+
   updatePill(tab) {
     if (!this.isCalendarAnchor(tab)) return;
-    const pill = this.ensurePill(tab);
     const events = this.app.cache.todayEvents(this.app.getContextKey(tab));
     const soon = pickPillEvent(events);
     const text = soon ? pillText(soon) : '';
+    if (isPinnedCalendarTab(tab)) {
+      this.clearPill(tab);
+      this.setSublabel(tab, text);
+      return;
+    }
+    this.clearSublabel(tab);
+    const pill = this.ensurePill(tab);
     if (!text) {
       pill.setAttribute('hidden', 'true');
       pill.textContent = '';
@@ -315,7 +352,7 @@ export class LiveCalendarTabs {
       return;
     }
     pill.removeAttribute('hidden');
-    pill.textContent = text;
+    pill.textContent = '';
     pill.setAttribute('value', text);
   }
 
