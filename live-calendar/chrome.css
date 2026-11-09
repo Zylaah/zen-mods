@@ -1,0 +1,152 @@
+#live-calendar-panel {
+  --panel-padding: 0;
+  width: 280px;
+}
+
+.live-calendar-wrapper {
+  display: flex;
+  flex-direction: column;
+  max-height: 380px;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 12px;
+  color: light-dark(#0c0c0d, #f9f9fa);
+}
+
+.live-calendar-header {
+  padding: 10px 12px;
+  border-bottom: 1px solid light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
+  background: light-dark(rgba(0, 0, 0, 0.04), rgba(255, 255, 255, 0.04));
+}
+
+.live-calendar-title {
+  font-weight: 650;
+  font-size: 13px;
+}
+
+.live-calendar-list {
+  overflow: auto;
+  max-height: 280px;
+  padding: 6px;
+}
+
+.live-calendar-empty {
+  padding: 18px 10px;
+  text-align: center;
+  color: light-dark(#737373, #b1b1b1);
+}
+
+.live-calendar-event {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 8px;
+}
+
+.live-calendar-event:hover {
+  background: light-dark(rgba(0, 0, 0, 0.05), rgba(255, 255, 255, 0.06));
+}
+
+.live-calendar-open {
+  appearance: none;
+  -moz-appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  margin: 0;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.live-calendar-when {
+  font-size: 11px;
+  color: light-dark(#5b5b5b, #c7c7c7);
+}
+
+.live-calendar-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.live-calendar-join {
+  appearance: none;
+  -moz-appearance: none;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: light-dark(#0c0c0d, #f9f9fa);
+  color: light-dark(#f9f9fa, #0c0c0d);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.live-calendar-add {
+  appearance: none;
+  -moz-appearance: none;
+  align-self: flex-end;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  margin: 4px 12px 12px;
+  padding: 0;
+  border: 1px solid light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
+  border-radius: 50%;
+  --zen-squircle-value: 1;
+  corner-shape: round !important;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background-color: light-dark(rgba(210, 210, 210), rgba(69, 69, 69));
+  color: light-dark(#0c0c0d, #f9f9fa);
+  box-shadow:
+    inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.1)),
+    0px 2px 3px 0px rgba(0, 0, 0, 0.15);
+}
+
+.live-calendar-add:hover {
+  background-color: light-dark(rgba(200, 200, 200), rgba(80, 80, 80));
+}
+
+.live-calendar-pill {
+  pointer-events: none;
+  margin: 0;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 13px;
+  background: light-dark(#0c0c0d, #f9f9fa);
+  color: light-dark(#f9f9fa, #0c0c0d);
+}
+
+.live-calendar-pill[hidden] {
+  display: none !important;
+}
+
+.tabbrowser-tab[zen-essential]:has(.live-calendar-pill) {
+  position: relative;
+}
+
+.tabbrowser-tab[zen-essential] .live-calendar-pill {
+  position: absolute;
+  left: 50%;
+  bottom: 1px;
+  z-index: 5;
+  transform: translateX(-50%);
+  max-width: calc(100% - 2px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
