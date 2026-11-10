@@ -2,7 +2,7 @@
 // @name           Better Media Toolbar
 // @description    Artwork, progress ring, and hover controls on Zen's media cards
 // @author         Zylaah
-// @version        2.1.0
+// @version        2.1.1
 // @namespace      https://github.com/Zylaah/zen-mods
 // ==/UserScript==
 
@@ -17,6 +17,7 @@
 
   const XHTML_NS = "http://www.w3.org/1999/xhtml";
   const SVG_NS = "http://www.w3.org/2000/svg";
+  const GLOW_PREF = "bmt.glow";
   const ARTWORK_WAIT_MS = 1500;
   const FLIP_OUT_MS = 200;
   const FLIP_IN_MS = 380;
@@ -813,6 +814,29 @@
     });
   }
 
+  function glowOn() {
+    try {
+      return Services.prefs.getBoolPref(GLOW_PREF, true);
+    } catch (err) {
+      return true;
+    }
+  }
+
+  function watchPref(name, fn) {
+    Services.prefs.addObserver(name, fn);
+    window.addEventListener(
+      "unload",
+      () => {
+        try {
+          Services.prefs.removeObserver(name, fn);
+        } catch (err) {
+          noteError("glow pref", err);
+        }
+      },
+      { once: true }
+    );
+  }
+
   function loadGlowEngine() {
     if (window.BmtGlow?.create) return true;
     try {
@@ -824,7 +848,6 @@
   }
 
   function watchUltraGlow(bar) {
-    if (!loadGlowEngine()) return;
     const glows = new Map();
     const dark = () => !document.documentElement.hasAttribute("bmt-light");
 
@@ -837,8 +860,14 @@
     };
 
     const sync = () => {
+      const on = glowOn();
+      document.documentElement.toggleAttribute("bmt-glow", on);
+      if (on && !loadGlowEngine()) {
+        document.documentElement.removeAttribute("bmt-glow");
+        return;
+      }
       const seen = new Set();
-      for (const card of bar.querySelectorAll(".zen-media-card")) {
+      for (const card of on ? bar.querySelectorAll(".zen-media-card") : []) {
         seen.add(card);
         let glow = glows.get(card);
         if (!glow) {
@@ -877,6 +906,7 @@
       attributes: true,
       attributeFilter: ["bmt-light"],
     });
+    watchPref(GLOW_PREF, sync);
     sync();
   }
 

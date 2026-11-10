@@ -1,0 +1,8 @@
+[
+  {
+    "type": "checkbox",
+    "label": "Glow along the bottom of a playing card",
+    "property": "bmt.glow",
+    "defaultValue": true
+  }
+]

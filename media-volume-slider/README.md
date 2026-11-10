@@ -8,7 +8,7 @@ Rebuilds Zen’s sidebar media cards in the style of [Zia](https://github.com/z1
 - **Progress ring** — a thin ring around the art follows playback, tinted from the artwork. It starts at the top and runs clockwise.
 - **Sound bars** — the mute button is a set of bars. They move while audio is playing and collapse to dots when muted.
 - **Collapsed card** — title, artist, artwork, and mute at the end of the title. Hover (or keyboard focus) opens the scrubber, elapsed time, time remaining, and previous, play, next, picture-in-picture, and close. Play sits between previous and next.
-- **Glow** — while the card is hovered and playing, a coloured beam runs along its bottom edge, in colours taken from the artwork. The beam follows the card's own corner radius.
+- **Glow** — while the card is hovered and playing, a coloured beam runs along its bottom edge, in colours taken from the artwork. The beam follows the card's own corner radius. Turn it off under the mod's Sine settings.
 - **Live** — streams without a duration, and a Kick channel page, show a LIVE mark instead of the scrubber. The ring stays whole, in the artwork's colours.
 - **Stack** — several sessions still peek behind the front card. The peek is a sliver until the toolbar is open. The peek stays filled while the front card is leaving.
 - Cards can’t be dragged out of the sidebar. The card also stays up when its video is in picture-in-picture, unless that tab is the one in front or the window is fullscreen.

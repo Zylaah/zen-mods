@@ -97,6 +97,10 @@
       opacity: 1;
     }
 
+    :root:not([bmt-glow]) &::before {
+      display: none !important;
+    }
+
     &:has(> .bmt-glow) {
       --bmt-glow-z: -1;
     }

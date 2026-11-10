@@ -1,5 +1,5 @@
 {
-  "version": "2.1.0",
+  "version": "2.1.1",
   "id": "media-volume-slider",
   "name": "Better Media Toolbar",
   "description": "Artwork, a progress ring, hover controls, and a playing glow on Zen's media cards",
@@ -11,6 +11,7 @@
   "style": {
     "chrome": "chrome.css"
   },
+  "preferences": "preferences.json",
   "homepage": "https://github.com/Zylaah/zen-mods/tree/main/media-volume-slider",
   "readme": "https://raw.githubusercontent.com/Zylaah/zen-mods/refs/heads/main/media-volume-slider/README.md",
   "author": "Zylaah",
