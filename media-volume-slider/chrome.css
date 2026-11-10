@@ -537,6 +537,19 @@
   }
 }
 
+/* Zen's own fade for a leaving card. The doubled id outranks the open-stack
+   rules, whose spring on transform and height would replace it. */
+#zen-media-controls-toolbar#zen-media-controls-toolbar .zen-media-card:is([zen-hiding], [zen-removing]) {
+  transition:
+    translate 0.3s var(--bmt-ease),
+    opacity 0.3s var(--bmt-ease),
+    filter 0.3s var(--bmt-ease) !important;
+
+  & > .bmt-glow {
+    display: none !important;
+  }
+}
+
 .bmt-glow {
   /* written every frame by glow.js; these are the first-frame values */
   --zg-w: 1;

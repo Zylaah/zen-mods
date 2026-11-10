@@ -848,7 +848,8 @@
         }
         tint(card, glow).catch((err) => noteError("glow colours", err));
         glow.setDark(dark());
-        glow.setPlaying(card.classList.contains("playing") && card.matches(":hover"));
+        const leaving = card.hasAttribute("zen-hiding") || card.hasAttribute("zen-removing");
+        glow.setPlaying(!leaving && card.classList.contains("playing") && card.matches(":hover"));
       }
       for (const [card, glow] of glows) {
         if (seen.has(card)) continue;
@@ -861,7 +862,7 @@
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["class", "bmt-art", "bmt-favicon"],
+      attributeFilter: ["class", "bmt-art", "bmt-favicon", "zen-hiding", "zen-removing"],
     });
     let pending = 0;
     const later = () => {
