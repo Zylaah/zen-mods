@@ -21,6 +21,32 @@
   --bmt-button-hover: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.12));
   --bmt-glow-a: rgb(90, 185, 245);
   --bmt-glow-b: rgb(123, 77, 255);
+  --bmt-icon-play: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23fff' fill-opacity='.92'%3E%3Cpath d='M6 4v16a1 1 0 0 0 1.524 .852l13 -8a1 1 0 0 0 0 -1.704l-13 -8a1 1 0 0 0 -1.524 .852z'/%3E%3C/svg%3E");
+  --bmt-icon-pause: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23fff' fill-opacity='.92'%3E%3Cpath d='M9 4h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h2a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2z'/%3E%3Cpath d='M17 4h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h2a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2z'/%3E%3C/svg%3E");
+  --bmt-icon-prev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23fff' fill-opacity='.92'%3E%3Cpath d='M19.496 4.136l-12 7a1 1 0 0 0 0 1.728l12 7a1 1 0 0 0 1.504 -.864v-14a1 1 0 0 0 -1.504 -.864z'/%3E%3Cpath d='M4 4a1 1 0 0 1 .993 .883l.007 .117v14a1 1 0 0 1 -1.993 .117l-.007 -.117v-14a1 1 0 0 1 1 -1z'/%3E%3C/svg%3E");
+  --bmt-icon-next: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23fff' fill-opacity='.92'%3E%3Cpath d='M3 5v14a1 1 0 0 0 1.504 .864l12 -7a1 1 0 0 0 0 -1.728l-12 -7a1 1 0 0 0 -1.504 .864z'/%3E%3Cpath d='M20 4a1 1 0 0 1 .993 .883l.007 .117v14a1 1 0 0 1 -1.993 .117l-.007 -.117v-14a1 1 0 0 1 1 -1z'/%3E%3C/svg%3E");
+  --bmt-icon-pip: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-opacity='.92' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11 19h-6a2 2 0 0 1 -2 -2v-10a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v4'/%3E%3Cpath d='M14 15a1 1 0 0 1 1 -1h5a1 1 0 0 1 1 1v3a1 1 0 0 1 -1 1h-5a1 1 0 0 1 -1 -1l0 -3'/%3E%3C/svg%3E");
+  --bmt-icon-close: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-opacity='.92' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 6l-12 12'/%3E%3Cpath d='M6 6l12 12'/%3E%3C/svg%3E");
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([style*="--bmt-fg"]) {
+    --bmt-icon-play: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23141416' fill-opacity='.88'%3E%3Cpath d='M6 4v16a1 1 0 0 0 1.524 .852l13 -8a1 1 0 0 0 0 -1.704l-13 -8a1 1 0 0 0 -1.524 .852z'/%3E%3C/svg%3E");
+    --bmt-icon-pause: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23141416' fill-opacity='.88'%3E%3Cpath d='M9 4h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h2a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2z'/%3E%3Cpath d='M17 4h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h2a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2z'/%3E%3C/svg%3E");
+    --bmt-icon-prev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23141416' fill-opacity='.88'%3E%3Cpath d='M19.496 4.136l-12 7a1 1 0 0 0 0 1.728l12 7a1 1 0 0 0 1.504 -.864v-14a1 1 0 0 0 -1.504 -.864z'/%3E%3Cpath d='M4 4a1 1 0 0 1 .993 .883l.007 .117v14a1 1 0 0 1 -1.993 .117l-.007 -.117v-14a1 1 0 0 1 1 -1z'/%3E%3C/svg%3E");
+    --bmt-icon-next: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23141416' fill-opacity='.88'%3E%3Cpath d='M3 5v14a1 1 0 0 0 1.504 .864l12 -7a1 1 0 0 0 0 -1.728l-12 -7a1 1 0 0 0 -1.504 .864z'/%3E%3Cpath d='M20 4a1 1 0 0 1 .993 .883l.007 .117v14a1 1 0 0 1 -1.993 .117l-.007 -.117v-14a1 1 0 0 1 1 -1z'/%3E%3C/svg%3E");
+    --bmt-icon-pip: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23141416' stroke-opacity='.88' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11 19h-6a2 2 0 0 1 -2 -2v-10a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v4'/%3E%3Cpath d='M14 15a1 1 0 0 1 1 -1h5a1 1 0 0 1 1 1v3a1 1 0 0 1 -1 1h-5a1 1 0 0 1 -1 -1l0 -3'/%3E%3C/svg%3E");
+    --bmt-icon-close: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23141416' stroke-opacity='.88' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 6l-12 12'/%3E%3Cpath d='M6 6l12 12'/%3E%3C/svg%3E");
+  }
+}
+
+:root[bmt-light] {
+  --bmt-icon-play: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23141416' fill-opacity='.88'%3E%3Cpath d='M6 4v16a1 1 0 0 0 1.524 .852l13 -8a1 1 0 0 0 0 -1.704l-13 -8a1 1 0 0 0 -1.524 .852z'/%3E%3C/svg%3E");
+  --bmt-icon-pause: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23141416' fill-opacity='.88'%3E%3Cpath d='M9 4h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h2a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2z'/%3E%3Cpath d='M17 4h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h2a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2z'/%3E%3C/svg%3E");
+  --bmt-icon-prev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23141416' fill-opacity='.88'%3E%3Cpath d='M19.496 4.136l-12 7a1 1 0 0 0 0 1.728l12 7a1 1 0 0 0 1.504 -.864v-14a1 1 0 0 0 -1.504 -.864z'/%3E%3Cpath d='M4 4a1 1 0 0 1 .993 .883l.007 .117v14a1 1 0 0 1 -1.993 .117l-.007 -.117v-14a1 1 0 0 1 1 -1z'/%3E%3C/svg%3E");
+  --bmt-icon-next: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23141416' fill-opacity='.88'%3E%3Cpath d='M3 5v14a1 1 0 0 0 1.504 .864l12 -7a1 1 0 0 0 0 -1.728l-12 -7a1 1 0 0 0 -1.504 .864z'/%3E%3Cpath d='M20 4a1 1 0 0 1 .993 .883l.007 .117v14a1 1 0 0 1 -1.993 .117l-.007 -.117v-14a1 1 0 0 1 1 -1z'/%3E%3C/svg%3E");
+  --bmt-icon-pip: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23141416' stroke-opacity='.88' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11 19h-6a2 2 0 0 1 -2 -2v-10a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v4'/%3E%3Cpath d='M14 15a1 1 0 0 1 1 -1h5a1 1 0 0 1 1 1v3a1 1 0 0 1 -1 1h-5a1 1 0 0 1 -1 -1l0 -3'/%3E%3C/svg%3E");
+  --bmt-icon-close: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23141416' stroke-opacity='.88' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 6l-12 12'/%3E%3Cpath d='M6 6l12 12'/%3E%3C/svg%3E");
 }
 
 #zen-media-controls-toolbar {
@@ -471,39 +497,28 @@
     }
   }
 
-.zen-media-playpause-button {
-    list-style-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22context-fill%22%20fill-opacity%3D%22context-fill-opacity%22%3E%3Cpath%20d%3D%22M6%204v16a1%201%200%200%200%201.524%20.852l13%20-8a1%201%200%200%200%200%20-1.704l-13%20-8a1%201%200%200%200%20-1.524%20.852z%22%2F%3E%3C%2Fsvg%3E%0A") !important;
+  .zen-media-playpause-button {
+    list-style-image: var(--bmt-icon-play) !important;
   }
 
   .zen-media-card.playing .zen-media-playpause-button {
-    list-style-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22context-fill%22%20fill-opacity%3D%22context-fill-opacity%22%3E%3Cpath%20d%3D%22M9%204h-2a2%202%200%200%200%20-2%202v12a2%202%200%200%200%202%202h2a2%202%200%200%200%202%20-2v-12a2%202%200%200%200%20-2%20-2z%22%2F%3E%3Cpath%20d%3D%22M17%204h-2a2%202%200%200%200%20-2%202v12a2%202%200%200%200%202%202h2a2%202%200%200%200%202%20-2v-12a2%202%200%200%200%20-2%20-2z%22%2F%3E%3C%2Fsvg%3E%0A") !important;
+    list-style-image: var(--bmt-icon-pause) !important;
   }
 
   .zen-media-previoustrack-button {
-    list-style-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22context-fill%22%20fill-opacity%3D%22context-fill-opacity%22%3E%3Cpath%20d%3D%22M19.496%204.136l-12%207a1%201%200%200%200%200%201.728l12%207a1%201%200%200%200%201.504%20-.864v-14a1%201%200%200%200%20-1.504%20-.864z%22%2F%3E%3Cpath%20d%3D%22M4%204a1%201%200%200%201%20.993%20.883l.007%20.117v14a1%201%200%200%201%20-1.993%20.117l-.007%20-.117v-14a1%201%200%200%201%201%20-1z%22%2F%3E%3C%2Fsvg%3E%0A") !important;
+    list-style-image: var(--bmt-icon-prev) !important;
   }
 
   .zen-media-nexttrack-button {
-    list-style-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22context-fill%22%20fill-opacity%3D%22context-fill-opacity%22%3E%3Cpath%20d%3D%22M3%205v14a1%201%200%200%200%201.504%20.864l12%20-7a1%201%200%200%200%200%20-1.728l-12%20-7a1%201%200%200%200%20-1.504%20.864z%22%2F%3E%3Cpath%20d%3D%22M20%204a1%201%200%200%201%20.993%20.883l.007%20.117v14a1%201%200%200%201%20-1.993%20.117l-.007%20-.117v-14a1%201%200%200%201%201%20-1z%22%2F%3E%3C%2Fsvg%3E%0A") !important;
+    list-style-image: var(--bmt-icon-next) !important;
   }
 
   .zen-media-pip-button {
-    list-style-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22context-fill%22%20stroke-opacity%3D%22context-fill-opacity%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M11%2019h-6a2%202%200%200%201%20-2%20-2v-10a2%202%200%200%201%202%20-2h14a2%202%200%200%201%202%202v4%22%2F%3E%3Cpath%20d%3D%22M14%2015a1%201%200%200%201%201%20-1h5a1%201%200%200%201%201%201v3a1%201%200%200%201%20-1%201h-5a1%201%200%200%201%20-1%20-1l0%20-3%22%2F%3E%3C%2Fsvg%3E%0A") !important;
+    list-style-image: var(--bmt-icon-pip) !important;
   }
 
   .zen-media-close-button {
-    list-style-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22context-fill%22%20stroke-opacity%3D%22context-fill-opacity%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M18%206l-12%2012%22%2F%3E%3Cpath%20d%3D%22M6%206l12%2012%22%2F%3E%3C%2Fsvg%3E") !important;
-  }
-
-  :is(.zen-media-playpause-button, .zen-media-previoustrack-button, .zen-media-nexttrack-button, .zen-media-pip-button, .zen-media-close-button) > .toolbarbutton-icon {
-    -moz-context-properties: fill, fill-opacity, stroke, stroke-opacity;
-    fill: currentColor !important;
-    fill-opacity: 1 !important;
-  }
-
-  .zen-media-playpause-button > .toolbarbutton-icon {
-    color: var(--bmt-fg) !important;
-    fill: var(--bmt-fg) !important;
+    list-style-image: var(--bmt-icon-close) !important;
   }
 }
 
