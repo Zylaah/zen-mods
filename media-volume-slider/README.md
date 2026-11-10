@@ -5,13 +5,13 @@ Rebuilds Zen’s sidebar media cards in the style of [Zia](https://github.com/z1
 ## Features
 
 - **Artwork tile** — album art sits in the card, with the site icon or a letter when a track has none. A new picture flips into place.
-- **Progress ring** — a thin ring around the art follows playback, tinted from the artwork.
-- **Glow** — hovering a card washes it with two colours sampled from the art.
+- **Progress ring** — a thin ring around the art follows playback, tinted from the artwork. It starts at the top and runs clockwise.
 - **Sound bars** — the mute button is a set of bars. They move while audio is playing and collapse to dots when muted.
-- **Collapsed card** — title, artist, artwork, and mute. Hover (or keyboard focus) opens the scrubber, elapsed time, time remaining, and previous / next / picture-in-picture / close.
-- **Live** — streams without a duration show a LIVE mark instead of the scrubber.
-- **Stack** — several sessions still peek behind the front card. The peek is a sliver until the toolbar is open.
-- Cards can’t be dragged out of the sidebar.
+- **Collapsed card** — title, artist, artwork, and mute at the end of the title. Hover (or keyboard focus) opens the scrubber, elapsed time, time remaining, and previous, play, next, picture-in-picture, and close. Play sits between previous and next.
+- **Glow** — while the card is hovered and playing, a coloured beam runs along its bottom edge, in colours taken from the artwork. The beam follows the card's own corner radius.
+- **Live** — streams without a duration, and a Kick channel page, show a LIVE mark instead of the scrubber. The ring stays whole, in the artwork's colours.
+- **Stack** — several sessions still peek behind the front card. The peek is a sliver until the toolbar is open. The peek stays filled while the front card is leaving.
+- Cards can’t be dragged out of the sidebar. The card also stays up when its video is in picture-in-picture, unless that tab is the one in front or the window is fullscreen.
 
 ## Requirements
 
@@ -35,7 +35,7 @@ Rebuilds Zen’s sidebar media cards in the style of [Zia](https://github.com/z1
 
 ## How it works
 
-- **UI** runs in browser chrome via `media-volume-slider.uc.js` on `browser.xhtml`, with `chrome.css`
+- **UI** runs in browser chrome via `media-volume-slider.uc.js` on `browser.xhtml`, with `chrome.css`. The bottom-edge beam is `media-glow.js`.
 - Hooks the media card’s `updateIcon` and `updatePosition` so each card gets artwork, a progress ring, and the remaining time
 - Samples artwork (and favicons) on a canvas for the glow, the ring, and the mute bars
 - Tints the card from the sidebar background so it sits in the same paint as the rest of the sidebar

@@ -1,8 +1,8 @@
 {
-  "version": "2.0.0",
+  "version": "2.1.0",
   "id": "media-volume-slider",
   "name": "Better Media Toolbar",
-  "description": "Artwork, a progress ring, and hover controls on Zen's media cards",
+  "description": "Artwork, a progress ring, hover controls, and a playing glow on Zen's media cards",
   "scripts": {
     "media-volume-slider.uc.js": {
       "include": ["chrome://browser/content/browser.xhtml"]

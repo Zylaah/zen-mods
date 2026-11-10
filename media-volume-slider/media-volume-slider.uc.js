@@ -2,12 +2,12 @@
 // @name           Better Media Toolbar
 // @description    Artwork, progress ring, and hover controls on Zen's media cards
 // @author         Zylaah
-// @version        2.0.0
+// @version        2.1.0
 // @namespace      https://github.com/Zylaah/zen-mods
 // ==/UserScript==
 
 /* eslint-env es6, browser */
-/* global gBrowser */
+/* global gBrowser, Services */
 
 (function () {
   "use strict";
@@ -380,9 +380,15 @@
     const gradient = make("linearGradient", { id, x1: "0", y1: "0", x2: "1", y2: "1" }, make("defs", {}, svg));
     make("stop", { offset: "0", style: "stop-color: var(--bmt-glow-a)" }, gradient);
     make("stop", { offset: "1", style: "stop-color: var(--bmt-glow-b)" }, gradient);
-    const shape = { x: "1", y: "1", width: "44", height: "44", rx: "10", fill: "none", "stroke-width": "2", pathLength: "100" };
-    make("rect", { ...shape, class: "bmt-ring-track" }, svg);
-    make("rect", {
+    // Starts at the top and runs clockwise. Round, to match the artwork tile.
+    const shape = {
+      d: "M23 1 L35 1 A10 10 0 0 1 45 11 L45 35 A10 10 0 0 1 35 45 L11 45 A10 10 0 0 1 1 35 L1 11 A10 10 0 0 1 11 1 Z",
+      fill: "none",
+      "stroke-width": "2",
+      pathLength: "100",
+    };
+    make("path", { ...shape, class: "bmt-ring-track" }, svg);
+    make("path", {
       ...shape,
       class: "bmt-ring-fill",
       stroke: `url(#${id})`,
@@ -504,27 +510,22 @@
       swap();
       return;
     }
+    // One animation, picture swapped on a timer. Waiting on the first half's
+    // finished promise can leave the picture edge-on if Firefox never resolves it.
     button.__bmtFlip?.cancel();
-    const turnAway = icon.animate(
-      [{ transform: "perspective(240px) rotateY(0deg)" }, { transform: "perspective(240px) rotateY(90deg)" }],
-      { duration: FLIP_OUT_MS, easing: "cubic-bezier(0.55, 0, 1, 0.45)", fill: "forwards" }
+    clearTimeout(button.__bmtFlipSwap);
+    const half = FLIP_OUT_MS / (FLIP_OUT_MS + FLIP_IN_MS);
+    button.__bmtFlip = icon.animate(
+      [
+        { offset: 0, transform: "perspective(240px) rotateY(0deg)", easing: "cubic-bezier(0.55, 0, 1, 0.45)" },
+        { offset: half, transform: "perspective(240px) rotateY(90deg)" },
+        { offset: half, transform: "perspective(240px) rotateY(-90deg)", easing: "cubic-bezier(0.2, 0.8, 0.3, 1)" },
+        { offset: half + 0.75 * (1 - half), transform: "perspective(240px) rotateY(8deg)", easing: "ease-in-out" },
+        { offset: 1, transform: "perspective(240px) rotateY(0deg)" },
+      ],
+      { duration: FLIP_OUT_MS + FLIP_IN_MS }
     );
-    button.__bmtFlip = turnAway;
-    turnAway.finished
-      .then(() => {
-        swap();
-        const turnBack = icon.animate(
-          [
-            { transform: "perspective(240px) rotateY(-90deg)" },
-            { transform: "perspective(240px) rotateY(8deg)", offset: 0.75 },
-            { transform: "perspective(240px) rotateY(0deg)" },
-          ],
-          { duration: FLIP_IN_MS, easing: "cubic-bezier(0.2, 0.8, 0.3, 1)" }
-        );
-        button.__bmtFlip = turnBack;
-        turnAway.cancel();
-      })
-      .catch(() => {});
+    button.__bmtFlipSwap = setTimeout(swap, FLIP_OUT_MS);
   }
 
   function isStandInArtwork(src) {
@@ -547,6 +548,90 @@
     return [...usable].sort((a, b) => area(b) - area(a))[0]?.src || "";
   }
 
+  const EMOJI =
+    /(?:[#*0-9]\uFE0F?\u20E3|\p{Regional_Indicator}{2}|(?:\p{Emoji_Presentation}|\p{Extended_Pictographic}\uFE0F)\p{Emoji_Modifier}?[\u{E0020}-\u{E007F}]*(?:\u200D\p{Extended_Pictographic}\uFE0F?\p{Emoji_Modifier}?)*)/gu;
+
+  function withoutEmoji(text) {
+    const bare = String(text || "").replace(EMOJI, " ").replace(/\s{2,}/g, " ").trim();
+    return bare || text;
+  }
+
+  function dropCardEmoji(card) {
+    for (const label of [card.titleEl, card.artistEl]) {
+      if (!label) continue;
+      const next = withoutEmoji(label.textContent);
+      if (next !== label.textContent) label.textContent = next;
+    }
+  }
+
+  function markLiveStream(card) {
+    const element = card.element;
+    const browser = card.browser;
+    if (!element || !browser) return;
+    let host = "";
+    let path = "";
+    try {
+      host = browser.currentURI?.host || "";
+      path = browser.currentURI?.filePath || "";
+    } catch (err) {
+      host = "";
+    }
+    const kickChannel = /^(www\.)?kick\.com$/.test(host) && /^\/[\w-]+\/?$/.test(path);
+    element.toggleAttribute("bmt-live", kickChannel);
+  }
+
+  function dressCardIcon(card) {
+    dropCardEmoji(card);
+    if (card.element) card.element.__bmtCard = card;
+    const button = card.focusButton;
+    if (!button) return;
+
+    let art = "";
+    try {
+      art = bestArtwork(card.controller?.getMetadata?.()?.artwork);
+    } catch (err) {
+      noteError("artwork", err);
+    }
+
+    ensureRing(button);
+    if (art) {
+      const previous = button.getAttribute("bmt-art");
+      button.setAttribute("bmt-art", art);
+      const showArt = () => button.style.setProperty("--bmt-media-art", `url("${art.replace(/"/g, "%22")}")`);
+      if (previous && previous !== art) flipArtwork(button, showArt);
+      else showArt();
+    } else {
+      button.removeAttribute("bmt-art");
+      button.style.removeProperty("--bmt-media-art");
+    }
+    showFaviconTile(card, button, art);
+  }
+
+  function keepCardsWithPip() {
+    const front = window.gZenMediaController?.frontCard;
+    const proto = front && Object.getPrototypeOf(front);
+    const desc = proto && Object.getOwnPropertyDescriptor(proto, "shouldBeVisible");
+    if (!desc?.get || desc.get.__bmt) return;
+    const original = desc.get;
+    const patched = function () {
+      try {
+        if (
+          !this.isSharing &&
+          this.controller?.isBeingUsedInPIPModeOrFullscreen &&
+          !document.fullscreenElement &&
+          !window.fullScreen
+        ) {
+          return gBrowser.selectedBrowser.browserId !== this.browser.browserId;
+        }
+      } catch (err) {
+        noteError("pip", err);
+      }
+      return original.call(this);
+    };
+    patched.__bmt = true;
+    Object.defineProperty(proto, "shouldBeVisible", { ...desc, get: patched });
+  }
+
   function useMediaArtwork() {
     const front = window.gZenMediaController?.frontCard;
     const proto = front && Object.getPrototypeOf(front);
@@ -562,6 +647,7 @@
           if (this.element) this.element.__bmtCard = this;
           watchTimeLeft(this);
           showTimeLeft(this);
+          markLiveStream(this);
         } catch (err) {
           noteError("updatePosition", err);
         }
@@ -572,33 +658,16 @@
     const originalIcon = proto.updateIcon;
     const patched = function () {
       originalIcon.call(this);
-      const button = this.focusButton;
-      if (this.element) this.element.__bmtCard = this;
-      if (!button) return;
-
-      let art = "";
       try {
-        art = bestArtwork(this.controller?.getMetadata?.()?.artwork);
+        dressCardIcon(this);
       } catch (err) {
         noteError("artwork", err);
       }
-
-      ensureRing(button);
-      if (art) {
-        const previous = button.getAttribute("bmt-art");
-        button.setAttribute("bmt-art", art);
-        const showArt = () => button.style.setProperty("--bmt-media-art", `url("${art.replace(/"/g, "%22")}")`);
-        if (previous && previous !== art) flipArtwork(button, showArt);
-        else showArt();
-      } else {
-        button.removeAttribute("bmt-art");
-        button.style.removeProperty("--bmt-media-art");
-      }
-      showFaviconTile(this, button, art);
     };
     patched.__bmt = true;
     proto.updateIcon = patched;
 
+    keepCardsWithPip();
     try {
       front.updateIcon();
       front.updatePosition?.();
@@ -617,7 +686,7 @@
       for (const card of bar.querySelectorAll(".zen-media-card")) updateCardGlow(card);
     };
     new MutationObserver((records) => {
-      if (records.every((record) => record.target.closest?.(".bmt-ring"))) return;
+      if (records.every((record) => record.target.closest?.(".bmt-ring, .bmt-glow"))) return;
       if (!frame) frame = requestAnimationFrame(refresh);
     }).observe(bar, {
       subtree: true,
@@ -644,6 +713,157 @@
     });
   }
 
+  function rgbToHsl(r, g, b) {
+    r /= 255;
+    g /= 255;
+    b /= 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    if (max === min) return [0, 0, l];
+    const d = max - min;
+    const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    const h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return [h / 6, s, l];
+  }
+
+  function hslToRgb(h, s, l) {
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    const channel = (t) => {
+      t = (t + 1) % 1;
+      const v = t < 1 / 6 ? p + (q - p) * 6 * t : t < 1 / 2 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p;
+      return Math.round(v * 255);
+    };
+    return [channel(h + 1 / 3), channel(h), channel(h - 1 / 3)];
+  }
+
+  const artPalettes = new Map();
+
+  function readArtPalette(url) {
+    return new Promise((resolve) => {
+      if (!url) {
+        resolve(null);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const size = 32;
+          const canvas = document.createElementNS(XHTML_NS, "canvas");
+          canvas.width = size;
+          canvas.height = size;
+          const ctx = canvas.getContext("2d", { willReadFrequently: true });
+          ctx.drawImage(img, 0, 0, size, size);
+          const { data } = ctx.getImageData(0, 0, size, size);
+          const bins = Array.from({ length: 12 }, (_, hue) => ({ hue, n: 0, r: 0, g: 0, b: 0 }));
+          let seen = 0;
+          for (let i = 0; i < data.length; i += 4) {
+            const [r, g, b, a] = [data[i], data[i + 1], data[i + 2], data[i + 3]];
+            if (a < 128) continue;
+            seen++;
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            const sat = max ? (max - min) / max : 0;
+            if (sat < 0.25 || max < 50) continue;
+            const bin = bins[Math.floor(rgbToHsl(r, g, b)[0] * 12) % 12];
+            bin.n += sat;
+            bin.r += r * sat;
+            bin.g += g * sat;
+            bin.b += b * sat;
+          }
+          const picked = [];
+          for (const bin of bins.filter((b) => b.n > seen * 0.012).sort((x, y) => y.n - x.n)) {
+            if (picked.length < 4 && picked.every((p) => Math.min((p.hue - bin.hue + 12) % 12, (bin.hue - p.hue + 12) % 12) > 1)) {
+              picked.push(bin);
+            }
+          }
+          if (!picked.length) {
+            resolve(null);
+            return;
+          }
+          const glowy = ([h, s, l]) => [h, Math.max(0.7, s), Math.min(0.62, Math.max(0.52, l))];
+          const colors = picked.map((bin) => glowy(rgbToHsl(bin.r / bin.n, bin.g / bin.n, bin.b / bin.n)));
+          if (colors.length === 1) {
+            const [h, s, l] = colors[0];
+            colors.push([(h + 0.07) % 1, s, l], [(h + 0.93) % 1, s, l]);
+          }
+          resolve(colors.map(([h, s, l]) => `rgb(${hslToRgb(h, s, l).join(", ")})`));
+        } catch (err) {
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+  }
+
+  function loadGlowEngine() {
+    if (window.BmtGlow?.create) return true;
+    try {
+      Services.scriptloader.loadSubScript("chrome://sine/content/media-volume-slider/media-glow.js", window);
+    } catch (err) {
+      noteError("glow script", err);
+    }
+    return !!window.BmtGlow?.create;
+  }
+
+  function watchUltraGlow(bar) {
+    if (!loadGlowEngine()) return;
+    const glows = new Map();
+    const dark = () => !document.documentElement.hasAttribute("bmt-light");
+
+    const tint = async (card, glow) => {
+      const url = artUrlOf(card);
+      if (card.__bmtGlowArt === url) return;
+      card.__bmtGlowArt = url;
+      if (!artPalettes.has(url)) artPalettes.set(url, url ? await readArtPalette(url) : null);
+      if (card.__bmtGlowArt === url && glows.get(card) === glow) glow.setColors(artPalettes.get(url));
+    };
+
+    const sync = () => {
+      const seen = new Set();
+      for (const card of bar.querySelectorAll(".zen-media-card")) {
+        seen.add(card);
+        let glow = glows.get(card);
+        if (!glow) {
+          glow = window.BmtGlow.create(card, { dark: dark() });
+          glows.set(card, glow);
+          card.__bmtGlowArt = undefined;
+        }
+        tint(card, glow).catch((err) => noteError("glow colours", err));
+        glow.setDark(dark());
+        glow.setPlaying(card.classList.contains("playing") && card.matches(":hover"));
+      }
+      for (const [card, glow] of glows) {
+        if (seen.has(card)) continue;
+        glow.destroy();
+        glows.delete(card);
+      }
+    };
+
+    new MutationObserver(sync).observe(bar, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class", "bmt-art", "bmt-favicon"],
+    });
+    let pending = 0;
+    const later = () => {
+      pending ||= requestAnimationFrame(() => {
+        pending = 0;
+        sync();
+      });
+    };
+    bar.addEventListener("mouseover", later);
+    bar.addEventListener("mouseout", later);
+    new MutationObserver(sync).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["bmt-light"],
+    });
+    sync();
+  }
+
   // A card can be dragged out of the sidebar like a toolbar button, which
   // takes it away from Zen's player until restart. Nothing on the card is a drag.
   function keepMediaCardsInPlace() {
@@ -665,6 +885,7 @@
     installSoundDefaults();
     watchSidebarPaint();
     watchMedia(bar);
+    watchUltraGlow(bar);
     watchFaviconUpdates();
     keepMediaCardsInPlace();
     return true;
