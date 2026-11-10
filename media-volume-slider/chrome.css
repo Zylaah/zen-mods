@@ -550,6 +550,21 @@
   }
 }
 
+/* Closing a tab takes the card out of the flow at once, and Zen only
+   re-slots the cards behind it after the fade, so they jump. Switching to
+   the tab keeps the card in flow. Stay in the stack until the fade ends. */
+#zen-media-controls-toolbar#zen-media-controls-toolbar .zen-media-card[zen-removing] {
+  position: relative !important;
+  inset: auto !important;
+  transform: translateY(
+      calc(
+        var(--zen-media-card-index, 0) * (100% + var(--zen-media-stack-gap, 6px)) -
+          var(--zen-media-stack-peek, 8px) * var(--zen-media-card-peek-level, 0)
+      )
+    )
+    scale(calc(1 - 0.04 * var(--zen-media-card-peek-level, 0))) !important;
+}
+
 .bmt-glow {
   /* written every frame by glow.js; these are the first-frame values */
   --zg-w: 1;
