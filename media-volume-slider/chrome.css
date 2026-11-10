@@ -49,6 +49,10 @@
   --bmt-icon-close: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23141416' stroke-opacity='.88' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 6l-12 12'/%3E%3Cpath d='M6 6l12 12'/%3E%3C/svg%3E");
 }
 
+.zen-media-notes {
+  display: none !important;
+}
+
 #zen-media-controls-toolbar {
   --bmt-ease: var(--zen-media-stack-easing, cubic-bezier(0.25, 1, 0.5, 1));
   --zen-media-collapsed-height: var(--bmt-card-height) !important;
