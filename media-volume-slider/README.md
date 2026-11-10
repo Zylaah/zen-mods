@@ -45,7 +45,3 @@ Rebuilds Zen’s sidebar media cards in the style of [Zia](https://github.com/z1
 - Targets Zen’s stacked media-card toolbar
 - Picture-in-picture stays available even when Zen would hide it for pages with more than one video
 - Does not change the card’s corner radius or corner shape
-
-## License
-
-MIT
