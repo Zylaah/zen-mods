@@ -1,169 +1,511 @@
-/* Artwork + dim layered on the card background (no ::before — avoids
-   losing a z-index fight with native card chrome). */
-#zen-media-controls-toolbar .zen-media-card {
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
+/* Better Media Toolbar
+   Layout follows Zia's media player. Card corners are Zen's:
+   border-radius and corner-shape are not set on the toolbar or the cards. */
+
+:root {
+  --bmt-spring: cubic-bezier(0.3, 1.4, 0.5, 1);
+  --bmt-spring-time: 0.42s;
+  --bmt-card-height: 64px;
+  --bmt-card-height-open: 124px;
+  --bmt-ring-size: 46px;
+  --bmt-art-size: 38px;
+  --bmt-title-weight: 500;
+  --bmt-artist-weight: 400;
+  --bmt-media-bg: rgba(0, 0, 0, 0.225);
+  --bmt-card-base: light-dark(rgb(235, 235, 235), #1b1b1b);
+  --bmt-fg: light-dark(rgb(20, 20, 22), rgb(255, 255, 255));
+  --bmt-fg-dim: light-dark(rgba(20, 20, 22, 0.62), rgba(255, 255, 255, 0.65));
+  --bmt-track: light-dark(rgba(0, 0, 0, 0.16), rgba(255, 255, 255, 0.2));
+  --bmt-ring-track: light-dark(rgba(0, 0, 0, 0.14), rgba(255, 255, 255, 0.14));
+  --bmt-hairline: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.07));
+  --bmt-button-hover: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.12));
+  --bmt-glow-a: rgb(90, 185, 245);
+  --bmt-glow-b: rgb(123, 77, 255);
 }
 
-:root:not([zen-library-open], [zen-library-open-compact])
-  #zen-media-controls-toolbar:is(:hover, [zen-volume-open])
-  .zen-media-card.has-artwork.playing {
-  background-image:
-    linear-gradient(
-      light-dark(rgba(255, 255, 255, 0.7), rgba(0, 0, 0, 0.9)),
-      light-dark(rgba(255, 255, 255, 0.7), rgba(0, 0, 0, 0.9))
-    ),
-    var(--zen-media-artwork-bg) !important;
+#zen-media-controls-toolbar {
+  --bmt-ease: var(--zen-media-stack-easing, cubic-bezier(0.25, 1, 0.5, 1));
+  --zen-media-collapsed-height: var(--bmt-card-height) !important;
+
+  .zen-media-card {
+    --bmt-glow-a: rgb(90, 185, 245);
+    --bmt-glow-b: rgb(123, 77, 255);
+
+    --zen-sidebar-notification-bg: rgb(0, 0, 0);
+
+    background-color: var(--bmt-rest, var(--bmt-media-bg)) !important;
+    background-image: none !important;
+    isolation: isolate;
+    outline: none !important;
+    box-shadow: inset 0 0 0 1px var(--bmt-hairline) !important;
+    padding: 9px 10px !important;
+    box-sizing: border-box !important;
+    height: var(--bmt-card-height) !important;
+    transition:
+      transform var(--bmt-spring-time) var(--bmt-spring),
+      opacity 0.3s var(--bmt-ease),
+      filter 0.3s var(--bmt-ease),
+      height var(--bmt-spring-time) var(--bmt-spring),
+      background-color 0.3s var(--bmt-ease) !important;
+
+    &::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      border-radius: inherit;
+      corner-shape: inherit;
+      pointer-events: none;
+      background:
+        radial-gradient(170px 110px at 16px 6px, color-mix(in srgb, var(--bmt-glow-a) 32%, transparent), transparent 72%),
+        radial-gradient(220px 120px at 60% -40px, color-mix(in srgb, var(--bmt-glow-b) 16%, transparent), transparent 75%);
+      opacity: 0;
+      transition: opacity 0.3s var(--bmt-ease);
+    }
+
+    &:is(:hover, :focus-within)::before {
+      opacity: 1;
+    }
+
+    &[zen-reindexing] {
+      transition: none !important;
+    }
+
+    &[bmt-glow-pending] {
+      --bmt-glow-a: transparent;
+      --bmt-glow-b: transparent;
+    }
+
+    & .zen-media-info-vbox::before {
+      display: none !important;
+    }
+  }
+
+  .zen-media-main-vbox {
+    height: 100% !important;
+    align-content: center;
+    display: grid !important;
+    grid-template-columns: var(--bmt-ring-size) minmax(0, 1fr) auto auto auto auto;
+    grid-template-rows: auto auto auto;
+    column-gap: 0;
+    row-gap: 0;
+    align-items: center;
+  }
+
+  .zen-media-main-vbox > vbox,
+  .zen-media-info-container,
+  .zen-media-buttons-hbox,
+  .zen-media-controls-hbox,
+  .zen-media-playback-buttons {
+    display: contents !important;
+  }
+
+  /* The title row is a show-on-hover box. Flattening it is not enough if
+     that box's opacity still groups its children, so keep the title shown. */
+  .zen-media-info-container,
+  .zen-media-info-vbox {
+    opacity: 1 !important;
+    max-height: none !important;
+    transform: none !important;
+    filter: none !important;
+    pointer-events: auto !important;
+  }
+
+  .zen-media-focus-button {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center !important;
+    position: relative;
+    width: var(--bmt-ring-size) !important;
+    height: var(--bmt-ring-size) !important;
+    min-width: var(--bmt-ring-size) !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    justify-content: center !important;
+    align-items: center !important;
+    background: transparent !important;
+
+    & > .toolbarbutton-icon,
+    & image {
+      width: var(--bmt-art-size) !important;
+      height: var(--bmt-art-size) !important;
+      min-width: var(--bmt-art-size) !important;
+      min-height: var(--bmt-art-size) !important;
+      padding: 0 !important;
+      border-radius: 7px !important;
+      transition: opacity 0.2s ease, filter 0.2s ease;
+    }
+
+    & > .bmt-ring {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      pointer-events: none;
+    }
+
+    & .bmt-ring-track {
+      stroke: var(--bmt-ring-track);
+    }
+
+    & .bmt-ring-fill {
+      transition: stroke-dasharray 0.9s linear, opacity 0.2s ease;
+    }
+
+    &:not([bmt-art])[bmt-favicon] > .toolbarbutton-icon,
+    &:not([bmt-art])[bmt-favicon] image {
+      list-style-image: none !important;
+      background:
+        var(--bmt-media-favicon, none) center / 50% no-repeat,
+        var(--bmt-favicon-tint, rgb(44, 44, 46)) !important;
+      transition: background-color 0.3s ease, opacity 0.2s ease, filter 0.2s ease;
+    }
+
+    &:not([bmt-art])[bmt-initial]::before {
+      content: attr(bmt-initial);
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1;
+      color: var(--bmt-fg);
+      opacity: 0.85;
+      font-size: 16px;
+      font-weight: 600;
+      pointer-events: none;
+    }
+
+    &[bmt-art] > .toolbarbutton-icon,
+    &[bmt-art] image {
+      list-style-image: none !important;
+      background: var(--bmt-media-art) center / cover no-repeat !important;
+    }
+
+    &::after {
+      display: none !important;
+    }
+  }
+
+  .zen-media-card[media-position-hidden] .bmt-ring-fill {
+    opacity: 0;
+  }
+
+  .zen-media-card:not(.playing) .zen-media-focus-button :is(image, .toolbarbutton-icon) {
+    opacity: 0.75;
+    filter: saturate(0.75);
+  }
+
+  .zen-media-info-vbox {
+    grid-column: 2 / 6;
+    grid-row: 1;
+    width: auto !important;
+    min-width: 0;
+    padding-inline: 8px 4px;
+    justify-content: center;
+    gap: 2px;
+
+    &::before {
+      display: none !important;
+    }
+
+    & label {
+      min-height: 0 !important;
+      height: auto !important;
+      line-height: 1.25;
+    }
+  }
+
+  .zen-media-title {
+    color: var(--bmt-fg) !important;
+    font-weight: var(--bmt-title-weight) !important;
+    font-size: 1.08em !important;
+  }
+
+  .zen-media-artist {
+    color: var(--bmt-fg-dim) !important;
+    opacity: 1 !important;
+    font-weight: var(--bmt-artist-weight) !important;
+    font-size: 0.95em !important;
+  }
+
+  .zen-media-playpause-button {
+    grid-column: 6;
+    grid-row: 1;
+    transition: opacity 0.2s var(--bmt-ease) !important;
+  }
+
+  .zen-media-progress-hbox {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    display: flex !important;
+    align-items: center !important;
+    gap: 0;
+    height: 0 !important;
+    max-height: none !important;
+    opacity: 0 !important;
+    overflow: hidden !important;
+    transform: none !important;
+    padding: 0 2px !important;
+    margin: 0 !important;
+    pointer-events: none !important;
+    transition:
+      height var(--bmt-spring-time) var(--bmt-spring),
+      margin var(--bmt-spring-time) var(--bmt-spring),
+      opacity 0.25s var(--bmt-ease) !important;
+  }
+
+  .zen-media-card[media-sharing] .zen-media-progress-hbox {
+    display: none !important;
+  }
+
+  .zen-media-card[media-position-hidden]:not([media-sharing]) .zen-media-progress-hbox {
+    & > * {
+      display: none !important;
+    }
+
+    &::before {
+      content: "LIVE";
+      flex: 1;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--bmt-fg-dim);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      background:
+        linear-gradient(
+          to right,
+          var(--bmt-track) calc(50% - 34px),
+          transparent calc(50% - 18px),
+          transparent calc(50% + 18px),
+          var(--bmt-track) calc(50% + 34px)
+        ) center / 100% 4px no-repeat;
+    }
+  }
+
+  .zen-media-current-time,
+  .zen-media-duration {
+    max-width: 0;
+    opacity: 0;
+    overflow: hidden;
+    color: var(--bmt-fg-dim) !important;
+    font-size: 10px !important;
+    font-variant-numeric: tabular-nums;
+    margin: 0 !important;
+    transition:
+      max-width 0.3s var(--bmt-ease),
+      opacity 0.3s var(--bmt-ease),
+      margin 0.3s var(--bmt-ease) !important;
+  }
+
+  .zen-media-progress-bar {
+    --progress-height: 2px;
+    flex: 1;
+    height: var(--progress-height) !important;
+    margin: 0 !important;
+    background-color: transparent !important;
+    transition: height 0.3s var(--bmt-ease) !important;
+
+    &::-moz-range-track {
+      background: var(--bmt-track) !important;
+      height: var(--progress-height) !important;
+    }
+
+    &::-moz-range-progress {
+      background: var(--bmt-fg) !important;
+      box-shadow: none !important;
+      height: var(--progress-height) !important;
+    }
+
+    &::-moz-range-thumb {
+      background: var(--bmt-fg) !important;
+      width: 10px !important;
+      height: 10px !important;
+      transform: scale(0) !important;
+      transition: transform 0.2s var(--bmt-ease) !important;
+    }
+  }
+
+  .zen-media-mute-button { grid-column: 1; grid-row: 3; justify-self: start !important; }
+  .zen-media-previoustrack-button { grid-column: 3; grid-row: 3; }
+  .zen-media-nexttrack-button { grid-column: 4; grid-row: 3; }
+  /* Zen hides picture-in-picture unless the page has exactly one video.
+     The button still picks the main video, so keep it in the row. */
+  .zen-media-pip-button { grid-column: 5; grid-row: 3; display: flex !important; }
+  .zen-media-close-button { grid-column: 6; grid-row: 3; }
+
+  .zen-media-mute-button,
+  .zen-media-previoustrack-button,
+  .zen-media-nexttrack-button,
+  .zen-media-pip-button,
+  .zen-media-close-button {
+    max-height: 0 !important;
+    opacity: 0 !important;
+    overflow: hidden !important;
+    translate: 0 6px;
+    transform: none !important;
+    margin-top: 0 !important;
+    pointer-events: none;
+    transition:
+      max-height var(--bmt-spring-time) var(--bmt-spring),
+      opacity 0.3s var(--bmt-ease),
+      translate var(--bmt-spring-time) var(--bmt-spring),
+      margin var(--bmt-spring-time) var(--bmt-spring) !important;
+  }
+
+  .zen-media-card:not([muted]) .zen-media-mute-button {
+    list-style-image: var(--bmt-sound-still) !important;
+  }
+
+  .zen-media-card.playing:not([muted]) .zen-media-mute-button {
+    list-style-image: var(--bmt-sound-wave) !important;
+  }
+
+  .zen-media-card[muted] .zen-media-mute-button {
+    list-style-image: var(--bmt-sound-muted) !important;
+  }
+
+  .media-device-buttons {
+    grid-column: 3 / -1;
+    grid-row: 1;
+    justify-self: end;
+  }
+
+  .zen-media-card[media-sharing] .media-device-buttons {
+    display: flex !important;
+  }
+
+  /* Several cards open together without the spring, so the top card
+     doesn't bounce. Closing, and a single card growing, still spring. */
+  &:is(:hover, :focus-within):has(.zen-media-card ~ .zen-media-card) .zen-media-card:not([zen-reindexing]) {
+    transition:
+      transform 0.35s var(--bmt-ease),
+      opacity 0.3s var(--bmt-ease),
+      filter 0.3s var(--bmt-ease),
+      height 0.3s var(--bmt-ease),
+      background-color 0.3s var(--bmt-ease) !important;
+  }
+
+  &:is(:hover, :focus-within) {
+    .zen-media-card {
+      height: var(--bmt-card-height-open) !important;
+      background-color: var(--bmt-solid, var(--bmt-card-base)) !important;
+      transition:
+        transform 0.35s var(--bmt-ease),
+        opacity 0.3s var(--bmt-ease),
+        filter 0.3s var(--bmt-ease),
+        height var(--bmt-spring-time) var(--bmt-spring),
+        background-color 0.3s var(--bmt-ease) !important;
+
+      &[zen-reindexing] {
+        transition: none !important;
+      }
+    }
+
+    .zen-media-progress-hbox {
+      height: 16px !important;
+      margin: 8px 0 0 !important;
+      opacity: 1 !important;
+      pointer-events: auto !important;
+    }
+
+    .zen-media-current-time,
+    .zen-media-duration {
+      max-width: 40px;
+      opacity: 1;
+    }
+
+    .zen-media-current-time {
+      margin-inline-end: 7px !important;
+    }
+
+    .zen-media-duration {
+      margin-inline-start: 7px !important;
+    }
+
+    .zen-media-progress-bar {
+      --progress-height: 4px;
+
+      &::-moz-range-thumb {
+        transform: scale(1) !important;
+      }
+    }
+
+    .zen-media-mute-button,
+    .zen-media-previoustrack-button,
+    .zen-media-nexttrack-button,
+    .zen-media-pip-button,
+    .zen-media-close-button {
+      max-height: 30px !important;
+      opacity: 1 !important;
+      translate: 0 0;
+      margin-top: 6px !important;
+      pointer-events: auto;
+    }
+  }
+
+  .toolbarbutton-1 {
+    margin-block: 0 !important;
+    margin-inline: 0 !important;
+    padding: 0 !important;
+    justify-self: center;
+    border-radius: 8px !important;
+    color: var(--bmt-fg) !important;
+    fill: currentColor !important;
+    scale: 1 !important;
+
+    & > .toolbarbutton-icon {
+      width: 28px !important;
+      height: 28px !important;
+      padding: 6px !important;
+      border-radius: 8px !important;
+      background-color: transparent !important;
+    }
+
+    &:hover > .toolbarbutton-icon {
+      background-color: var(--bmt-button-hover) !important;
+    }
+
+    &:active {
+      scale: 1 !important;
+    }
+  }
+
+  .zen-media-playpause-button > .toolbarbutton-icon {
+    color: var(--bmt-fg) !important;
+    fill: var(--bmt-fg) !important;
+  }
 }
 
-/* Keep the stack expanded while the volume popup is open.
-   Avoid padding shorthand — it overrides .zen-media-progress-hbox's
-   padding-top: 0 and nudges pip/close/progress when the slider opens. */
-#zen-media-controls-toolbar[zen-volume-open] .show-on-hover {
-  max-height: 50px !important;
-  padding-block: 5px !important;
-  margin-bottom: 0 !important;
-  opacity: 1 !important;
-  transform: translateY(0) !important;
-  pointer-events: auto !important;
+#zen-media-controls-toolbar:not(:is(:hover, :focus-within)) {
+  & .zen-media-mute-button {
+    grid-column: 6;
+    grid-row: 1;
+    justify-self: center !important;
+    max-height: 30px !important;
+    opacity: 1 !important;
+    translate: 0 0 !important;
+    margin-top: 0 !important;
+    pointer-events: auto !important;
+  }
+
+  & .zen-media-playpause-button {
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
 }
 
-#zen-media-controls-toolbar[zen-volume-open] .zen-media-progress-hbox {
-  padding-top: 0 !important;
-}
-
-#zen-media-controls-toolbar[zen-volume-open] .zen-media-card {
-  transform: none !important;
-  opacity: 1 !important;
-}
-
-#zen-media-controls-toolbar[zen-volume-open] .zen-media-focus-button::after {
-  display: none !important;
-}
-
-#zen-media-controls-toolbar[zen-volume-open] .zen-media-card::after {
-  content: "";
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  height: calc(var(--zen-media-stack-gap, 6px) + var(--zen-media-stack-peek, 8px));
-}
-
-/*
- * Gap-only hover bridge (fixed, out of document flow).
- * Must NOT overlap mute/controls — only the space between toolbar and popup.
- */
-#zen-media-volume-hover-bridge {
-  position: fixed;
-  display: none;
-  z-index: 9998;
-  pointer-events: auto;
-  /* no size/margin contribution */
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-#zen-media-volume-hover-bridge[open] {
-  display: block;
-}
-
-/* Popup sits to the right of the media toolbar.
-   Prefer card theme tokens; JS also copies computed card chrome on open.
-   These nodes are document children — never toolbar flex items — so a
-   toolbox transform cannot capture their position:fixed containing block. */
-:root:is([zen-library-open], [zen-library-open-compact]) #zen-media-volume-slider-popup,
-:root:is([zen-library-open], [zen-library-open-compact]) #zen-media-volume-hover-bridge {
-  display: none !important;
-}
-
-#zen-media-volume-slider-popup {
-  position: fixed;
-  left: 0;
-  top: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  transform: translate(-4px, -50%);
-  transform-origin: 0 50%;
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  z-index: 10000;
-  padding: 10px 12px;
-  border-radius: var(--border-radius-medium);
-  background-color: var(--zen-sidebar-notification-bg);
-  box-shadow: var(--zen-sidebar-notification-shadow);
-  outline: var(--zen-sidebar-notification-outline);
-  outline-offset: -1.5px;
-  color: inherit;
-  transition:
-    opacity 0.15s ease,
-    transform 0.15s ease,
-    visibility 0.15s ease;
-}
-
-#zen-media-volume-slider-popup[open] {
-  opacity: 1;
-  visibility: visible;
-  pointer-events: auto;
-  transform: translate(0, -50%);
-}
-
-/* Tiny pad across the gap only — do not cover toolbar controls */
-#zen-media-volume-slider-popup[open]::before {
-  content: "";
-  position: absolute;
-  right: 100%;
-  top: -8px;
-  bottom: -8px;
-  width: 12px;
-}
-
-#zen-media-volume-slider {
-  --zen-volume-track-height: 4px;
-  appearance: none;
-  display: block;
-  width: 96px;
-  height: calc(var(--zen-volume-track-height) * 4);
-  margin: 0;
-  padding: 0;
-  cursor: pointer;
-  background: transparent;
-}
-
-#zen-media-volume-slider::-moz-range-track {
-  background: var(--zen-toolbar-element-bg, rgba(127, 127, 127, 0.3));
-  border-radius: 999px;
-  height: var(--zen-volume-track-height);
-}
-
-#zen-media-volume-slider::-moz-range-progress {
-  background: color-mix(
-    in srgb,
-    var(--zen-primary-color, #0060df) 70%,
-    light-dark(black, white) 30%
+#zen-media-controls-toolbar:not(:is(:hover, :focus-within)):has(.zen-media-card[stacked-behind]) .zen-media-card[stacked-behind] {
+  mask: linear-gradient(
+    #000 0 calc(var(--zen-media-stack-peek, 8px) * var(--zen-media-card-peek-level, 1) / (1 - 0.04 * var(--zen-media-card-peek-level, 1))),
+    transparent 0
   );
-  border-radius: 999px;
-  height: var(--zen-volume-track-height);
-}
 
-#zen-media-volume-slider::-moz-range-thumb {
-  background: color-mix(
-    in srgb,
-    var(--zen-primary-color, #0060df) 70%,
-    light-dark(black, white) 30%
-  );
-  border: none;
-  width: calc(var(--zen-volume-track-height) * 2);
-  height: calc(var(--zen-volume-track-height) * 2);
-  border-radius: 50%;
-  cursor: pointer;
-}
-
-:root:not([zen-sidebar-expanded="true"]) #zen-media-volume-slider {
-  width: 72px;
+  & .zen-media-main-vbox {
+    opacity: 0 !important;
+  }
 }

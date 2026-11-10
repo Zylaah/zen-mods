@@ -1,1146 +1,687 @@
 // ==UserScript==
 // @name           Better Media Toolbar
-// @description    Volume slider on mute hover and media artwork background on toolbar hover
+// @description    Artwork, progress ring, and hover controls on Zen's media cards
 // @author         Zylaah
-// @version        1.4.5
+// @version        2.0.0
 // @namespace      https://github.com/Zylaah/zen-mods
 // ==/UserScript==
 
 /* eslint-env es6, browser */
-/* global Services, gBrowser */
+/* global gBrowser */
 
 (function () {
   "use strict";
 
-  if (window.__zenMediaVolumeSliderLoaded) return;
-  window.__zenMediaVolumeSliderLoaded = true;
+  if (window.__bmtLoaded) return;
+  window.__bmtLoaded = true;
 
-  const LOG_PREFIX = "[BetterMediaToolbar]";
-  const POPUP_ID = "zen-media-volume-slider-popup";
-  const SLIDER_ID = "zen-media-volume-slider";
-  const BRIDGE_ID = "zen-media-volume-hover-bridge";
-  const ARTWORK_VAR = "--zen-media-artwork-bg";
-  const ARTWORK_CLASS = "has-artwork";
-  const CARD_SELECTOR = ".zen-media-card";
-  const MUTE_SELECTOR = ".zen-media-mute-button";
-  const TOOLBAR_VOLUME_ATTR = "zen-volume-open";
-  const PREF_VOLUMES_BY_ORIGIN = "mod.media-volume-slider.volumes-by-origin";
-  const MAX_STORED_ORIGINS = 100;
-  const HIDE_DELAY_MS = 320;
-  const POPUP_GAP_PX = 4;
-  const INIT_RETRY_MS = 100;
-  const INIT_RETRY_MAX = 80;
-  /** Match ZenMediaController stack limits. */
-  const MAX_STACKED_CARDS = 3;
-  const MAX_PEEK_LEVELS = 2;
+  const XHTML_NS = "http://www.w3.org/1999/xhtml";
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const ARTWORK_WAIT_MS = 1500;
+  const FLIP_OUT_MS = 200;
+  const FLIP_IN_MS = 380;
+  const LONG_MEDIA_SECONDS = 900_000;
 
-  let frameScriptUrl = null;
-  let messageListenersReady = false;
-  let hooksInstalled = false;
-  let initRetryCount = 0;
-  let initRetryTimer = null;
-  let hideTimer = null;
-  let popupOpen = false;
-  let dragging = false;
-  /** @type {Element | null} Active mute button the popup is anchored to */
-  let muteButton = null;
-  /** @type {HTMLElement | null} Card that owns the active mute button */
-  let activeCardEl = null;
-  let popupEl = null;
-  let sliderEl = null;
-  let bridgeEl = null;
-  let toolbarObserver = null;
-  let cardsObserver = null;
-  let layoutObserver = null;
+  const noted = new Set();
+  const mediaColorCache = new Map();
+  const soundBarCache = new Map();
+  const faviconTints = new Map();
 
-  /** Per-browser last unmuted volume for this session. */
-  /** @type {WeakMap<object, number>} */
-  const browserVolumes = new WeakMap();
+  let soundBarToken = 0;
+  let ringCount = 0;
+  let started = false;
 
-  /** Browsers that already had persisted volume applied to content this session. */
-  /** @type {WeakSet<object>} */
-  const restoredBrowsers = new WeakSet();
+  const BAR_X = [1.6, 5.2, 8.8, 12.4];
+  const BAR_W = 2;
+  const BAR_REST = [
+    [4.5, 7],
+    [2.5, 11],
+    [3.5, 9],
+    [5.25, 5.5],
+  ];
 
-  /** @type {WeakMap<Element, { browser: object, controller: object | null }>} */
-  const cardBindings = new WeakMap();
-
-  /** @type {WeakSet<Element>} */
-  const wiredCards = new WeakSet();
-
-  /** @type {WeakMap<Element, boolean>} */
-  const cardWasMuted = new WeakMap();
-
-  /** Last time each card transitioned into playing. */
-  /** @type {WeakMap<Element, number>} */
-  const playStartedAt = new WeakMap();
-
-  /** Previous .playing class (not visibility) so tab-hide does not look like a new play. */
-  /** @type {WeakMap<Element, boolean>} */
-  const cardWasPlaying = new WeakMap();
-
-  /** @type {WeakSet<Element>} */
-  const playbackWired = new WeakSet();
-
-  let restackBusy = false;
-  let ignoreCardMutations = 0;
-
-  const log = (...args) => console.log(LOG_PREFIX, ...args);
-
-  function safe(fn) {
-    try {
-      return fn();
-    } catch (_) {
-      return undefined;
-    }
+  function noteError(where, err) {
+    if (noted.has(where)) return;
+    noted.add(where);
+    console.debug("[BetterMediaToolbar]", where, err);
   }
 
-  function getToolbar() {
+  function toolbar() {
     return document.getElementById("zen-media-controls-toolbar");
   }
 
-  /**
-   * Resolve browser/controller for a card element.
-   * Only uses bindings from activate* hooks or frontCard — never walks
-   * gBrowser tabs (touching linkedBrowser/browsingContext loads pinned
-   * and essentials tabs in Zen).
-   */
-  function resolveCardBinding(cardEl) {
-    if (!cardEl) return null;
+  function parseColor(text) {
+    const parts = String(text).match(/[\d.]+/g)?.map(Number) || [];
+    if (parts.length < 3) return [0, 0, 0, 0];
+    return [parts[0], parts[1], parts[2], Math.round((parts[3] ?? 1) * 255)];
+  }
 
-    const cached = cardBindings.get(cardEl);
-    if (cached?.browser) return cached;
+  function colorOver(top, bottom) {
+    const topAlpha = top[3] / 255;
+    const bottomAlpha = (bottom[3] / 255) * (1 - topAlpha);
+    const alpha = topAlpha + bottomAlpha;
+    if (!alpha) return [0, 0, 0, 0];
+    return [0, 1, 2]
+      .map((i) => Math.round((top[i] * topAlpha + bottom[i] * bottomAlpha) / alpha))
+      .concat(Math.round(alpha * 255));
+  }
 
-    const front = window.gZenMediaController?.frontCard;
-    if (front?.element === cardEl && front.browser) {
-      const binding = { browser: front.browser, controller: front.controller ?? null };
-      cardBindings.set(cardEl, binding);
-      wirePlayback(cardEl, binding.controller);
-      return binding;
+  function cssColor([r, g, b, a = 255]) {
+    return a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
+  }
+
+  function brightnessOf([r, g, b, a = 255]) {
+    const behind = matchMedia("(prefers-color-scheme: dark)").matches ? 0 : 255;
+    return ((r * 299 + g * 587 + b * 114) / 1000) * (a / 255) + behind * (1 - a / 255);
+  }
+
+  function resolveColor(text) {
+    if (!text || !text.trim()) return null;
+    let probe = document.getElementById("bmt-color-probe");
+    if (!probe) {
+      probe = document.createElementNS(XHTML_NS, "div");
+      probe.id = "bmt-color-probe";
+      probe.hidden = true;
+      document.documentElement.appendChild(probe);
     }
-
-    return null;
+    probe.style.color = "";
+    probe.style.color = text.trim();
+    if (!probe.style.color) return null;
+    return parseColor(getComputedStyle(probe).color);
   }
 
-  function bindCard(cardEl, browser, controller = null) {
-    if (!cardEl || !browser) return;
-    cardBindings.set(cardEl, { browser, controller });
-    wirePlayback(cardEl, controller);
+  const COLOR_TOKEN = /(?:rgba?|hsla?|color-mix|light-dark|oklch|oklab|lab|lch|color)\((?:[^()]|\([^()]*\))*\)|#[0-9a-fA-F]{3,8}\b|\btransparent\b/g;
+
+  function paintColor(value) {
+    if (!value) return null;
+    if (!/gradient\(/.test(value)) return resolveColor(value);
+    const stops = (value.match(COLOR_TOKEN) || []).map(resolveColor).filter(Boolean);
+    if (!stops.length) return null;
+    return [0, 1, 2, 3].map((i) => Math.round(stops.reduce((sum, color) => sum + color[i], 0) / stops.length));
   }
 
-  function getActiveBrowser() {
-    return resolveCardBinding(activeCardEl)?.browser ?? null;
+  function neutralBars() {
+    if (!document.documentElement.hasAttribute("bmt-light")) return null;
+    return ["rgb(48, 48, 52)", "rgb(72, 72, 78)"];
   }
 
-  function getActiveTab() {
-    const browser = getActiveBrowser();
-    if (!browser || !gBrowser) return null;
-    return gBrowser.getTabForBrowser(browser);
-  }
-
-  function syncCardMuteAttribute(cardEl, browser) {
-    if (!cardEl || !browser) return;
-    cardEl.toggleAttribute("muted", !!browser.audioMuted);
-    const zenCard = window.gZenMediaController?.frontCard;
-    if (zenCard?.element === cardEl) {
-      safe(() => zenCard.updateMuteState());
-    }
-  }
-
-  function findBestArtwork(artwork = []) {
-    if (!Array.isArray(artwork) || artwork.length === 0) return null;
-    const sorted = [...artwork].sort((a, b) => {
-      const sizeA = parseInt(a.sizes?.split("x")[0] || "0", 10);
-      const sizeB = parseInt(b.sizes?.split("x")[0] || "0", 10);
-      return sizeB - sizeA;
-    });
-    return sorted[0]?.src || null;
-  }
-
-  function applyArtworkToCard(cardEl) {
-    if (!cardEl || cardEl.hasAttribute("media-sharing")) return;
-
-    try {
-      const binding = resolveCardBinding(cardEl);
-      const artworkUrl = findBestArtwork(
-        safe(() => binding?.controller?.getMetadata()?.artwork) ?? []
-      );
-
-      if (artworkUrl) {
-        cardEl.style.setProperty(ARTWORK_VAR, `url("${artworkUrl}")`);
-        cardEl.classList.add(ARTWORK_CLASS);
-      } else {
-        cardEl.style.removeProperty(ARTWORK_VAR);
-        cardEl.classList.remove(ARTWORK_CLASS);
-      }
-    } catch (e) {
-      console.error(LOG_PREFIX, "artwork apply failed", e);
-      cardEl.style.removeProperty(ARTWORK_VAR);
-      cardEl.classList.remove(ARTWORK_CLASS);
-    }
-  }
-
-  function removeArtworkFromCard(cardEl) {
-    if (!cardEl) return;
-    cardEl.style.removeProperty(ARTWORK_VAR);
-    cardEl.classList.remove(ARTWORK_CLASS);
-  }
-
-  function isMediaPlayingCard(cardEl) {
-    return (
-      !!cardEl &&
-      cardEl.classList.contains("playing") &&
-      !cardEl.hasAttribute("media-sharing")
-    );
-  }
-
-  function isVisiblePlayingCard(cardEl) {
-    return isMediaPlayingCard(cardEl) && !cardEl.hidden;
-  }
-
-  /**
-   * Record the instant a card starts playing. Visibility must not count —
-   * selecting the tab hides the card without pausing.
-   */
-  function syncPlayingTimestamp(cardEl) {
-    const playing = isMediaPlayingCard(cardEl);
-    const prev = cardWasPlaying.get(cardEl) === true;
-    if (playing && !prev) {
-      playStartedAt.set(cardEl, Date.now());
-    }
-    cardWasPlaying.set(cardEl, playing);
-  }
-
-  function getPlayRank(cardEl) {
-    return playStartedAt.get(cardEl) || 0;
-  }
-
-  function getVisibleCards(toolbar) {
-    return [...toolbar.querySelectorAll(CARD_SELECTOR)].filter((el) => !el.hidden);
-  }
-
-  /**
-   * Put the playing session at the front of Zen's stack. If several are
-   * playing, the most recently started one wins; paused cards keep native
-   * newest-first order behind them.
-   */
-  function restackPlayingToFront(toolbar = getToolbar()) {
-    if (!toolbar || restackBusy) return;
-    restackBusy = true;
-    try {
-      for (const cardEl of toolbar.querySelectorAll(CARD_SELECTOR)) {
-        syncPlayingTimestamp(cardEl);
-      }
-
-      const visible = getVisibleCards(toolbar);
-      if (!visible.length) return;
-
-      visible.sort((a, b) => {
-        const aPlaying = isVisiblePlayingCard(a);
-        const bPlaying = isVisiblePlayingCard(b);
-        if (aPlaying !== bPlaying) return aPlaying ? -1 : 1;
-        if (aPlaying && bPlaying) {
-          const rankDiff = getPlayRank(b) - getPlayRank(a);
-          if (rankDiff !== 0) return rankDiff;
-        }
-        // Native stack: later in DOM = newer = closer to front.
-        return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? 1 : -1;
-      });
-
-      let alreadyOrdered = true;
-      for (let index = 0; index < visible.length; index++) {
-        if (visible[index].style.getPropertyValue("--zen-media-card-index") !== String(index)) {
-          alreadyOrdered = false;
-          break;
-        }
-      }
-      if (alreadyOrdered) return;
-
-      visible.forEach((cardEl, index) => {
-        cardEl.toggleAttribute("stack-overflow", index >= MAX_STACKED_CARDS);
-        cardEl.toggleAttribute("stacked-behind", index > 0);
-        cardEl.style.setProperty("--zen-media-card-index", String(index));
-        cardEl.style.zIndex = String(100 - index);
-        cardEl.style.setProperty(
-          "--zen-media-card-peek-level",
-          String(Math.min(index, MAX_PEEK_LEVELS))
-        );
-      });
-
-      const stackedCount = Math.min(visible.length, MAX_STACKED_CARDS);
-      toolbar.style.setProperty(
-        "--zen-media-stack-behind",
-        String(Math.max(Math.min(stackedCount - 1, MAX_PEEK_LEVELS), 0))
-      );
-    } finally {
-      restackBusy = false;
-    }
-  }
-
-  function withCardMutationsIgnored(fn) {
-    ignoreCardMutations++;
-    try {
-      fn();
-    } finally {
-      // Observer callbacks run after this stack; keep the guard until then.
-      queueMicrotask(() => {
-        ignoreCardMutations = Math.max(0, ignoreCardMutations - 1);
-      });
-    }
-  }
-
-  function isLibraryOpen() {
+  function applyForeground(color) {
     const root = document.documentElement;
-    return root.hasAttribute("zen-library-open") || root.hasAttribute("zen-library-open-compact");
-  }
-
-  function refreshArtworkIfToolbarActive(toolbar = getToolbar()) {
-    if (!toolbar || isLibraryOpen()) return;
-    if (toolbar.matches(":hover") || toolbar.hasAttribute(TOOLBAR_VOLUME_ATTR) || popupOpen) {
-      applyArtworkToVisibleCards(toolbar);
-    }
-  }
-
-  function applyArtworkToVisibleCards(toolbar) {
-    withCardMutationsIgnored(() => {
-      for (const cardEl of toolbar.querySelectorAll(CARD_SELECTOR)) {
-        if (isVisiblePlayingCard(cardEl)) applyArtworkToCard(cardEl);
-        else removeArtworkFromCard(cardEl);
+    const bright = color ? brightnessOf(color) > 160 : !matchMedia("(prefers-color-scheme: dark)").matches;
+    const wasLight = root.hasAttribute("bmt-light");
+    root.style.setProperty("--bmt-fg", bright ? "rgb(20, 20, 22)" : "rgb(255, 255, 255)");
+    root.style.setProperty("--bmt-fg-dim", bright ? "rgba(20, 20, 22, 0.62)" : "rgba(255, 255, 255, 0.65)");
+    root.style.setProperty("--bmt-track", bright ? "rgba(0, 0, 0, 0.16)" : "rgba(255, 255, 255, 0.2)");
+    root.style.setProperty("--bmt-ring-track", bright ? "rgba(0, 0, 0, 0.14)" : "rgba(255, 255, 255, 0.14)");
+    root.style.setProperty("--bmt-hairline", bright ? "rgba(0, 0, 0, 0.08)" : "rgba(255, 255, 255, 0.07)");
+    root.style.setProperty("--bmt-button-hover", bright ? "rgba(0, 0, 0, 0.08)" : "rgba(255, 255, 255, 0.12)");
+    root.toggleAttribute("bmt-light", bright);
+    if (wasLight !== bright) {
+      installSoundDefaults();
+      for (const card of toolbar()?.querySelectorAll(".zen-media-card") || []) {
+        paintSoundBars(card, card.__bmtColors ?? null);
       }
-    });
-  }
-
-  function clearArtworkOnToolbar(toolbar) {
-    withCardMutationsIgnored(() => {
-      for (const cardEl of toolbar.querySelectorAll(CARD_SELECTOR)) {
-        removeArtworkFromCard(cardEl);
-      }
-    });
-  }
-
-  function onPlaybackChanged(cardEl, controller) {
-    if (controller?.isPlaying) {
-      playStartedAt.set(cardEl, Date.now());
-      cardWasPlaying.set(cardEl, true);
-    } else {
-      cardWasPlaying.set(cardEl, false);
     }
-    restackPlayingToFront();
-    refreshArtworkIfToolbarActive();
   }
 
-  function wirePlayback(cardEl, controller) {
-    if (!cardEl || !controller || playbackWired.has(cardEl)) return;
-    playbackWired.add(cardEl);
-    syncPlayingTimestamp(cardEl);
-    if (controller.isPlaying && !playStartedAt.has(cardEl)) {
-      playStartedAt.set(cardEl, Date.now());
+  function syncSidebarPaint() {
+    const root = document.documentElement;
+    const compact = root.getAttribute("zen-compact-mode") === "true";
+    const layer = document.getElementById(compact ? "zen-toolbar-background" : "zen-browser-background");
+    const name = compact ? "--zen-main-browser-background-toolbar" : "--zen-main-browser-background";
+    const paint = layer ? paintColor(getComputedStyle(layer).getPropertyValue(name)) : null;
+    const rootStyle = getComputedStyle(root);
+    const tint = resolveColor(rootStyle.getPropertyValue("--bmt-media-bg"));
+    const base = resolveColor(rootStyle.getPropertyValue("--bmt-card-base"));
+    if (!paint || !tint || !base) {
+      root.style.removeProperty("--bmt-rest");
+      root.style.removeProperty("--bmt-solid");
+      applyForeground(null);
+      return;
     }
-    controller.addEventListener("playbackstatechange", () => {
-      onPlaybackChanged(cardEl, controller);
-    });
+    const rest = colorOver(tint, paint);
+    root.style.setProperty("--bmt-rest", cssColor(rest));
+    root.style.setProperty("--bmt-solid", cssColor(colorOver(tint, colorOver(paint, base))));
+    applyForeground(rest);
   }
 
-  function addArtworkHoverListeners(toolbar) {
-    if (toolbar.dataset.artworkListenersAdded === "true") return;
-
-    toolbar.addEventListener("mouseenter", () => {
-      if (isLibraryOpen()) return;
-      applyArtworkToVisibleCards(toolbar);
-    });
-    toolbar.addEventListener("mouseleave", () => {
-      // Keep artwork while moving onto the volume slider / bridge.
-      if (popupOpen || toolbar.hasAttribute(TOOLBAR_VOLUME_ATTR)) return;
-      clearArtworkOnToolbar(toolbar);
-    });
-    toolbar.dataset.artworkListenersAdded = "true";
-  }
-
-  /**
-   * Stable key for persistence: site origin (e.g. https://www.youtube.com).
-   * Each origin keeps its own volume across sessions without sharing across cards.
-   */
-  function getVolumeKey(browser) {
-    return (
-      safe(() => {
-        const uri = browser?.currentURI;
-        if (!uri) return null;
-        if (uri.schemeIs("about") || uri.schemeIs("chrome") || uri.schemeIs("resource")) {
-          return null;
-        }
-        return uri.prePath || null;
-      }) ?? null
-    );
-  }
-
-  function readVolumeMap() {
-    const raw =
-      safe(() => Services.prefs.getStringPref(PREF_VOLUMES_BY_ORIGIN, "")) || "";
-    if (!raw) return {};
+  function watchSidebarPaint() {
     try {
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch (_) {
-      return {};
+      syncSidebarPaint();
+    } catch (err) {
+      noteError("sidebar paint", err);
     }
-  }
-
-  function writeVolumeMap(map) {
-    const keys = Object.keys(map);
-    if (keys.length > MAX_STORED_ORIGINS) {
-      for (const key of keys.slice(0, keys.length - MAX_STORED_ORIGINS)) {
-        delete map[key];
+    const watcher = new MutationObserver(() => {
+      try {
+        syncSidebarPaint();
+      } catch (err) {
+        noteError("sidebar paint", err);
       }
+    });
+    for (const id of ["zen-browser-background", "zen-toolbar-background"]) {
+      const layer = document.getElementById(id);
+      if (layer) watcher.observe(layer, { attributes: true, attributeFilter: ["style"] });
     }
-    safe(() => Services.prefs.setStringPref(PREF_VOLUMES_BY_ORIGIN, JSON.stringify(map)));
-  }
-
-  function getPersistedVolumeForBrowser(browser) {
-    const key = getVolumeKey(browser);
-    if (!key) return null;
-    const value = readVolumeMap()[key];
-    if (typeof value !== "number" || !Number.isFinite(value)) return null;
-    return Math.max(1, Math.min(100, Math.round(value)));
-  }
-
-  /**
-   * Remember volume for this browser; optionally persist by origin for next sessions.
-   */
-  function rememberBrowserVolume(browser, volume, { persist = true } = {}) {
-    if (!browser) return;
-    const value = Math.max(1, Math.min(100, Math.round(volume)));
-    browserVolumes.set(browser, value);
-    if (!persist) return;
-
-    const key = getVolumeKey(browser);
-    if (!key) return;
-    const map = readVolumeMap();
-    map[key] = value;
-    writeVolumeMap(map);
-  }
-
-  function getBrowserVolume(browser) {
-    if (!browser) return 100;
-    if (browserVolumes.has(browser)) return browserVolumes.get(browser);
-    const persisted = getPersistedVolumeForBrowser(browser);
-    if (persisted != null) {
-      browserVolumes.set(browser, persisted);
-      return persisted;
-    }
-    return 100;
-  }
-
-  function capturePreMuteVolume(browser) {
-    if (!browser || browser.audioMuted) return;
-    const fromSlider = Number(sliderEl?.value);
-    rememberBrowserVolume(
-      browser,
-      fromSlider > 0 ? fromSlider : getBrowserVolume(browser)
-    );
-  }
-
-  /**
-   * Apply this origin's saved volume to the tab's media once per browser/session.
-   */
-  function restorePersistedVolumeToContent(browser) {
-    if (!browser?.messageManager || browser.audioMuted) return;
-    if (restoredBrowsers.has(browser)) return;
-
-    const persisted = getPersistedVolumeForBrowser(browser);
-    if (persisted == null) return;
-
-    restoredBrowsers.add(browser);
-    browserVolumes.set(browser, persisted);
-    ensureFrameScript(browser);
-    browser.messageManager.sendAsyncMessage("ZenMediaVolumeSlider:Init", {
-      volume: persisted,
+    watcher.observe(document.documentElement, { attributes: true, attributeFilter: ["zen-compact-mode"] });
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      try {
+        syncSidebarPaint();
+      } catch (err) {
+        noteError("sidebar paint", err);
+      }
     });
   }
 
-  function setToolbarVolumeOpen(open) {
-    const toolbar = getToolbar();
-    if (!toolbar) return;
-    if (open) toolbar.setAttribute(TOOLBAR_VOLUME_ATTR, "true");
-    else toolbar.removeAttribute(TOOLBAR_VOLUME_ATTR);
+  function artUrlOf(card) {
+    const artwork = card.querySelector(".zen-media-focus-button[bmt-art]")?.getAttribute("bmt-art");
+    if (artwork) return artwork;
+    const favicon = card.querySelector(".zen-media-focus-button[bmt-favicon]")?.getAttribute("bmt-favicon");
+    if (favicon) return favicon;
+    const img = card.querySelector(".zen-media-focus-button image, .zen-media-focus-button .toolbarbutton-icon");
+    if (!img) return "";
+    const src = img.getAttribute("src") || img.src || "";
+    if (src) return src;
+    const listStyle = getComputedStyle(img).listStyleImage || "";
+    const match = listStyle.match(/url\(["']?(.*?)["']?\)/);
+    return match ? match[1] : "";
   }
 
-  const VOLUME_FRAME_SCRIPT = `
-(function () {
-  const FRAME_SCRIPT_VERSION = 2;
-  if (content.__zenMediaVolumeSlider === FRAME_SCRIPT_VERSION) return;
-  content.__zenMediaVolumeSlider = FRAME_SCRIPT_VERSION;
-
-  let lastUnmutedVolume = 100;
-
-  function pickMedia() {
-    const nodes = content.document.querySelectorAll("video, audio");
-    let best = null;
-    let bestScore = -1;
-    for (const el of nodes) {
-      if (el.readyState < 2) continue;
-      const audible = !el.paused && !el.ended && !el.muted && el.volume > 0;
-      const score = (audible ? 1000 : 0) + el.volume;
-      if (score > bestScore) {
-        bestScore = score;
-        best = el;
-      }
-    }
-    return best;
+  function boost([r, g, b]) {
+    const avg = (r + g + b) / 3;
+    return [r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(avg + (v - avg) * 1.6))));
   }
 
-  function readVolume() {
-    const el = pickMedia();
-    if (!el) return lastUnmutedVolume;
-    if (el.muted || el.volume === 0) return 0;
-    lastUnmutedVolume = Math.round(el.volume * 100);
-    return lastUnmutedVolume;
-  }
-
-  function writeVolume(percent) {
-    const el = pickMedia();
-    if (!el) return readVolume();
-    const v = Math.max(0, Math.min(100, percent)) / 100;
-    if (v === 0) {
-      if (el.volume > 0 && !el.muted) {
-        lastUnmutedVolume = Math.round(el.volume * 100);
-      }
-      el.muted = true;
-      el.volume = 0;
-    } else {
-      el.muted = false;
-      el.volume = v;
-      lastUnmutedVolume = Math.round(el.volume * 100);
-    }
-    return Math.round(el.volume * 100);
-  }
-
-  addMessageListener("ZenMediaVolumeSlider:Get", () => {
-    sendAsyncMessage("ZenMediaVolumeSlider:State", { volume: readVolume() });
-  });
-
-  addMessageListener("ZenMediaVolumeSlider:Set", (msg) => {
-    const volume = writeVolume(msg.data?.volume ?? 100);
-    sendAsyncMessage("ZenMediaVolumeSlider:State", { volume });
-  });
-
-  addMessageListener("ZenMediaVolumeSlider:Init", (msg) => {
-    const target = Math.max(0, Math.min(100, msg.data?.volume ?? 100));
-    if (target <= 0) return;
-    lastUnmutedVolume = target;
-    const el = pickMedia();
-    if (!el) return;
-    el.muted = false;
-    el.volume = target / 100;
-    sendAsyncMessage("ZenMediaVolumeSlider:State", {
-      volume: Math.round(el.volume * 100),
-    });
-  });
-
-  addMessageListener("ZenMediaVolumeSlider:Unmute", (msg) => {
-    const target = Math.max(1, Math.min(100, msg.data?.volume ?? lastUnmutedVolume));
-    lastUnmutedVolume = target;
-    const el = pickMedia();
-    if (el) {
-      el.muted = false;
-      el.volume = target / 100;
-    }
-    sendAsyncMessage("ZenMediaVolumeSlider:State", { volume: target });
-  });
-})();
-`;
-
-  /**
-   * Browser that sent a frame-script message — no tab list walk.
-   */
-  function getBrowserFromFrameMessage(message) {
-    return (
-      safe(() => {
-        const target = message?.target;
-        if (!target) return null;
-        if (target.nodeName === "browser") return target;
-        const top = target.browsingContext?.top || target.browsingContext;
-        const embedder = top?.embedderElement;
-        if (embedder?.nodeName === "browser") return embedder;
-        return null;
-      }) ?? null
-    );
-  }
-
-  function ensureFrameScript(browser) {
-    if (!browser?.messageManager) return false;
-    try {
-      if (!frameScriptUrl) {
-        frameScriptUrl =
-          "data:application/javascript;charset=utf-8," +
-          encodeURIComponent(VOLUME_FRAME_SCRIPT);
-      }
-      // Only the media card's own browser — never broadcast to other tabs.
-      browser.messageManager.loadFrameScript(frameScriptUrl, true);
-      return true;
-    } catch (e) {
-      console.warn(LOG_PREFIX, "frame script load failed", e);
-      return false;
-    }
-  }
-
-  function setupMessageListeners() {
-    if (messageListenersReady || !Services.mm) return;
-    Services.mm.addMessageListener("ZenMediaVolumeSlider:State", (message) => {
-      const browser = getBrowserFromFrameMessage(message);
-      const current = getActiveBrowser();
-      // Only update the slider from the browser that owns the active card.
-      if (!browser || !current || browser !== current) return;
-      if (!sliderEl) return;
-      const volume = Math.max(0, Math.min(100, message.data?.volume ?? 0));
-      if (volume === 0 && !current.audioMuted) {
-        restoreVolumeAfterUnmute();
+  function readArtColors(url) {
+    return new Promise((resolve) => {
+      if (!url) {
+        resolve(null);
         return;
       }
-      // Session cache only — never persist Get responses (would clobber saved
-      // volumes with the site's default 100 before Init runs after restart).
-      if (volume > 0) rememberBrowserVolume(current, volume, { persist: false });
-      sliderEl.value = String(volume);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const size = 24;
+          const canvas = document.createElementNS(XHTML_NS, "canvas");
+          canvas.width = size;
+          canvas.height = size;
+          const ctx = canvas.getContext("2d", { willReadFrequently: true });
+          ctx.drawImage(img, 0, 0, size, size);
+          const { data } = ctx.getImageData(0, 0, size, size);
+          const halves = [
+            [0, 0, 0, 0],
+            [0, 0, 0, 0],
+          ];
+          for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+              const i = (y * size + x) * 4;
+              if (data[i + 3] < 128) continue;
+              const half = halves[x < size / 2 ? 0 : 1];
+              half[0] += data[i];
+              half[1] += data[i + 1];
+              half[2] += data[i + 2];
+              half[3]++;
+            }
+          }
+          const colors = halves.map((half) => (half[3] ? boost([half[0] / half[3], half[1] / half[3], half[2] / half[3]]) : null));
+          if (!colors[0] && !colors[1]) {
+            resolve(null);
+            return;
+          }
+          const left = colors[0] || colors[1];
+          const right = colors[1] || colors[0];
+          resolve([`rgb(${left.join(", ")})`, `rgb(${right.join(", ")})`]);
+        } catch (err) {
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = url;
     });
-    messageListenersReady = true;
   }
 
-  function requestContentVolume(browser) {
-    if (!browser?.messageManager) return;
-    ensureFrameScript(browser);
-    browser.messageManager.sendAsyncMessage("ZenMediaVolumeSlider:Get", {});
-  }
+  async function updateCardGlow(card) {
+    const url = artUrlOf(card);
+    if (card.__bmtArtUrl === url) return;
+    card.__bmtArtUrl = url;
 
-  function applyVolume(percent) {
-    const browser = getActiveBrowser();
-    const tab = getActiveTab();
-    if (!browser || !tab) return;
-
-    const value = Math.max(0, Math.min(100, Math.round(percent)));
-    ensureFrameScript(browser);
-
-    if (value > 0) rememberBrowserVolume(browser, value);
-
-    if (value === 0) {
-      const current =
-        Number(sliderEl?.value) > 0 ? Number(sliderEl.value) : getBrowserVolume(browser);
-      rememberBrowserVolume(browser, current);
-      if (!browser.audioMuted) tab.toggleMuteAudio();
-    } else if (browser.audioMuted) {
-      tab.toggleMuteAudio();
+    const isArtwork = !!card.querySelector(".zen-media-focus-button[bmt-art]");
+    if (!isArtwork) {
+      if (!card.hasAttribute("bmt-glow-ready")) card.setAttribute("bmt-glow-pending", "true");
+      await new Promise((resolve) => setTimeout(resolve, ARTWORK_WAIT_MS));
+      if (card.__bmtArtUrl !== url) return;
     }
 
-    // Set only goes to this card's browser message manager.
-    browser.messageManager.sendAsyncMessage("ZenMediaVolumeSlider:Set", {
-      volume: value,
-    });
-    syncCardMuteAttribute(activeCardEl, browser);
-  }
-
-  function restoreVolumeAfterUnmute() {
-    const browser = getActiveBrowser();
-    if (!browser || browser.audioMuted) return;
-
-    const volume = getBrowserVolume(browser);
-    ensureFrameScript(browser);
-    browser.messageManager.sendAsyncMessage("ZenMediaVolumeSlider:Unmute", {
-      volume,
-    });
-    if (sliderEl && !dragging) sliderEl.value = String(volume);
-    syncCardMuteAttribute(activeCardEl, browser);
-  }
-
-  function clearHideTimer() {
-    if (hideTimer) {
-      clearTimeout(hideTimer);
-      hideTimer = null;
+    let colors = mediaColorCache.get(url);
+    if (colors === undefined) {
+      colors = await readArtColors(url);
+      mediaColorCache.set(url, colors);
     }
-  }
+    if (card.__bmtArtUrl !== url) return;
 
-  function syncPopupPosition() {
-    if (!popupEl) return;
-    const toolbar = getToolbar();
-    if (!toolbar) return;
-
-    const toolbarRect = toolbar.getBoundingClientRect();
-    if (toolbarRect.width === 0 || toolbarRect.height === 0) return;
-
-    const muteRect = muteButton?.getBoundingClientRect();
-    const anchorRect =
-      muteRect && muteRect.width > 0 && muteRect.height > 0 ? muteRect : toolbarRect;
-
-    const popupLeft = toolbarRect.right + POPUP_GAP_PX;
-    const popupTop = anchorRect.top + anchorRect.height / 2;
-
-    popupEl.style.left = `${popupLeft}px`;
-    popupEl.style.top = `${popupTop}px`;
-
-    // Gap-only bridge: from the toolbar's right edge to the popup (no overlap on controls).
-    if (bridgeEl) {
-      const bridgeLeft = toolbarRect.right;
-      const bridgeWidth = Math.max(POPUP_GAP_PX + 2, popupLeft - bridgeLeft + 2);
-      const bridgeTop = anchorRect.top - 4;
-      const bridgeHeight = Math.max(anchorRect.height + 8, 32);
-      bridgeEl.style.left = `${bridgeLeft}px`;
-      bridgeEl.style.top = `${bridgeTop}px`;
-      bridgeEl.style.width = `${bridgeWidth}px`;
-      bridgeEl.style.height = `${bridgeHeight}px`;
+    if (colors) {
+      card.style.setProperty("--bmt-glow-a", colors[0]);
+      card.style.setProperty("--bmt-glow-b", colors[1]);
+    } else {
+      card.style.removeProperty("--bmt-glow-a");
+      card.style.removeProperty("--bmt-glow-b");
     }
-
-    syncPopupChromeFromCard();
+    card.removeAttribute("bmt-glow-pending");
+    card.setAttribute("bmt-glow-ready", "true");
+    paintSoundBars(card, colors);
   }
 
-  /**
-   * Match popup chrome to the active media card. Theme tokens on :root often
-   * disagree with the sidebar card (e.g. white card, dark popup).
-   */
-  function syncPopupChromeFromCard() {
-    if (!popupEl) return;
-    const card =
-      activeCardEl ||
-      getToolbar()?.querySelector(`${CARD_SELECTOR}:not([hidden])`) ||
-      null;
-    if (!card) return;
-
-    const cs = getComputedStyle(card);
-    popupEl.style.backgroundColor = cs.backgroundColor;
-    popupEl.style.boxShadow = cs.boxShadow;
-    popupEl.style.borderRadius = cs.borderRadius;
-    popupEl.style.outline = cs.outline;
-    popupEl.style.outlineOffset = cs.outlineOffset;
-    popupEl.style.color = cs.color;
+  function mixTowardWhite(color, amount) {
+    const parts = String(color).match(/\d+(\.\d+)?/g);
+    if (!parts || parts.length < 3) return "rgb(255, 255, 255)";
+    const [r, g, b] = parts.slice(0, 3).map(Number).map((v) => Math.round(v + (255 - v) * amount));
+    return `rgb(${r}, ${g}, ${b})`;
   }
 
-  function clearVolumeUiPosition() {
-    if (popupEl) {
-      popupEl.style.removeProperty("left");
-      popupEl.style.removeProperty("top");
+  function soundBarImages(colors, lightenBy) {
+    const key = `${colors ? colors.join("|") : "white"}|${lightenBy}`;
+    const cached = soundBarCache.get(key);
+    if (cached) return cached;
+
+    const a = colors ? mixTowardWhite(colors[0], lightenBy) : "rgb(255, 255, 255)";
+    const b = colors ? mixTowardWhite(colors[1] || colors[0], lightenBy) : "rgb(255, 255, 255)";
+    const gradient =
+      `<defs><linearGradient id="g" gradientUnits="userSpaceOnUse" x1="1.6" y1="0" x2="14.4" y2="0">` +
+      `<stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs>`;
+    const moving = [0.55, 0.68, 0.5, 0.74];
+    const wave =
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">${gradient}` +
+      `<style>rect{transform-box:fill-box;transform-origin:center;animation:grow .26s cubic-bezier(.2,.9,.3,1) both,z .6s .26s ease-in-out infinite alternate}` +
+      moving.map((duration, i) => `.b${i}{animation-duration:.26s,${duration}s;animation-delay:0s,${(0.26 + i * 0.05).toFixed(2)}s}`).join("") +
+      `@keyframes grow{from{height:2px;y:7px}to{height:11px;y:2.5px}}` +
+      `@keyframes z{from{transform:scaleY(.22)}to{transform:scaleY(1)}}` +
+      `@media (prefers-reduced-motion:reduce){rect{animation:none;transform:scaleY(.6)}}</style>` +
+      `<g fill="url(#g)">` +
+      BAR_X.map((x, i) => `<rect class="b${i}" x="${x}" y="2.5" width="${BAR_W}" height="11" rx="1"/>`).join("") +
+      `</g></svg>`;
+    const dots =
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">${gradient}` +
+      `<style>rect{animation:shrink .28s cubic-bezier(.4,0,.2,1) forwards}@keyframes shrink{to{height:${BAR_W}px;y:${8 - BAR_W / 2}px}}` +
+      `@media (prefers-reduced-motion:reduce){rect{animation-duration:1ms}}</style>` +
+      `<g fill="url(#g)">` +
+      BAR_X.map((x, i) => `<rect x="${x}" y="${BAR_REST[i][0]}" width="${BAR_W}" height="${BAR_REST[i][1]}" rx="1"/>`).join("") +
+      `</g></svg>`;
+    const still =
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">${gradient}<g fill="url(#g)">` +
+      BAR_X.map((x, i) => `<rect x="${x}" y="${BAR_REST[i][0]}" width="${BAR_W}" height="${BAR_REST[i][1]}" rx="1"/>`).join("") +
+      `</g></svg>`;
+    const encoded = (svg) => `data:image/svg+xml,${encodeURIComponent(svg)}`;
+    const images = { wave: encoded(wave), dots: encoded(dots), still: encoded(still) };
+    soundBarCache.set(key, images);
+    return images;
+  }
+
+  function freshSoundBars(colors, lightenBy) {
+    const images = soundBarImages(colors, lightenBy);
+    const token = ++soundBarToken;
+    return {
+      wave: `url("${images.wave}#${token}")`,
+      dots: `url("${images.dots}#${token}")`,
+      still: `url("${images.still}")`,
+    };
+  }
+
+  function barSpec(colors) {
+    if (colors) return { colors, lightenBy: 0.35 };
+    const neutral = neutralBars();
+    if (neutral) return { colors: neutral, lightenBy: 0 };
+    return { colors: null, lightenBy: 0 };
+  }
+
+  function applySoundBars(element, colors) {
+    const spec = barSpec(colors);
+    const fresh = freshSoundBars(spec.colors, spec.lightenBy);
+    element.style.setProperty("--bmt-sound-wave", fresh.wave);
+    element.style.setProperty("--bmt-sound-still", fresh.still);
+    element.style.setProperty("--bmt-sound-muted", fresh.dots);
+  }
+
+  function installSoundDefaults() {
+    applySoundBars(document.documentElement, null);
+  }
+
+  function watchCardSoundState(card) {
+    if (card.__bmtSoundWatch) return;
+    card.__bmtSoundWatch = true;
+    let last = "";
+    new MutationObserver(() => {
+      const state = `${card.classList.contains("playing")}|${card.hasAttribute("muted")}`;
+      if (state === last) return;
+      last = state;
+      applySoundBars(card, card.__bmtColors ?? null);
+    }).observe(card, { attributes: true, attributeFilter: ["class", "muted"] });
+  }
+
+  function paintSoundBars(card, colors) {
+    card.__bmtColors = colors;
+    applySoundBars(card, colors);
+    watchCardSoundState(card);
+  }
+
+  function ensureRing(button) {
+    if (!button || button.querySelector(":scope > .bmt-ring")) return;
+    const id = `bmt-ring-gradient-${++ringCount}`;
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("class", "bmt-ring");
+    svg.setAttribute("viewBox", "0 0 46 46");
+    svg.setAttribute("aria-hidden", "true");
+
+    const make = (tag, attrs, parent) => {
+      const el = document.createElementNS(SVG_NS, tag);
+      for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+      parent.appendChild(el);
+      return el;
+    };
+
+    const gradient = make("linearGradient", { id, x1: "0", y1: "0", x2: "1", y2: "1" }, make("defs", {}, svg));
+    make("stop", { offset: "0", style: "stop-color: var(--bmt-glow-a)" }, gradient);
+    make("stop", { offset: "1", style: "stop-color: var(--bmt-glow-b)" }, gradient);
+    const shape = { x: "1", y: "1", width: "44", height: "44", rx: "10", fill: "none", "stroke-width": "2", pathLength: "100" };
+    make("rect", { ...shape, class: "bmt-ring-track" }, svg);
+    make("rect", {
+      ...shape,
+      class: "bmt-ring-fill",
+      stroke: `url(#${id})`,
+      "stroke-linecap": "round",
+      "stroke-dasharray": "0 100",
+      "stroke-opacity": "0",
+    }, svg);
+    button.appendChild(svg);
+  }
+
+  function setRing(card, fraction) {
+    const fill = card.focusButton?.querySelector(".bmt-ring-fill");
+    if (!fill) return;
+    const pct = Math.max(0, Math.min(1, fraction || 0)) * 100;
+    fill.style.strokeDasharray = pct > 0.2 ? `${pct.toFixed(2)} 100` : "0 100";
+    fill.style.strokeOpacity = pct > 0.2 ? "1" : "0";
+  }
+
+  function formatRemaining(card, seconds) {
+    const safe = Math.max(0, seconds || 0);
+    if (typeof card.formatSecondsToTime === "function") {
+      return `-${card.formatSecondsToTime(safe)}`;
     }
-    if (bridgeEl) {
-      bridgeEl.style.removeProperty("left");
-      bridgeEl.style.removeProperty("top");
-      bridgeEl.style.removeProperty("width");
-      bridgeEl.style.removeProperty("height");
-    }
+    const whole = Math.floor(safe);
+    const pad = (n) => String(n).padStart(2, "0");
+    const minutes = Math.floor(whole / 60);
+    const hours = Math.floor(minutes / 60);
+    if (hours) return `-${hours}:${pad(minutes % 60)}:${pad(whole % 60)}`;
+    return `-${minutes}:${pad(whole % 60)}`;
   }
 
-  function closePopup() {
-    clearHideTimer();
-    popupOpen = false;
-    dragging = false;
-    popupEl?.removeAttribute("open");
-    bridgeEl?.removeAttribute("open");
-    setToolbarVolumeOpen(false);
-    clearVolumeUiPosition();
-
-    const toolbar = getToolbar();
-    if (toolbar && !toolbar.matches(":hover")) {
-      clearArtworkOnToolbar(toolbar);
-    }
-  }
-
-  function setActiveMuteTarget(nextMuteButton, nextCardEl) {
-    muteButton = nextMuteButton;
-    activeCardEl = nextCardEl;
-  }
-
-  function openPopup() {
-    const toolbar = getToolbar();
-    if (isLibraryOpen() || !toolbar || toolbar.hasAttribute("hidden") || !muteButton || !activeCardEl) {
+  function showTimeLeft(card) {
+    const bar = card.progressBar;
+    if (!bar || !card.duration || card.duration >= LONG_MEDIA_SECONDS) {
+      setRing(card, 0);
       return;
     }
-    if (activeCardEl.hasAttribute("media-sharing") || activeCardEl.hidden) {
+    const fraction = Number(bar.value) / 100;
+    setRing(card, fraction);
+    if (card.durationEl) {
+      const played = fraction * card.duration;
+      card.durationEl.textContent = formatRemaining(card, card.duration - played);
+    }
+  }
+
+  function watchTimeLeft(card) {
+    const label = card.currentTimeEl;
+    if (label && !label.__bmtTimeLeft) {
+      label.__bmtTimeLeft = true;
+      new MutationObserver(() => showTimeLeft(card)).observe(label, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+    }
+    const bar = card.progressBar;
+    if (bar && !bar.__bmtScrub) {
+      bar.__bmtScrub = true;
+      bar.addEventListener("input", () => showTimeLeft(card));
+    }
+  }
+
+  function tintFromColors(colors) {
+    const parts = String(colors?.[0] || "").match(/\d+(\.\d+)?/g);
+    if (!parts) return "rgb(44, 44, 46)";
+    const [r, g, b] = parts.slice(0, 3).map(Number).map((v) => Math.round(v * 0.32 + 26));
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+
+  async function showFaviconTile(card, button, art) {
+    if (art) {
+      button.removeAttribute("bmt-favicon");
+      button.removeAttribute("bmt-initial");
       return;
     }
+    const tab = card.browser && gBrowser.getTabForBrowser(card.browser);
+    let icon =
+      tab?.getAttribute("image") ||
+      (tab && gBrowser.getIcon?.(tab)) ||
+      card.browser?.mIconURL ||
+      (card.browser?.currentURI?.spec ? `page-icon:${card.browser.currentURI.spec}` : "");
+    if (/defaultFavicon|globe/i.test(icon)) icon = "";
 
-    clearHideTimer();
-    syncPopupPosition();
-    popupOpen = true;
-    popupEl?.setAttribute("open", "true");
-    bridgeEl?.setAttribute("open", "true");
-    setToolbarVolumeOpen(true);
-    applyArtworkToVisibleCards(toolbar);
-
-    const browser = getActiveBrowser();
-    if (!browser) return;
-
-    // Show this browser's remembered volume immediately, then sync from content.
-    if (browser.audioMuted) {
-      sliderEl.value = "0";
-      return;
-    }
-
-    sliderEl.value = String(getBrowserVolume(browser));
-    requestContentVolume(browser);
-  }
-
-  function scheduleHide() {
-    if (dragging) return;
-    clearHideTimer();
-    hideTimer = setTimeout(() => {
-      hideTimer = null;
-      if (!dragging) closePopup();
-    }, HIDE_DELAY_MS);
-  }
-
-  function keepVolumeUiOpen() {
-    clearHideTimer();
-    syncPopupPosition();
-    popupOpen = true;
-    popupEl?.setAttribute("open", "true");
-    bridgeEl?.setAttribute("open", "true");
-    setToolbarVolumeOpen(true);
-  }
-
-  /**
-   * Mount on the document, never under #zen-media-controls-toolbar.
-   * That toolbar lives inside #navigator-toolbox; a transform there
-   * (Zen Library's open spring) captures position:fixed descendants
-   * and leftover viewport left/top become toolbox-local overflow that
-   * clips the sidebar. Card chrome is copied in syncPopupChromeFromCard.
-   */
-  function mountVolumeUi() {
-    const parent = document.documentElement;
-    if (popupEl && popupEl.parentNode !== parent) {
-      parent.appendChild(popupEl);
-    }
-    if (bridgeEl && bridgeEl.parentNode !== parent) {
-      parent.appendChild(bridgeEl);
-    }
-  }
-
-  function ensurePopup() {
-    const existing = document.getElementById(POPUP_ID);
-    if (existing) {
-      popupEl = existing;
-      sliderEl = document.getElementById(SLIDER_ID);
-      bridgeEl = document.getElementById(BRIDGE_ID);
-      if (!bridgeEl) {
-        bridgeEl = document.createElement("div");
-        bridgeEl.id = BRIDGE_ID;
-        bridgeEl.setAttribute("aria-hidden", "true");
-        bridgeEl.addEventListener("mouseenter", () => keepVolumeUiOpen());
-        bridgeEl.addEventListener("mouseleave", scheduleHide);
+    if (!icon) {
+      let host = "";
+      try {
+        host = card.browser?.currentURI?.displayHost?.replace(/^www\./, "") || "";
+      } catch (err) {
+        host = "";
       }
-      mountVolumeUi();
-      return !!popupEl && !!sliderEl;
+      button.setAttribute("bmt-favicon", "");
+      button.setAttribute("bmt-initial", (host[0] || "♪").toUpperCase());
+      button.style.removeProperty("--bmt-media-favicon");
+      button.style.setProperty("--bmt-favicon-tint", "rgb(52, 52, 56)");
+      return;
     }
 
-    popupEl = document.createElement("div");
-    popupEl.id = POPUP_ID;
-    popupEl.setAttribute("role", "group");
-    popupEl.setAttribute("aria-label", "Volume");
-
-    sliderEl = document.createElement("input");
-    sliderEl.type = "range";
-    sliderEl.id = SLIDER_ID;
-    sliderEl.min = "0";
-    sliderEl.max = "100";
-    sliderEl.step = "1";
-    sliderEl.value = "100";
-    sliderEl.setAttribute("aria-label", "Volume");
-
-    bridgeEl = document.createElement("div");
-    bridgeEl.id = BRIDGE_ID;
-    bridgeEl.setAttribute("aria-hidden", "true");
-
-    popupEl.appendChild(sliderEl);
-    mountVolumeUi();
-
-    const onVolumeZoneEnter = () => keepVolumeUiOpen();
-
-    bridgeEl.addEventListener("mouseenter", onVolumeZoneEnter);
-    bridgeEl.addEventListener("mouseleave", scheduleHide);
-
-    popupEl.addEventListener("mouseenter", onVolumeZoneEnter);
-    popupEl.addEventListener("mouseleave", scheduleHide);
-
-    sliderEl.addEventListener("pointerdown", () => {
-      dragging = true;
-      clearHideTimer();
-    });
-
-    sliderEl.addEventListener("pointerup", () => {
-      dragging = false;
-      scheduleHide();
-    });
-
-    sliderEl.addEventListener("input", () => {
-      applyVolume(Number(sliderEl.value));
-    });
-
-    sliderEl.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
-        closePopup();
-        muteButton?.focus();
+    button.removeAttribute("bmt-initial");
+    button.setAttribute("bmt-favicon", icon);
+    button.style.setProperty("--bmt-media-favicon", `url("${icon.replace(/"/g, "%22")}")`);
+    let tint = faviconTints.get(icon);
+    if (!tint) {
+      let colors = mediaColorCache.get(icon);
+      if (colors === undefined) {
+        colors = await readArtColors(icon);
+        mediaColorCache.set(icon, colors);
       }
-    });
+      tint = tintFromColors(colors);
+      faviconTints.set(icon, tint);
+    }
+    if (button.getAttribute("bmt-favicon") === icon) {
+      button.style.setProperty("--bmt-favicon-tint", tint);
+    }
+  }
 
+  function flipArtwork(button, swap) {
+    const icon = button.querySelector(":scope > .toolbarbutton-icon") || button.querySelector("image");
+    if (!icon || typeof icon.animate !== "function" || matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      swap();
+      return;
+    }
+    button.__bmtFlip?.cancel();
+    const turnAway = icon.animate(
+      [{ transform: "perspective(240px) rotateY(0deg)" }, { transform: "perspective(240px) rotateY(90deg)" }],
+      { duration: FLIP_OUT_MS, easing: "cubic-bezier(0.55, 0, 1, 0.45)", fill: "forwards" }
+    );
+    button.__bmtFlip = turnAway;
+    turnAway.finished
+      .then(() => {
+        swap();
+        const turnBack = icon.animate(
+          [
+            { transform: "perspective(240px) rotateY(-90deg)" },
+            { transform: "perspective(240px) rotateY(8deg)", offset: 0.75 },
+            { transform: "perspective(240px) rotateY(0deg)" },
+          ],
+          { duration: FLIP_IN_MS, easing: "cubic-bezier(0.2, 0.8, 0.3, 1)" }
+        );
+        button.__bmtFlip = turnBack;
+        turnAway.cancel();
+      })
+      .catch(() => {});
+  }
+
+  function isStandInArtwork(src) {
+    return !src || /^(jar|chrome|resource|moz-src):/i.test(src) || /defaultFavicon|globe/i.test(src);
+  }
+
+  function bestArtwork(artwork) {
+    if (!Array.isArray(artwork)) return "";
+    const usable = artwork.filter((item) => !isStandInArtwork(item?.src));
+    if (!usable.length) return "";
+    const area = (item) => {
+      let best = 0;
+      for (const size of String(item.sizes || "").split(/\s+/)) {
+        const [w, h] = size.split("x");
+        const value = (parseInt(w, 10) || 0) * (parseInt(h, 10) || 0);
+        if (value > best) best = value;
+      }
+      return best;
+    };
+    return [...usable].sort((a, b) => area(b) - area(a))[0]?.src || "";
+  }
+
+  function useMediaArtwork() {
+    const front = window.gZenMediaController?.frontCard;
+    const proto = front && Object.getPrototypeOf(front);
+    if (!proto || typeof proto.updateIcon !== "function" || proto.updateIcon.__bmt) {
+      return !!proto?.updateIcon?.__bmt;
+    }
+
+    const originalPosition = proto.updatePosition;
+    if (typeof originalPosition === "function") {
+      proto.updatePosition = function (...args) {
+        const result = originalPosition.apply(this, args);
+        try {
+          if (this.element) this.element.__bmtCard = this;
+          watchTimeLeft(this);
+          showTimeLeft(this);
+        } catch (err) {
+          noteError("updatePosition", err);
+        }
+        return result;
+      };
+    }
+
+    const originalIcon = proto.updateIcon;
+    const patched = function () {
+      originalIcon.call(this);
+      const button = this.focusButton;
+      if (this.element) this.element.__bmtCard = this;
+      if (!button) return;
+
+      let art = "";
+      try {
+        art = bestArtwork(this.controller?.getMetadata?.()?.artwork);
+      } catch (err) {
+        noteError("artwork", err);
+      }
+
+      ensureRing(button);
+      if (art) {
+        const previous = button.getAttribute("bmt-art");
+        button.setAttribute("bmt-art", art);
+        const showArt = () => button.style.setProperty("--bmt-media-art", `url("${art.replace(/"/g, "%22")}")`);
+        if (previous && previous !== art) flipArtwork(button, showArt);
+        else showArt();
+      } else {
+        button.removeAttribute("bmt-art");
+        button.style.removeProperty("--bmt-media-art");
+      }
+      showFaviconTile(this, button, art);
+    };
+    patched.__bmt = true;
+    proto.updateIcon = patched;
+
+    try {
+      front.updateIcon();
+      front.updatePosition?.();
+    } catch (err) {
+      noteError("show artwork", err);
+    }
     return true;
   }
 
-  /** Undo older wraps that broke native toolbarbutton hover/layout. */
-  function unwrapMuteButton(button) {
-    const anchor = button?.parentElement;
-    if (!anchor?.hasAttribute?.("zen-volume-anchor")) return;
-    const parent = anchor.parentNode;
-    if (!parent) return;
-    parent.insertBefore(button, anchor);
-    anchor.remove();
-  }
-
-  function onCardMuteChanged(cardEl) {
-    if (!sliderEl || dragging || cardEl !== activeCardEl) return;
-
-    const isMuted = cardEl.hasAttribute("muted");
-    const wasMuted = cardWasMuted.get(cardEl) === true;
-
-    if (!wasMuted && isMuted) {
-      sliderEl.value = "0";
-    } else if (wasMuted && !isMuted) {
-      restoreVolumeAfterUnmute();
-    }
-
-    cardWasMuted.set(cardEl, isMuted);
-  }
-
-  /**
-   * Wire mute button hover directly (no wrapper) so native hover styles stay intact.
-   */
-  function wireCard(cardEl) {
-    if (!cardEl || wiredCards.has(cardEl)) return false;
-
-    const button = cardEl.querySelector(MUTE_SELECTOR);
-    if (!button) return false;
-
-    // Sharing cards hide the mute button; skip wiring.
-    if (cardEl.hasAttribute("media-sharing")) {
-      wiredCards.add(cardEl);
-      return true;
-    }
-
-    if (!ensurePopup()) return false;
-
-    unwrapMuteButton(button);
-
-    button.addEventListener("mouseenter", () => {
-      setActiveMuteTarget(button, cardEl);
-      openPopup();
+  function watchMedia(bar) {
+    let frame = null;
+    let artworkReady = false;
+    const refresh = () => {
+      frame = null;
+      if (!artworkReady) artworkReady = useMediaArtwork();
+      for (const card of bar.querySelectorAll(".zen-media-card")) updateCardGlow(card);
+    };
+    new MutationObserver((records) => {
+      if (records.every((record) => record.target.closest?.(".bmt-ring"))) return;
+      if (!frame) frame = requestAnimationFrame(refresh);
+    }).observe(bar, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["src", "style", "hidden", "bmt-art", "bmt-favicon"],
     });
-    button.addEventListener("mouseleave", scheduleHide);
+    refresh();
+  }
 
-    button.addEventListener(
-      "pointerdown",
-      () => {
-        setActiveMuteTarget(button, cardEl);
-        capturePreMuteVolume(getActiveBrowser());
+  function watchFaviconUpdates() {
+    if (!gBrowser?.tabContainer) return;
+    gBrowser.tabContainer.addEventListener("TabAttrModified", (event) => {
+      if (!event.detail?.changed?.includes("image")) return;
+      for (const element of toolbar()?.querySelectorAll(".zen-media-card") || []) {
+        const card = element.__bmtCard;
+        if (card?.browser !== event.target.linkedBrowser) continue;
+        try {
+          card.updateIcon();
+        } catch (err) {
+          noteError("favicon", err);
+        }
+      }
+    });
+  }
+
+  // A card can be dragged out of the sidebar like a toolbar button, which
+  // takes it away from Zen's player until restart. Nothing on the card is a drag.
+  function keepMediaCardsInPlace() {
+    window.addEventListener(
+      "dragstart",
+      (event) => {
+        if (!event.target?.closest?.("#zen-media-controls-toolbar")) return;
+        event.preventDefault();
+        event.stopPropagation();
       },
       true
     );
+  }
 
-    cardWasMuted.set(cardEl, cardEl.hasAttribute("muted"));
-
-    const muteObserver = new MutationObserver(() => onCardMuteChanged(cardEl));
-    muteObserver.observe(cardEl, {
-      attributes: true,
-      attributeFilter: ["muted"],
-    });
-
-    const binding = resolveCardBinding(cardEl);
-    if (binding?.browser) {
-      ensureFrameScript(binding.browser);
-      // Warm volume from prefs and push into content so restart restores level.
-      getBrowserVolume(binding.browser);
-      restorePersistedVolumeToContent(binding.browser);
-    }
-
-    wiredCards.add(cardEl);
+  function start() {
+    const bar = toolbar();
+    if (started || !window.gBrowser || !bar) return false;
+    started = true;
+    installSoundDefaults();
+    watchSidebarPaint();
+    watchMedia(bar);
+    watchFaviconUpdates();
+    keepMediaCardsInPlace();
     return true;
   }
 
-  function scanAndWireCards(toolbar) {
-    for (const cardEl of toolbar.querySelectorAll(CARD_SELECTOR)) {
-      const front = window.gZenMediaController?.frontCard;
-      if (front?.element === cardEl) {
-        bindCard(cardEl, front.browser, front.controller ?? null);
-      }
-      wireCard(cardEl);
-    }
-  }
-
-  /**
-   * Hook native activate methods so we can map each new card to its browser.
-   */
-  function installControllerHooks() {
-    const mc = window.gZenMediaController;
-    if (!mc || hooksInstalled) return !!mc;
-
-    if (typeof mc.activateMediaControls === "function") {
-      const original = mc.activateMediaControls.bind(mc);
-      mc.activateMediaControls = (mediaController, browser) => {
-        const toolbar = getToolbar();
-        const before = new Set(toolbar?.querySelectorAll(CARD_SELECTOR) ?? []);
-        const result = original(mediaController, browser);
-        if (toolbar) {
-          for (const cardEl of toolbar.querySelectorAll(CARD_SELECTOR)) {
-            if (!before.has(cardEl)) {
-              bindCard(cardEl, browser, mediaController);
-              wireCard(cardEl);
-            }
-          }
-        }
-        return result;
-      };
-    }
-
-    if (typeof mc.activateMediaDeviceControls === "function") {
-      const originalDevice = mc.activateMediaDeviceControls.bind(mc);
-      mc.activateMediaDeviceControls = (browser) => {
-        const toolbar = getToolbar();
-        const before = new Set(toolbar?.querySelectorAll(CARD_SELECTOR) ?? []);
-        const result = originalDevice(browser);
-        if (toolbar) {
-          for (const cardEl of toolbar.querySelectorAll(CARD_SELECTOR)) {
-            if (!before.has(cardEl)) {
-              bindCard(cardEl, browser, null);
-              wireCard(cardEl);
-            }
-          }
-        }
-        return result;
-      };
-    }
-
-    if (typeof mc.onCardVisibilityChanged === "function") {
-      const originalVis = mc.onCardVisibilityChanged.bind(mc);
-      mc.onCardVisibilityChanged = () => {
-        originalVis();
-        restackPlayingToFront();
-        refreshArtworkIfToolbarActive();
-      };
-    }
-
-    hooksInstalled = true;
-    return true;
-  }
-
-  function observeToolbar(toolbar) {
-    if (toolbarObserver) return;
-
-    toolbarObserver = new MutationObserver(() => {
-      if (toolbar.hasAttribute("hidden")) {
-        closePopup();
-        clearArtworkOnToolbar(toolbar);
-      }
+  function waitForToolbar() {
+    if (start()) return;
+    const observer = new MutationObserver(() => {
+      if (start()) observer.disconnect();
     });
-    toolbarObserver.observe(toolbar, {
-      attributes: true,
-      attributeFilter: ["hidden"],
-    });
-
-    cardsObserver = new MutationObserver((mutations) => {
-      if (ignoreCardMutations || restackBusy) return;
-
-      let shouldScan = false;
-      let shouldRestack = false;
-      for (const mutation of mutations) {
-        if (mutation.type === "childList") {
-          shouldScan = true;
-          continue;
-        }
-        if (mutation.attributeName === "hidden") {
-          shouldRestack = true;
-          continue;
-        }
-        if (mutation.attributeName === "class") {
-          const nowPlaying = mutation.target?.classList?.contains("playing");
-          const wasPlaying = mutation.oldValue?.split(/\s+/).includes("playing");
-          if (nowPlaying !== wasPlaying) shouldRestack = true;
-        }
-      }
-      if (shouldScan) scanAndWireCards(toolbar);
-      if (shouldScan || shouldRestack) {
-        restackPlayingToFront(toolbar);
-        refreshArtworkIfToolbarActive(toolbar);
-      }
-    });
-    cardsObserver.observe(toolbar, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeOldValue: true,
-      attributeFilter: ["class", "hidden"],
-    });
-
-    const bumpLayout = () => {
-      if (popupOpen) syncPopupPosition();
-    };
-    window.addEventListener("resize", bumpLayout);
-    safe(() => {
-      layoutObserver = new ResizeObserver(bumpLayout);
-      layoutObserver.observe(toolbar);
-    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    window.addEventListener("unload", () => observer.disconnect(), { once: true });
   }
 
-  function observeLibraryOpen() {
-    const root = document.documentElement;
-    const onLibraryAttr = () => {
-      if (!isLibraryOpen()) return;
-      closePopup();
-      clearArtworkOnToolbar(getToolbar());
-    };
-    onLibraryAttr();
-    new MutationObserver(onLibraryAttr).observe(root, {
-      attributes: true,
-      attributeFilter: ["zen-library-open", "zen-library-open-compact"],
-    });
-  }
-
-  function buildUi() {
-    const toolbar = getToolbar();
-    if (!toolbar || typeof window.gZenMediaController === "undefined") {
-      return false;
-    }
-
-    installControllerHooks();
-    setupMessageListeners();
-    // Prebuild popup + frame-script URL so the first mute hover isn't cold.
-    ensurePopup();
-    if (!frameScriptUrl) {
-      frameScriptUrl =
-        "data:application/javascript;charset=utf-8," +
-        encodeURIComponent(VOLUME_FRAME_SCRIPT);
-    }
-    addArtworkHoverListeners(toolbar);
-    observeToolbar(toolbar);
-    observeLibraryOpen();
-    scanAndWireCards(toolbar);
-    restackPlayingToFront(toolbar);
-
-    // Ready once controller + toolbar exist; cards may appear later via observer.
-    log("UI ready for stacked media cards");
-    return true;
-  }
-
-  function requestInit() {
-    setupMessageListeners();
-    if (buildUi()) {
-      if (initRetryTimer) {
-        clearTimeout(initRetryTimer);
-        initRetryTimer = null;
-      }
-      initRetryCount = 0;
-      return;
-    }
-    if (initRetryCount >= INIT_RETRY_MAX) return;
-    initRetryCount++;
-    initRetryTimer = setTimeout(requestInit, INIT_RETRY_MS);
-  }
-
-  function bootstrap() {
-    requestInit();
-  }
-
-  bootstrap();
-  if (document.readyState !== "complete") {
-    window.addEventListener("load", bootstrap, { once: true });
+  if (document.readyState === "complete") waitForToolbar();
+  else {
+    document.addEventListener("DOMContentLoaded", waitForToolbar, { once: true });
+    window.addEventListener("load", waitForToolbar, { once: true });
   }
 })();
