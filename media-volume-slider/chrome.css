@@ -93,7 +93,7 @@
       transition: opacity 0.3s var(--bmt-ease);
     }
 
-    &:is(:hover, :focus-within)::before {
+    &:hover::before {
       opacity: 1;
     }
 
@@ -411,7 +411,7 @@
 
   /* Several cards open together without the spring, so the top card
      doesn't bounce. Closing, and a single card growing, still spring. */
-  &:is(:hover, :focus-within):has(.zen-media-card ~ .zen-media-card) .zen-media-card:not([zen-reindexing]) {
+  &:hover:has(.zen-media-card ~ .zen-media-card) .zen-media-card:not([zen-reindexing]) {
     transition:
       transform 0.35s var(--bmt-ease),
       opacity 0.3s var(--bmt-ease),
@@ -420,7 +420,7 @@
       background-color 0.3s var(--bmt-ease) !important;
   }
 
-  &:is(:hover, :focus-within) {
+  &:hover {
     .zen-media-card {
       height: var(--bmt-card-height-open) !important;
       background-color: var(--bmt-solid, var(--bmt-card-base)) !important;
@@ -526,7 +526,7 @@
   }
 }
 
-#zen-media-controls-toolbar:not(:is(:hover, :focus-within)):has(.zen-media-card[stacked-behind]):not(:has(.zen-media-card:not([stacked-behind]):is([zen-hiding], [zen-removing]))) .zen-media-card[stacked-behind] {
+#zen-media-controls-toolbar:not(:hover):has(.zen-media-card[stacked-behind]):not(:has(.zen-media-card:not([stacked-behind]):is([zen-hiding], [zen-removing]))) .zen-media-card[stacked-behind] {
   mask: linear-gradient(
     #000 0 calc(var(--zen-media-stack-peek, 8px) * var(--zen-media-card-peek-level, 1) / (1 - 0.04 * var(--zen-media-card-peek-level, 1))),
     transparent 0

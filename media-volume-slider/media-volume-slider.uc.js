@@ -132,7 +132,9 @@
     const paint = layer ? paintColor(getComputedStyle(layer).getPropertyValue(name)) : null;
     const rootStyle = getComputedStyle(root);
     const tint = resolveColor(rootStyle.getPropertyValue("--bmt-media-bg"));
-    const base = resolveColor(rootStyle.getPropertyValue("--bmt-card-base"));
+    // light-dark() follows the window's scheme, not the space's: a dark space
+    // in a light window got the pale base and the open card turned gray
+    const base = paint ? (brightnessOf(paint) > 160 ? [235, 235, 235, 255] : [27, 27, 27, 255]) : null;
     if (!paint || !tint || !base) {
       root.style.removeProperty("--bmt-rest");
       root.style.removeProperty("--bmt-solid");
@@ -151,12 +153,18 @@
     } catch (err) {
       noteError("sidebar paint", err);
     }
+    // Zen restyles these layers every frame while blending spaces; reading
+    // each colour stop then recalculates styles several times a frame.
+    let settling = 0;
     const watcher = new MutationObserver(() => {
-      try {
-        syncSidebarPaint();
-      } catch (err) {
-        noteError("sidebar paint", err);
-      }
+      clearTimeout(settling);
+      settling = setTimeout(() => {
+        try {
+          syncSidebarPaint();
+        } catch (err) {
+          noteError("sidebar paint", err);
+        }
+      }, 120);
     });
     for (const id of ["zen-browser-background", "zen-toolbar-background"]) {
       const layer = document.getElementById(id);
@@ -686,7 +694,14 @@
       for (const card of bar.querySelectorAll(".zen-media-card")) updateCardGlow(card);
     };
     new MutationObserver((records) => {
-      if (records.every((record) => record.target.closest?.(".bmt-ring, .bmt-glow"))) return;
+      const relevant = records.some((record) => {
+        const target = record.target;
+        if (target.closest?.(".bmt-ring, .bmt-glow")) return false;
+        // Zen moves the stack through inline styles on the cards and toolbar
+        if (record.attributeName === "style" && (target === bar || target.classList?.contains("zen-media-card"))) return false;
+        return true;
+      });
+      if (!relevant) return;
       if (!frame) frame = requestAnimationFrame(refresh);
     }).observe(bar, {
       subtree: true,
