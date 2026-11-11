@@ -113,11 +113,40 @@ function saveTokens(store) {
   return tokenWrite;
 }
 
-async function tokenFor(contextKey) {
+const CONSUMER_OUTLOOK_FAMILIES = new Set(['live', 'cloud']);
+
+function outlookKeyParts(contextKey) {
+  const parts = String(contextKey || '').split(':');
+  return {
+    family: parts[1] || '',
+    container: parts[parts.length - 1] || '0'
+  };
+}
+
+function tokenStorageKey(store, contextKey) {
+  if (store[contextKey]?.accessToken) return contextKey;
+  const wanted = outlookKeyParts(contextKey);
+  if (!CONSUMER_OUTLOOK_FAMILIES.has(wanted.family)) return '';
+  for (const key of Object.keys(store)) {
+    const other = outlookKeyParts(key);
+    if (other.container !== wanted.container) continue;
+    if (!CONSUMER_OUTLOOK_FAMILIES.has(other.family)) continue;
+    if (store[key]?.accessToken) return key;
+  }
+  return '';
+}
+
+async function resolveToken(contextKey) {
   const store = await loadTokens();
-  const entry = store[contextKey];
-  if (!entry?.accessToken) return null;
-  return entry;
+  const key = tokenStorageKey(store, contextKey);
+  if (!key) return null;
+  if (key !== contextKey) debugLog('Outlook token reused', key, 'for', contextKey);
+  return { key, entry: store[key] };
+}
+
+async function tokenFor(contextKey) {
+  const found = await resolveToken(contextKey);
+  return found?.entry || null;
 }
 
 async function putToken(contextKey, payload, previous) {
@@ -156,19 +185,22 @@ async function postToken(win, userContextId, fields) {
 }
 
 async function refreshToken(win, userContextId, contextKey, entry, clientId) {
-  if (!entry?.refreshToken) return null;
+  const found = await resolveToken(contextKey);
+  const key = found?.key || contextKey;
+  const current = entry || found?.entry;
+  if (!current?.refreshToken) return null;
   const { status, payload } = await postToken(win, userContextId, {
     client_id: clientId,
     grant_type: 'refresh_token',
-    refresh_token: entry.refreshToken,
+    refresh_token: current.refreshToken,
     scope: OUTLOOK_SCOPE
   });
   if (status < 200 || status >= 300 || !payload.access_token) {
     debugLog('Outlook refresh failed', status, payload.error || '');
-    await dropToken(contextKey);
+    await dropToken(key);
     return null;
   }
-  return putToken(contextKey, payload, entry);
+  return putToken(key, payload, current);
 }
 
 async function accessToken(win, userContextId, contextKey, clientId) {
