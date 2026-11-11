@@ -233,7 +233,9 @@ export function httpRequest(win, { url, userContextId, method = 'GET', headers =
 
   if (body) {
     const stream = Cc['@mozilla.org/io/string-input-stream;1'].createInstance(Ci.nsIStringInputStream);
-    stream.setData(body, body.length);
+    // setData was removed. setUTF8Data is the replacement on current Firefox.
+    if (typeof stream.setUTF8Data === 'function') stream.setUTF8Data(body);
+    else stream.setByteStringData(body);
     channel.QueryInterface(Ci.nsIUploadChannel);
     channel.setUploadStream(stream, 'application/json; charset=utf-8', -1);
   }
@@ -285,12 +287,20 @@ export function httpRequest(win, { url, userContextId, method = 'GET', headers =
       } catch (e) {}
       let status = 0;
       let finalUrl = url;
+      const responseHeaders = {};
       try {
         const http = request.QueryInterface(Ci.nsIHttpChannel);
         status = http.responseStatus;
         finalUrl = http.URI?.spec || url;
+        http.visitResponseHeaders({
+          visitHeader(name, value) {
+            const key = String(name || '').toLowerCase();
+            if (key !== 'x-owa-canary' && key !== 'set-cookie') return;
+            responseHeaders[key] = responseHeaders[key] ? responseHeaders[key] + '\n' + value : value;
+          }
+        });
       } catch (e) {}
-      resolve({ status, finalUrl, text, jar, cookieString });
+      resolve({ status, finalUrl, text, jar, cookieString, responseHeaders });
     });
   });
 }

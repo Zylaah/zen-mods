@@ -281,8 +281,17 @@ function requestCookies(cookies, requestPath, canary) {
 }
 
 function canaryInText(text) {
-  const match = String(text || '').match(/X-OWA-CANARY["']?\s*[:=]\s*["']([^"'\s;]+)/i);
+  const match = String(text || '').match(/(?:X-OWA-CANARY|owaCanary|"canary")["']?\s*[:=]\s*["']([^"'\s;]+)/i);
   return match ? canaryValue(match[1]) : '';
+}
+
+function canaryFromResponse(fetched, origin, hints) {
+  if (!fetched) return null;
+  const fromHeader = canaryInText(
+    'X-OWA-CANARY=' + (fetched.responseHeaders?.['x-owa-canary'] || '') + '\n' + (fetched.responseHeaders?.['set-cookie'] || '')
+  ) || canaryInText(fetched.text);
+  if (!fromHeader) return null;
+  return { value: fromHeader, path: owaPrefix(origin, hints) + '/' };
 }
 
 async function loadCanary(app, tab, origin, hints) {
@@ -313,8 +322,8 @@ async function loadCanary(app, tab, origin, hints) {
   if (fetched) debugLog('Outlook startupdata', fetched.status, fetched.finalUrl);
   const again = read();
   if (again?.value) return again;
-  const fromBody = canaryInText(fetched?.text);
-  if (fromBody) return { value: fromBody, path: owaPrefix(origin, hints) + '/' };
+  const fromResponse = canaryFromResponse(fetched, origin, hints);
+  if (fromResponse?.value) return fromResponse;
 
   const names = hostCookies(userContextId, hosts).map((cookie) => cookie.name + '@' + (cookie.path || '/'));
   debugLog('Outlook canary still missing', names.slice(0, 40).join(', ') || '(no outlook cookies)');
