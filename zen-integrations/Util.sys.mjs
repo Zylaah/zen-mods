@@ -260,11 +260,22 @@ export function httpRequest(win, { url, userContextId, method = 'GET', headers =
     observe(subject) {
       // A missing channel id used to match every request and replace its
       // Cookie header. That signed Outlook out. Never touch another channel.
-      if (anonymous || !cookieString || !channelId) return;
+      if (!channelId) return;
       try {
         const http = subject.QueryInterface(Ci.nsIHttpChannel);
         const ident = subject.QueryInterface(Ci.nsIIdentChannel);
         if (ident.channelId !== channelId) return;
+        if (anonymous) {
+          // Necko adds Origin after our headers. A native public client token
+          // POST that still carries Origin is rejected as AADSTS90023.
+          const spec = http.URI?.spec || '';
+          if (spec.includes('/oauth2/') && spec.includes('/token')) {
+            http.setRequestHeader('Origin', '', false);
+            http.setRequestHeader('Referer', '', false);
+          }
+          return;
+        }
+        if (!cookieString) return;
         http.setRequestHeader('Cookie', cookieString, false);
       } catch (e) {}
     }
