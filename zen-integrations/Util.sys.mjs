@@ -221,10 +221,14 @@ function principalCookieHeader(pageUrl, userContextId) {
 export function httpRequest(win, { url, userContextId, method = 'GET', headers = {}, body = '', cookieHosts, cookieHeader, timeoutMs, maxBytes, contentType, anonymous = false }) {
   const uri = Services.io.newURI(url);
   const principal = Services.scriptSecurityManager.createContentPrincipal(uri, { userContextId });
-  const jar = cookieJar(userContextId, url, cookieHosts);
-  const cookieString = cookieHeader != null
-    ? cookieHeader
-    : (principalCookieHeader(url, userContextId) || cookieHeaderFromJar(jar));
+  // Anonymous calls (Microsoft token and Graph) have no cookie host list.
+  // cookieJar iterates that list, so skip it instead of throwing.
+  const jar = anonymous ? new Map() : cookieJar(userContextId, url, cookieHosts);
+  const cookieString = anonymous
+    ? ''
+    : (cookieHeader != null
+      ? cookieHeader
+      : (principalCookieHeader(url, userContextId) || cookieHeaderFromJar(jar)));
   const channel = NetUtil.newChannel({
     uri,
     loadingPrincipal: principal,
