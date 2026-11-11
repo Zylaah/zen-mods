@@ -1,15 +1,15 @@
 // ==UserScript==
-// @name           Live Gmail Panel
-// @description    Displays Gmail inbox emails in a floating panel when hovering over Gmail essential or pinned tabs
+// @name           Zen Integrations
+// @description    Unread Gmail and Outlook when hovering an essential or pinned tab
 // @author         Bxth
-// @version        4.1.18
+// @version        1.0.0
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const MOD_ROOT = 'chrome://sine/content/live-gmail';
+  const MOD_ROOT = 'chrome://sine/content/zen-integrations';
   const MODULE_VERSION = `?v=${Date.now()}`;
 
   function registerReadStateActor() {
@@ -33,7 +33,7 @@
       });
     } catch (err) {
       if (err?.name !== 'NotSupportedError') {
-        console.error('[Live Gmail] Could not register read-state actor:', err);
+        console.error('[Zen Integrations] Could not register read-state actor:', err);
       }
     }
   }
@@ -46,14 +46,14 @@
 
     registerReadStateActor();
 
-    const { createLiveGmail } = ChromeUtils.importESModule(
-      `${MOD_ROOT}/LiveGmail.sys.mjs${MODULE_VERSION}`
+    const { createZenIntegrations } = ChromeUtils.importESModule(
+      `${MOD_ROOT}/App.sys.mjs${MODULE_VERSION}`
     );
-    const app = createLiveGmail(window);
-    window.liveGmail = app;
+    const app = createZenIntegrations(window);
+    window.zenIntegrations = app;
     app.init();
 
-    window.liveGmailDebug = {
+    window.zenIntegrationsDebug = {
       showPanel: () => {
         if (app.panelElement) {
           app.panel.pinCompactChrome(app.hoveredTab);
@@ -62,15 +62,9 @@
       },
       hidePanel: () => app.panel.hide(),
       scan: () => {
-        const tab = app.tabs.findAnchor();
-        if (tab) app.atom.requestScan(tab, { force: true });
+        const tab = app.tabs.anchors()[0];
+        if (tab) app.scan.requestScan(tab, { force: true });
       },
-      authorize: (clientId, clientSecret) => app.oauth.authorize(clientId, clientSecret).catch((error) => {
-        console.error('[Live Gmail] OAuth', error && error.message ? error.message : error);
-        throw error;
-      }),
-      disconnect: () => app.oauth.disconnect(),
-      oauth: () => app.oauth.status(),
       rescan: () => app.tabs.scanLoadedAnchors(),
       emails: () => app.currentEmails,
       context: () => app.activePanelContextKey,
@@ -78,20 +72,10 @@
       reInit: () => app.init()
     };
 
-    const { attachLiveGmailSettings } = ChromeUtils.importESModule(
-      `${MOD_ROOT}/LiveGmailSettings.sys.mjs${MODULE_VERSION}`
-    );
-    const detachSettings = attachLiveGmailSettings(window);
-
     if (typeof window.addUnloadListener === 'function') {
       window.addUnloadListener(() => {
-        try {
-          detachSettings();
-        } catch (e) {}
-        try {
-          app.destroy();
-        } catch (e) {}
-        if (window.liveGmail === app) window.liveGmail = null;
+        try { app.destroy(); } catch (e) {}
+        if (window.zenIntegrations === app) window.zenIntegrations = null;
       });
     }
   }

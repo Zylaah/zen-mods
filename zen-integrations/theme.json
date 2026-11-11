@@ -1,0 +1,30 @@
+{
+  "version": "1.0.0",
+  "id": "zen-integrations",
+  "name": "Zen Integrations",
+  "description": "Unread Gmail and Outlook when hovering an essential or pinned tab",
+  "scripts": {
+    "zen-integrations.uc.js": {
+      "include": [
+        "chrome://browser/content/browser.xhtml"
+      ]
+    }
+  },
+  "style": {
+    "chrome": "chrome.css"
+  },
+  "homepage": "https://github.com/Zylaah/zen-mods/tree/main/zen-integrations",
+  "readme": "https://raw.githubusercontent.com/Zylaah/zen-mods/refs/heads/main/zen-integrations/README.md",
+  "author": "Bxth",
+  "tags": [
+    "Zen Browser",
+    "Gmail",
+    "Outlook",
+    "Essentials",
+    "Unread"
+  ],
+  "createdAt": "2025-12-08",
+  "updatedAt": "2026-11-11",
+  "fork": ["zen"],
+  "ai": "yes"
+}

@@ -4,12 +4,12 @@ export class LiveGmailParent extends JSWindowActorParent {
     const win = browser?.ownerGlobal;
     try {
       if (message.name === 'LiveGmail:ReadState') {
-        win?.liveGmail?.onReadState?.(browser, message.data);
+        win?.zenIntegrations?.onReadState?.(browser, message.data);
       } else if (message.name === 'LiveGmail:FeedDocument') {
-        win?.liveGmail?.onFeedDocument?.(browser, message.data);
+        win?.zenIntegrations?.onFeedDocument?.(browser, message.data);
       }
     } catch (e) {
-      console.error('[Live Gmail] actor message:', e);
+      console.error('[Zen Integrations] actor message:', e);
     }
   }
 }

@@ -1,21 +1,14 @@
-const { CONFIG, debugLog, getContextContainerId } = ChromeUtils.importESModule(
-  'chrome://sine/content/live-gmail/LiveGmailUtil.sys.mjs' + new URL(import.meta.url).search
+const { CONFIG, debugLog, profilePath, scopedCacheKey } = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
 );
 
-export class LiveGmailCache {
+export class ZenCache {
   constructor(app) {
     this.app = app;
   }
 
-  getFilePath() {
-    const profileDir = Services.dirsvc.get('ProfD', Ci.nsIFile).path;
-    return PathUtils.join(profileDir, 'live-gmail-cache.json');
-  }
-
   normalizeEntry(entry) {
-    if (Array.isArray(entry)) {
-      return { emails: entry, lastScanTs: 0 };
-    }
+    if (Array.isArray(entry)) return { emails: entry, lastScanTs: 0 };
     if (entry && Array.isArray(entry.emails)) {
       return {
         emails: entry.emails,
@@ -28,20 +21,18 @@ export class LiveGmailCache {
   migrateStore(store) {
     const migrated = {};
     for (const [key, entry] of Object.entries(store || {})) {
-      const containerKey = String(getContextContainerId(key));
+      const storeKey = scopedCacheKey(key);
       const normalized = this.normalizeEntry(entry);
-      const existing = migrated[containerKey];
+      const existing = migrated[storeKey];
       if (!existing) {
-        migrated[containerKey] = normalized;
+        migrated[storeKey] = normalized;
         continue;
       }
       const preferNew =
         normalized.lastScanTs > existing.lastScanTs ||
         (normalized.lastScanTs === existing.lastScanTs &&
           normalized.emails.length > existing.emails.length);
-      if (preferNew) {
-        migrated[containerKey] = normalized;
-      }
+      if (preferNew) migrated[storeKey] = normalized;
     }
     return migrated;
   }
@@ -51,16 +42,14 @@ export class LiveGmailCache {
     if (!ctx || !Object.prototype.hasOwnProperty.call(store, key)) return;
     const entry = this.normalizeEntry(store[key]);
     ctx.hasScanned = true;
-    if (!ctx.lastScanTs && entry.lastScanTs) {
-      ctx.lastScanTs = entry.lastScanTs;
-    }
+    if (!ctx.lastScanTs && entry.lastScanTs) ctx.lastScanTs = entry.lastScanTs;
     if (ctx.cachedEmails.length === 0 && entry.emails.length > 0) {
       ctx.cachedEmails = entry.emails.slice();
     }
   }
 
   getOrCreateContext(key) {
-    const storeKey = String(key ?? 0);
+    const storeKey = scopedCacheKey(key ?? 'gmail:0');
     const contexts = this.app.panelContexts;
     if (!contexts.has(storeKey)) {
       const store = this.app.diskCacheStore;
@@ -89,7 +78,7 @@ export class LiveGmailCache {
 
   activate(key) {
     if (key == null || key === '') return;
-    const storeKey = String(key);
+    const storeKey = scopedCacheKey(key);
     if (storeKey !== this.app.activePanelContextKey) {
       this.persistActive(this.app.activePanelContextKey);
       this.app.activePanelContextKey = storeKey;
@@ -122,37 +111,43 @@ export class LiveGmailCache {
         };
       }
       this.app.diskCacheStore = this.migrateStore(this.app.diskCacheStore);
-      IOUtils.writeUTF8(this.getFilePath(), JSON.stringify(this.app.diskCacheStore)).catch(() => {});
+      IOUtils.writeUTF8(profilePath(CONFIG.CACHE_FILE), JSON.stringify(this.app.diskCacheStore)).catch(() => {});
     } catch (e) {}
   }
 
-  load() {
-    const fallback = () => this.activate(this.app.getPanelContextKey());
-    try {
-      IOUtils.readUTF8(this.getFilePath())
-        .then((json) => {
-          const parsed = JSON.parse(json);
-          if (Array.isArray(parsed)) {
-            this.app.diskCacheStore = this.migrateStore({ '0': parsed });
-          } else if (parsed && typeof parsed === 'object') {
-            this.app.diskCacheStore = this.migrateStore(parsed);
-          }
-          for (const storeKey of Object.keys(this.app.diskCacheStore)) {
-            this.getOrCreateContext(storeKey);
-          }
-          const activeKey = this.app.getPanelContextKey();
-          this.activate(activeKey);
-          debugLog(
-            'Restored',
-            this.getOrCreateContext(activeKey).cachedEmails.length,
-            'emails for context',
-            activeKey
-          );
-          this.app.panel.updateDisplay();
-        })
-        .catch(fallback);
-    } catch (e) {
-      fallback();
+  applyStore(parsed) {
+    if (Array.isArray(parsed)) {
+      this.app.diskCacheStore = this.migrateStore({ '0': parsed });
+    } else if (parsed && typeof parsed === 'object') {
+      this.app.diskCacheStore = this.migrateStore(parsed);
     }
+    for (const storeKey of Object.keys(this.app.diskCacheStore)) {
+      this.getOrCreateContext(storeKey);
+    }
+  }
+
+  load() {
+    const finish = () => {
+      const activeKey = this.app.activePanelContextKey;
+      if (activeKey) this.activate(activeKey);
+      this.app.panel.updateDisplay();
+    };
+    const read = (path, legacy) => IOUtils.readUTF8(path).then((json) => {
+      this.applyStore(JSON.parse(json));
+      if (legacy) debugLog('Migrated cache from', CONFIG.LEGACY_CACHE_FILE);
+      const activeKey = this.app.activePanelContextKey;
+      debugLog(
+        'Restored',
+        activeKey ? this.getOrCreateContext(activeKey).cachedEmails.length : 0,
+        'messages for',
+        activeKey || '(no panel yet)'
+      );
+      finish();
+    });
+    try {
+      read(profilePath(CONFIG.CACHE_FILE), false).catch(() => {
+        read(profilePath(CONFIG.LEGACY_CACHE_FILE), true).catch(() => {});
+      });
+    } catch (e) {}
   }
 }

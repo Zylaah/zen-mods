@@ -2,25 +2,27 @@ const {
   CONFIG,
   debugLog,
   getContextContainerId,
-  getTabUserContextId,
-  emailMatchesThread,
-  getGmailComposeUrl,
-  getGmailInboxUrl,
   getGmailUrlPattern,
+  isEssentialOrPinnedTab
+} = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
+);
+const {
+  emailMatchesThread,
   gmailAccountSlotFromHints,
   gmailAccountSlotFromUrl,
   gmailSpaUrl,
   gmailThreadIdFromUrl,
-  isEssentialOrPinnedTab,
   isGmailThreadToken,
   normalizeGmailOpenUrl,
-  subjectsMatch,
-  tabMatchesContainerContext
+  subjectsMatch
 } = ChromeUtils.importESModule(
-  'chrome://sine/content/live-gmail/LiveGmailUtil.sys.mjs' + new URL(import.meta.url).search
+  'chrome://sine/content/zen-integrations/providers/Gmail.sys.mjs' + new URL(import.meta.url).search
 );
 
-export class LiveGmailTabs {
+const FRAME_SCRIPT = 'chrome://sine/content/zen-integrations/GmailFrame.js';
+
+export class ZenTabs {
   constructor(app) {
     this.app = app;
   }
@@ -61,22 +63,20 @@ export class LiveGmailTabs {
     return hints;
   }
 
-  matchesGmailPattern(tab) {
-    const pattern = getGmailUrlPattern();
+  providerFor(tab) {
+    if (!tab) return null;
     const hints = this.getUrlHints(tab);
-    if (hints.some((hint) => hint.includes(pattern))) return true;
-    const image = (tab.getAttribute('image') || '').toLowerCase();
-    if (image.includes('mail.google') || image.includes('google.com/mail') || image.includes('gmail')) {
-      return true;
+    for (const provider of this.app.providers) {
+      if (provider.matches(hints)) return provider;
     }
-    const label = (tab.getAttribute('label') || tab.label || '').toLowerCase();
-    return label === 'gmail' || label.includes('mail.google');
+    return null;
   }
 
-  isGmailAnchor(tab, contextKey = this.app.getPanelContextKey(tab)) {
-    if (!isEssentialOrPinnedTab(tab)) return false;
-    if (!tabMatchesContainerContext(tab, contextKey)) return false;
-    return this.matchesGmailPattern(tab);
+  isAnchor(tab, contextKey) {
+    const provider = this.providerFor(tab);
+    if (!provider || !isEssentialOrPinnedTab(tab)) return false;
+    if (!contextKey) return true;
+    return provider.contextKey(tab, this.getUrlHints(tab)) === String(contextKey);
   }
 
   getBrowserDocumentSpec(browser) {
@@ -88,12 +88,14 @@ export class LiveGmailTabs {
     }
   }
 
-  isLoadedGmailBrowser(browser) {
+  isLoadedMailBrowser(tab) {
+    const browser = tab?.linkedBrowser;
     if (!browser) return false;
     try {
-      if (!browser.browsingContext) return false;
-      if (browser.browsingContext.discarded) return false;
-      return this.getBrowserDocumentSpec(browser).includes(getGmailUrlPattern());
+      if (!browser.browsingContext || browser.browsingContext.discarded) return false;
+      const provider = this.providerFor(tab);
+      if (!provider) return false;
+      return provider.matches([this.getBrowserDocumentSpec(browser)]);
     } catch (e) {
       return false;
     }
@@ -104,7 +106,7 @@ export class LiveGmailTabs {
     try {
       if (tab.hasAttribute('discarded')) return true;
       if (tab.linkedBrowser.browsingContext?.discarded) return true;
-      return !this.isLoadedGmailBrowser(tab.linkedBrowser);
+      return !this.isLoadedMailBrowser(tab);
     } catch (e) {
       return true;
     }
@@ -118,29 +120,31 @@ export class LiveGmailTabs {
     return false;
   }
 
-  isNavigationComplete(browser) {
-    if (!this.isLoadedGmailBrowser(browser)) return false;
+  isNavigationComplete(tab) {
+    if (!this.isLoadedMailBrowser(tab)) return false;
     try {
-      if (browser.webProgress?.isLoadingDocument) return false;
+      if (tab.linkedBrowser?.webProgress?.isLoadingDocument) return false;
     } catch (e) {}
     return true;
   }
 
-  findLoadedAnchor(contextKey = this.app.activePanelContextKey || this.app.getPanelContextKey()) {
-    if (!this.gBrowser?.tabs) return null;
+  findLoadedAnchor(contextKey = this.app.activePanelContextKey) {
+    if (!contextKey || !this.gBrowser?.tabs) return null;
     for (const tab of this.gBrowser.tabs) {
-      if (!this.isGmailAnchor(tab, contextKey)) continue;
+      if (!this.isAnchor(tab, contextKey)) continue;
       if (this.isPendingOrDiscarded(tab)) continue;
-      if (this.isNavigationComplete(tab.linkedBrowser)) return tab;
+      if (this.isNavigationComplete(tab)) return tab;
     }
     return null;
   }
 
-  gmailAnchors() {
+  anchors() {
     const byContext = new Map();
     for (const tab of this.gBrowser?.tabs || []) {
-      if (!isEssentialOrPinnedTab(tab) || !this.matchesGmailPattern(tab)) continue;
-      const key = String(getTabUserContextId(tab) || 0);
+      if (!isEssentialOrPinnedTab(tab)) continue;
+      const provider = this.providerFor(tab);
+      if (!provider) continue;
+      const key = provider.contextKey(tab, this.getUrlHints(tab));
       const current = byContext.get(key);
       if (!current || (this.isPendingOrDiscarded(current) && !this.isPendingOrDiscarded(tab))) {
         byContext.set(key, tab);
@@ -149,33 +153,32 @@ export class LiveGmailTabs {
     return [...byContext.values()];
   }
 
-  findAnchor(contextKey = this.app.activePanelContextKey || this.app.getPanelContextKey()) {
+  findAnchor(contextKey = this.app.activePanelContextKey) {
+    if (!contextKey) return null;
     const loaded = this.findLoadedAnchor(contextKey);
     if (loaded) return loaded;
-    if (!this.gBrowser?.tabs) return null;
-    for (const tab of this.gBrowser.tabs) {
-      if (this.isGmailAnchor(tab, contextKey)) return tab;
+    for (const tab of this.gBrowser?.tabs || []) {
+      if (this.isAnchor(tab, contextKey)) return tab;
     }
     return null;
   }
 
-  resolveTarget(contextKey = this.app.activePanelContextKey || this.app.getPanelContextKey()) {
-    if (this.app.hoveredTab && this.isGmailAnchor(this.app.hoveredTab, contextKey)) {
-      return this.app.hoveredTab;
-    }
+  resolveTarget(contextKey = this.app.activePanelContextKey) {
+    if (this.app.hoveredTab && this.isAnchor(this.app.hoveredTab, contextKey)) return this.app.hoveredTab;
     const existing = this.findAnchor(contextKey);
     if (existing) return existing;
-    if (!this.gBrowser) return null;
-    const gmailUrl = `https://${getGmailUrlPattern()}/`;
+    const provider = this.app.providerForKey(contextKey);
+    if (!provider || !this.gBrowser) return null;
+    const hints = this.getUrlHints(this.app.hoveredTab);
     const containerId = getContextContainerId(contextKey);
     try {
       const addTabArgs = {
         triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
       };
       if (containerId) addTabArgs.userContextId = containerId;
-      return this.gBrowser.addTab(gmailUrl, addTabArgs);
+      return this.gBrowser.addTab(provider.homeUrl(hints), addTabArgs);
     } catch (err) {
-      console.warn('[Live Gmail] Could not create Gmail tab:', err);
+      console.warn('[Zen Integrations] Could not create tab:', err);
       return null;
     }
   }
@@ -208,41 +211,36 @@ export class LiveGmailTabs {
   }
 
   performLoadScan(tab) {
-    if (!tab || tab.closing || !this.isGmailAnchor(tab)) return;
-    const browser = tab.linkedBrowser;
-    if (browser && !this.isPendingOrDiscarded(tab) && !this.app.activeLoadScanTabs.has(tab)) {
+    if (!tab || tab.closing || !this.isAnchor(tab)) return;
+    if (tab.linkedBrowser && !this.isPendingOrDiscarded(tab) && !this.app.activeLoadScanTabs.has(tab)) {
       this.app.activeLoadScanTabs.add(tab);
-      tab.setAttribute('data-live-gmail-was-loaded', 'true');
+      tab.setAttribute('data-zi-was-loaded', 'true');
     }
-    this.app.atom.requestScan(tab, { force: false });
+    this.app.scan.requestScan(tab, { force: false });
   }
 
   checkLoadState(tab) {
-    if (!this.isGmailAnchor(tab)) return;
-    const wasLoaded = tab.getAttribute('data-live-gmail-was-loaded') === 'true';
-    const isLoaded =
-      !this.isPendingOrDiscarded(tab) &&
-      tab.linkedBrowser &&
-      this.isLoadedGmailBrowser(tab.linkedBrowser);
+    if (!this.isAnchor(tab)) return;
+    const wasLoaded = tab.getAttribute('data-zi-was-loaded') === 'true';
+    const isLoaded = !this.isPendingOrDiscarded(tab) && this.isLoadedMailBrowser(tab);
     if (isLoaded && !wasLoaded) {
       this.scheduleLoadScan(tab);
       this.loadInboxWatcher(tab);
     } else if (!isLoaded && wasLoaded) {
       this.finishLoadScan(tab);
-      tab.removeAttribute('data-live-gmail-was-loaded');
-      const contextKey = this.app.getPanelContextKey(tab);
-      this.app.loadScansInFlight.delete(contextKey);
-      if (this.app.activePanelContextKey === contextKey) {
-        this.app.scanInProgress = false;
-      }
+      tab.removeAttribute('data-zi-was-loaded');
+      const provider = this.providerFor(tab);
+      const contextKey = provider?.contextKey(tab, this.getUrlHints(tab));
+      if (contextKey) this.app.loadScansInFlight.delete(contextKey);
+      if (this.app.activePanelContextKey === contextKey) this.app.scanInProgress = false;
     }
   }
 
   attachLoadListeners(tab) {
-    if (tab.hasAttribute('data-live-gmail-load-mon')) return;
-    tab.setAttribute('data-live-gmail-load-mon', 'true');
+    if (tab.hasAttribute('data-zi-load-mon')) return;
+    tab.setAttribute('data-zi-load-mon', 'true');
     tab.addEventListener('SSTabRestored', () => {
-      debugLog('Gmail tab SSTabRestored');
+      debugLog('Mail tab SSTabRestored');
       this.scheduleLoadScan(tab);
     });
   }
@@ -250,10 +248,12 @@ export class LiveGmailTabs {
   scanLoadedAnchors() {
     if (!this.gBrowser?.tabs) return;
     for (const tab of this.gBrowser.tabs) {
-      if (!this.isGmailAnchor(tab, this.app.getPanelContextKey(tab))) continue;
+      if (!this.isAnchor(tab)) continue;
       this.attachLoadListeners(tab);
-      this.wakeGmailActor(tab);
-      this.loadInboxWatcher(tab);
+      if (this.providerFor(tab)?.id === 'gmail') {
+        this.wakeGmailActor(tab);
+        this.loadInboxWatcher(tab);
+      }
       this.checkLoadState(tab);
     }
   }
@@ -261,19 +261,18 @@ export class LiveGmailTabs {
   cleanupScannerTabs() {
     if (!this.gBrowser?.tabs) return;
     for (const tab of Array.from(this.gBrowser.tabs)) {
-      if (tab.hasAttribute(CONFIG.SCANNER_TAB_ATTR)) {
-        try {
-          this.gBrowser.removeTab(tab, { animate: false });
-        } catch (e) {}
+      if (tab.hasAttribute(CONFIG.SCANNER_TAB_ATTR) || tab.hasAttribute(CONFIG.LEGACY_SCANNER_TAB_ATTR)) {
+        try { this.gBrowser.removeTab(tab, { animate: false }); } catch (e) {}
       }
     }
   }
 
   loadInboxWatcher(tab) {
+    if (this.providerFor(tab)?.id !== 'gmail') return;
     const browser = tab?.linkedBrowser;
-    if (!this.isLoadedGmailBrowser(browser) || !browser.messageManager) return;
+    if (!this.isLoadedMailBrowser(tab) || !browser.messageManager) return;
     try {
-      browser.messageManager.loadFrameScript('chrome://sine/content/live-gmail/LiveGmailFrame.js', true);
+      browser.messageManager.loadFrameScript(FRAME_SCRIPT, true);
     } catch (e) {
       debugLog('Could not load inbox watcher', e);
     }
@@ -297,7 +296,7 @@ export class LiveGmailTabs {
     this.inboxWatchListener = (message) => {
       try {
         const tab = this.tabForMessageTarget(message?.target);
-        if (!tab || !this.isGmailAnchor(tab)) return;
+        if (!tab || this.providerFor(tab)?.id !== 'gmail' || !this.isAnchor(tab)) return;
         const data = message.data || {};
         this.noteOpenThread(tab, {
           href: data.href || '',
@@ -317,14 +316,12 @@ export class LiveGmailTabs {
 
   stopInboxWatch() {
     if (!this.inboxWatchListener) return;
-    try {
-      Services.mm.removeMessageListener('LiveGmail:InboxWatch', this.inboxWatchListener);
-    } catch (e) {}
+    try { Services.mm.removeMessageListener('LiveGmail:InboxWatch', this.inboxWatchListener); } catch (e) {}
     this.inboxWatchListener = null;
   }
 
   wakeGmailActor(tab) {
-    if (!this.isLoadedGmailBrowser(tab?.linkedBrowser)) return;
+    if (!this.isLoadedMailBrowser(tab)) return;
     try {
       tab.linkedBrowser.browsingContext?.currentWindowGlobal?.getActor('LiveGmail');
     } catch (e) {}
@@ -348,11 +345,7 @@ export class LiveGmailTabs {
     ]) {
       if (isGmailThreadToken(value) && !ids.includes(value)) ids.push(value);
     }
-    return {
-      ids,
-      subject: email?.subject || '',
-      from: email?.from || ''
-    };
+    return { ids, subject: email?.subject || '', from: email?.from || '' };
   }
 
   inboxUrlFor(email, tab) {
@@ -360,7 +353,7 @@ export class LiveGmailTabs {
     return `https://${getGmailUrlPattern()}/mail/u/${slot}/#inbox`;
   }
 
-  loadGmailUrl(browser, url) {
+  loadMailUrl(browser, url) {
     if (!browser?.fixupAndLoadURIString || !url) return;
     browser.fixupAndLoadURIString(url, {
       triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
@@ -379,11 +372,11 @@ export class LiveGmailTabs {
           return;
         }
         const browser = tab?.linkedBrowser;
-        const loaded = this.isLoadedGmailBrowser(browser) && this.isNavigationComplete(browser);
+        const loaded = this.isLoadedMailBrowser(tab) && this.isNavigationComplete(tab);
         if (!loaded) {
-          if (!loadedInbox && Date.now() - started > 1200 && browser && !this.isLoadedGmailBrowser(browser)) {
+          if (!loadedInbox && Date.now() - started > 1200 && browser && !this.isLoadedMailBrowser(tab)) {
             loadedInbox = true;
-            this.loadGmailUrl(browser, this.inboxUrlFor(email, tab));
+            this.loadMailUrl(browser, this.inboxUrlFor(email, tab));
           }
           win.setTimeout(tick, 150);
           return;
@@ -418,12 +411,12 @@ export class LiveGmailTabs {
     this.waitForInbox(tab, email).then((ready) => {
       if (!ready) {
         debugLog('Inbox was not ready, opening permalink');
-        this.loadGmailUrl(tab?.linkedBrowser, gmailSpaUrl(gmailUrl) || gmailUrl);
+        this.loadMailUrl(tab?.linkedBrowser, gmailSpaUrl(gmailUrl) || gmailUrl);
         return;
       }
       const actor = this.gmailActor(tab.linkedBrowser);
       if (!actor?.sendQuery) {
-        this.loadGmailUrl(tab.linkedBrowser, gmailSpaUrl(gmailUrl) || gmailUrl);
+        this.loadMailUrl(tab.linkedBrowser, gmailSpaUrl(gmailUrl) || gmailUrl);
         return;
       }
       actor.sendQuery('LiveGmail:OpenThread', this.threadPayload(email)).then((result) => {
@@ -432,10 +425,10 @@ export class LiveGmailTabs {
           return;
         }
         debugLog('No inbox row matched, opening permalink');
-        this.loadGmailUrl(tab.linkedBrowser, gmailSpaUrl(gmailUrl) || gmailUrl);
+        this.loadMailUrl(tab.linkedBrowser, gmailSpaUrl(gmailUrl) || gmailUrl);
       }).catch((err) => {
-        console.warn('[Live Gmail] Could not open thread:', err);
-        this.loadGmailUrl(tab.linkedBrowser, gmailSpaUrl(gmailUrl) || gmailUrl);
+        console.warn('[Zen Integrations] Could not open thread:', err);
+        this.loadMailUrl(tab.linkedBrowser, gmailSpaUrl(gmailUrl) || gmailUrl);
       });
     });
   }
@@ -455,7 +448,9 @@ export class LiveGmailTabs {
     if (ids.length === 0 && !subject) return;
 
     const app = this.app;
-    const key = app.getPanelContextKey(tab);
+    const provider = this.providerFor(tab);
+    const key = provider?.contextKey(tab, this.getUrlHints(tab));
+    if (!key) return;
     const ctx = app.cache.getOrCreateContext(key);
     const active = String(key) === String(app.activePanelContextKey);
     const lists = [ctx.currentEmails, ctx.cachedEmails];
@@ -510,35 +505,37 @@ export class LiveGmailTabs {
     if (!this.gBrowser) return;
     const targetTab = this.resolveTarget();
     if (!targetTab?.linkedBrowser) return;
+    const provider = this.providerFor(targetTab) || this.app.providerForKey(this.app.activePanelContextKey);
+    if (!provider) return;
     this.app.panel.hide();
-    if (this.gBrowser.selectedTab !== targetTab) {
-      this.gBrowser.selectedTab = targetTab;
-    }
+    if (this.gBrowser.selectedTab !== targetTab) this.gBrowser.selectedTab = targetTab;
     try {
-      targetTab.linkedBrowser.fixupAndLoadURIString(getGmailComposeUrl(), {
-        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()
-      });
-      debugLog('Opened Gmail compose');
+      this.loadMailUrl(targetTab.linkedBrowser, provider.composeUrl(this.getUrlHints(targetTab)));
+      debugLog('Opened compose', provider.id);
     } catch (e) {
-      console.warn('[Live Gmail] Could not open Gmail compose:', e);
+      console.warn('[Zen Integrations] Could not open compose:', e);
     }
   }
 
   openEmail(email) {
     const app = this.app;
     const targetTab =
-      app.hoveredTab && this.isGmailAnchor(app.hoveredTab)
+      app.hoveredTab && this.isAnchor(app.hoveredTab)
         ? app.hoveredTab
         : this.resolveTarget(app.activePanelContextKey);
     if (!targetTab || !this.gBrowser) return;
+    if (this.gBrowser.selectedTab !== targetTab) this.gBrowser.selectedTab = targetTab;
 
-    if (this.gBrowser.selectedTab !== targetTab) {
-      this.gBrowser.selectedTab = targetTab;
+    const provider = this.providerFor(targetTab) || app.providerForKey(app.activePanelContextKey);
+    if (provider?.id === 'gmail') {
+      const gmailUrl = normalizeGmailOpenUrl(email.url) || provider.homeUrl(this.getUrlHints(targetTab));
+      debugLog('Opening Gmail', gmailUrl);
+      this.openThreadWhenReady(targetTab, email, gmailUrl);
+    } else {
+      const url = email.url || provider?.homeUrl(this.getUrlHints(targetTab)) || '';
+      debugLog('Opening mail', url);
+      this.loadMailUrl(targetTab.linkedBrowser, url);
     }
-
-    const gmailUrl = normalizeGmailOpenUrl(email.url) || getGmailInboxUrl();
-    debugLog('Opening email', gmailUrl);
-    this.openThreadWhenReady(targetTab, email, gmailUrl);
 
     app.clickedEmailIds.add(email.id);
     const idx = app.currentEmails.findIndex((item) => item.id === email.id);
@@ -546,20 +543,20 @@ export class LiveGmailTabs {
     const cacheIdx = app.cachedEmails.findIndex((item) => item.id === email.id);
     if (cacheIdx !== -1) app.cachedEmails.splice(cacheIdx, 1);
     app.panel.updateDisplay();
-    app.atom.scanContext(app.activePanelContextKey);
+    app.scan.scanContext(app.activePanelContextKey);
     app.panel.hide();
   }
 
   attachHoverListener(tab) {
-    if (!tab || tab.hasAttribute('data-live-gmail-listener')) return;
+    if (!tab || tab.hasAttribute('data-zi-listener')) return;
     tab.addEventListener('mouseenter', (event) => this.onHover(event));
     tab.addEventListener('mouseleave', () => this.onLeave());
-    tab.setAttribute('data-live-gmail-listener', 'true');
+    tab.setAttribute('data-zi-listener', 'true');
   }
 
   onHover(event) {
     const tab = event.currentTarget;
-    if (!this.isGmailAnchor(tab)) {
+    if (!this.isAnchor(tab)) {
       this.app.panel.cancelShowTimer();
       this.app.panel.scheduleHide();
       return;
@@ -576,21 +573,21 @@ export class LiveGmailTabs {
     const document = this.window.document;
     if (!this.gBrowser?.tabs) return;
     for (const tab of this.gBrowser.tabs) {
-      if (tab.hasAttribute('zen-essential') || (tab.pinned && this.matchesGmailPattern(tab))) {
+      if (tab.hasAttribute('zen-essential') || (tab.pinned && this.providerFor(tab))) {
         this.attachHoverListener(tab);
       }
-      if (!this.isGmailAnchor(tab, this.app.getPanelContextKey(tab))) continue;
+      if (!this.isAnchor(tab)) continue;
       this.attachLoadListeners(tab);
-      this.wakeGmailActor(tab);
-      this.loadInboxWatcher(tab);
+      if (this.providerFor(tab)?.id === 'gmail') {
+        this.wakeGmailActor(tab);
+        this.loadInboxWatcher(tab);
+      }
       this.checkLoadState(tab);
     }
     for (const tab of document.querySelectorAll(
       '#zen-essentials .tabbrowser-tab[zen-essential], .zen-workspace-pinned-tabs-section .tabbrowser-tab[pinned]'
     )) {
-      if (tab.hasAttribute('zen-essential') || this.matchesGmailPattern(tab)) {
-        this.attachHoverListener(tab);
-      }
+      if (tab.hasAttribute('zen-essential') || this.providerFor(tab)) this.attachHoverListener(tab);
     }
   }
 
@@ -598,7 +595,7 @@ export class LiveGmailTabs {
     const document = this.window.document;
     const onHover = (event) => {
       const tab = event.target.closest?.('.tabbrowser-tab');
-      if (!tab || !this.isGmailAnchor(tab, this.app.getPanelContextKey(tab))) return;
+      if (!tab || !this.isAnchor(tab)) return;
       this.app.panel.scheduleShow(tab);
     };
     const roots = [
@@ -608,37 +605,27 @@ export class LiveGmailTabs {
       document.getElementById('tabbrowser-tabs')
     ];
     for (const root of roots) {
-      if (!root || root.hasAttribute('data-live-gmail-hover-delegate')) continue;
-      root.setAttribute('data-live-gmail-hover-delegate', 'true');
+      if (!root || root.hasAttribute('data-zi-hover-delegate')) continue;
+      root.setAttribute('data-zi-hover-delegate', 'true');
       root.addEventListener('mouseover', onHover, true);
     }
   }
 
-  onWorkspaceOrContainerChanged(force = false) {
-    const nextKey = this.app.getPanelContextKey();
-    if (!force && nextKey === this.app.activePanelContextKey) return;
+  onWorkspaceOrContainerChanged() {
     this.app.panel.hide();
     this.app.scanInProgress = false;
     this.app.scanContextKey = null;
     this.app.loadScansInFlight.clear();
-    this.app.cache.activate(nextKey);
   }
 
   setupWorkspaceMonitoring() {
-    this.window.addEventListener('ZenWorkspacesUIUpdate', () =>
-      this.onWorkspaceOrContainerChanged(false)
-    );
+    this.window.addEventListener('ZenWorkspacesUIUpdate', () => this.onWorkspaceOrContainerChanged());
     try {
-      Services.prefs.addObserver(
-        'zen.workspaces.separate-essentials',
-        () => this.onWorkspaceOrContainerChanged(true),
-        false
-      );
+      Services.prefs.addObserver('zen.workspaces.separate-essentials', () => this.onWorkspaceOrContainerChanged(), false);
     } catch (e) {}
   }
 
   setupMonitoring() {
-    const document = this.window.document;
     this.startInboxWatch();
     this.refreshAnchors();
     if (this.gBrowser?.tabContainer) {
@@ -658,6 +645,7 @@ export class LiveGmailTabs {
       timer = this.window.setTimeout(() => this.refreshAnchors(), 150);
     };
     const observer = new this.window.MutationObserver(debounced);
+    const document = this.window.document;
     const essentials = document.getElementById('zen-essentials');
     if (essentials) {
       observer.observe(essentials, {

@@ -1,0 +1,221 @@
+/* Zen Integrations panel. Background and radius come from the native XUL panel. */
+
+#zi-panel {
+  --panel-padding: 0;
+  width: 270px;
+}
+
+.zi-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  max-height: 360px;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 11px;
+  color: light-dark(#0c0c0d, #f9f9fa);
+}
+
+.zi-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid light-dark(rgba(0,0,0,0.1), rgba(255,255,255,0.1));
+  background: light-dark(rgba(0,0,0,0.04), rgba(255,255,255,0.04));
+  border-radius: max(calc(var(--panel-border-radius, 8px) - 2px), 4px)
+                 max(calc(var(--panel-border-radius, 8px) - 2px), 4px)
+                 0 0;
+}
+
+.zi-title {
+  font-weight: 600;
+  font-size: 12px;
+  color: light-dark(#0c0c0d, #f9f9fa);
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.zi-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: 300px;
+}
+
+.zi-compose {
+  appearance: none;
+  -moz-appearance: none;
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 1;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  margin: 0;
+  border: 1px solid light-dark(rgba(0,0,0,0.1), rgba(255,255,255,0.1));
+  border-radius: 50%;
+  /* Beat Zen's *:not(.no-squircles) superellipse so these stay true circles */
+  --zen-squircle-value: 1;
+  corner-shape: round !important;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: light-dark(rgba(210, 210, 210), rgba(69, 69, 69));
+  color: light-dark(#0c0c0d, #f9f9fa);
+  box-shadow:
+    inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.1)),
+    0px 2px 3px 0px rgba(0, 0, 0, 0.15);
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.zi-compose > svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+.zi-compose:hover {
+  background-color: light-dark(rgba(200, 200, 200), rgba(80, 80, 80));
+  box-shadow:
+    inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.15)),
+    0px 3px 8px 0px rgba(0, 0, 0, 0.2);
+}
+
+.zi-loading,
+.zi-empty {
+  padding: 16px;
+  text-align: center;
+  color: light-dark(#737373, #b1b1b1);
+  font-size: 12px;
+}
+
+.zi-error {
+  padding: 16px;
+  background: light-dark(rgba(255, 0, 0, 0.1), rgba(255, 0, 0, 0.2));
+  color: light-dark(#d70022, #ff6b6b);
+  border-radius: 4px;
+  margin: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.zi-emails {
+  padding: 0;
+}
+
+.zi-item {
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  position: relative;
+  border-bottom: 1px solid light-dark(rgba(0,0,0,0.07), rgba(255,255,255,0.07));
+  min-height: 76px;
+  height: 76px;
+  display: flex;
+  flex-direction: column;
+}
+
+.zi-item:last-child {
+  border-bottom: none;
+}
+
+.zi-item.zi-unread {
+  padding-left: 9px;
+}
+
+.zi-item.zi-unread .zi-from {
+  font-weight: 700;
+}
+
+.zi-item.zi-unread .zi-subject {
+  font-weight: 600;
+}
+
+.zi-item:hover {
+  background-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+.zi-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+  flex-shrink: 0;
+}
+
+.zi-from {
+  font-weight: 600;
+  font-size: 11px;
+  color: light-dark(#0c0c0d, #f9f9fa);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: 6px;
+}
+
+.zi-date {
+  font-size: 10px;
+  color: light-dark(#737373, #b1b1b1);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.zi-subject {
+  font-weight: 500;
+  font-size: 11px;
+  color: light-dark(#0c0c0d, #f9f9fa);
+  margin-bottom: 3px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Snippet wrap takes the flex height. The clamp box stays at auto height.
+   Firefox fails to ellipsize a line-clamp box that has a definite height
+   (Mozilla bug 1790882). */
+.zi-snippet-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.zi-snippet {
+  font-size: 10px;
+  color: light-dark(#737373, #b1b1b1);
+  line-height: 1.3;
+  padding-top: 2px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.zi-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.zi-content::-webkit-scrollbar-thumb {
+  background: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
+  border-radius: 4px;
+}
+
+.zi-content::-webkit-scrollbar-thumb:hover {
+  background: light-dark(rgba(0, 0, 0, 0.3), rgba(255, 255, 255, 0.3));
+}
+
+@media (max-width: 600px) {
+  #zi-panel {
+    max-width: calc(100vw - 20px);
+    min-width: 280px;
+  }
+}
