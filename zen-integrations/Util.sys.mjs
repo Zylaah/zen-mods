@@ -218,12 +218,22 @@ const OUTLOOK_AUTH_HOSTS = [
 // tab's Firefox container so each account stays separate.
 export function createOutlookAuthCapture() {
   const byContext = new Map();
+  const seenPaths = new Set();
   const header = (http, name) => {
+    const wanted = String(name || '').toLowerCase();
     try {
-      return http.getRequestHeader(name) || '';
-    } catch (e) {
-      return '';
-    }
+      const direct = http.getRequestHeader(name);
+      if (direct) return direct;
+    } catch (e) {}
+    let found = '';
+    try {
+      http.visitRequestHeaders({
+        visitHeader(headerName, value) {
+          if (String(headerName || '').toLowerCase() === wanted) found = value || '';
+        }
+      });
+    } catch (e) {}
+    return found;
   };
   const observer = {
     observe(subject) {
@@ -239,23 +249,36 @@ export function createOutlookAuthCapture() {
         host = http.URI?.host?.toLowerCase() || '';
         path = http.URI?.filePath || '';
       } catch (e) {}
+      let spec = '';
+      try { spec = http.URI?.spec || ''; } catch (e) {}
+      let parsed;
+      try { parsed = new URL(spec); } catch (e) { return; }
+      host = parsed.hostname.toLowerCase();
       if (!OUTLOOK_AUTH_HOSTS.includes(host)) return;
-      if (!/\/owa(\/\d+)?\/service\.svc/i.test(path)) return;
       const bearer = header(http, 'Authorization');
-      if (!/^bearer\s+/i.test(bearer)) return;
+      const pathName = parsed.pathname || '/';
+      if (!/^bearer\s+\S+/i.test(bearer)) {
+        const seenKey = host + pathName;
+        if (!seenPaths.has(seenKey) && seenPaths.size < 30) {
+          seenPaths.add(seenKey);
+          debugLog('Outlook request without bearer', host, pathName);
+        }
+        return;
+      }
       let contextId = 0;
       try {
         contextId = Number(http.loadInfo?.originAttributes?.userContextId || 0);
       } catch (e) {}
-      const prefix = (path.match(/\/owa(?:\/\d+)?/i) || ['/owa'])[0];
+      const prefix = (pathName.match(/\/owa(?:\/\d+)?/i) || ['/owa'])[0];
       byContext.set(String(contextId), {
-        origin: 'https://' + host,
+        origin: parsed.origin,
         prefix,
         bearer,
         canary: header(http, 'X-OWA-CANARY'),
         anchor: header(http, 'X-AnchorMailbox') || header(http, 'X-OWA-ExplicitLogonUser'),
         ts: Date.now()
       });
+      debugLog('Outlook bearer captured', host, pathName);
     }
   };
   try {
@@ -318,11 +341,13 @@ export function httpRequest(win, { url, userContextId, method = 'GET', headers =
   try { channelId = channel.QueryInterface(Ci.nsIIdentChannel).channelId; } catch (e) {}
   const observer = {
     observe(subject) {
-      if (!cookieString) return;
+      // A missing channel id used to match every request and replace its
+      // Cookie header. That signed Outlook out. Never touch another channel.
+      if (!cookieString || !channelId) return;
       try {
         const http = subject.QueryInterface(Ci.nsIHttpChannel);
         const ident = subject.QueryInterface(Ci.nsIIdentChannel);
-        if (channelId && ident.channelId !== channelId) return;
+        if (ident.channelId !== channelId) return;
         http.setRequestHeader('Cookie', cookieString, false);
       } catch (e) {}
     }

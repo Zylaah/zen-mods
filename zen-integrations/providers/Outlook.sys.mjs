@@ -280,56 +280,6 @@ function requestCookies(cookies, requestPath, canary) {
   return cookieHeaderFromJar(jar);
 }
 
-function canaryInText(text) {
-  const match = String(text || '').match(/(?:X-OWA-CANARY|owaCanary|"canary")["']?\s*[:=]\s*["']([^"'\s;]+)/i);
-  return match ? canaryValue(match[1]) : '';
-}
-
-function canaryFromResponse(fetched, origin, hints) {
-  if (!fetched) return null;
-  const fromHeader = canaryInText(
-    'X-OWA-CANARY=' + (fetched.responseHeaders?.['x-owa-canary'] || '') + '\n' + (fetched.responseHeaders?.['set-cookie'] || '')
-  ) || canaryInText(fetched.text);
-  if (!fromHeader) return null;
-  return { value: fromHeader, path: owaPrefix(origin, hints) + '/' };
-}
-
-async function loadCanary(app, tab, origin, hints) {
-  const hosts = cookieHosts(origin);
-  const userContextId = getTabUserContextId(tab);
-  const read = () => canaryFrom(hostCookies(userContextId, hosts));
-  const found = read();
-  if (found?.value) return found;
-
-  const startup = startupUrl(origin, hints);
-  debugLog('Outlook canary cookie missing, calling', startup);
-  let fetched = null;
-  try {
-    fetched = await httpRequest(app.window, {
-      url: startup,
-      userContextId,
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json; charset=utf-8'
-      },
-      body: '{}',
-      cookieHosts: hosts
-    });
-  } catch (e) {
-    debugLog('Outlook startupdata failed', e && e.message ? e.message : e);
-  }
-  if (fetched) debugLog('Outlook startupdata', fetched.status, fetched.finalUrl);
-  const again = read();
-  if (again?.value) return again;
-  const fromResponse = canaryFromResponse(fetched, origin, hints);
-  if (fromResponse?.value) return fromResponse;
-
-  const names = hostCookies(userContextId, hosts).map((cookie) => cookie.name + '@' + (cookie.path || '/'));
-  debugLog('Outlook canary still missing', names.slice(0, 40).join(', ') || '(no outlook cookies)');
-  throw signInError();
-}
-
 // Preferred path: reuse the Authorization bearer the loaded Outlook tab sends.
 async function postFindWithBearer(app, tab, creds, hints, shapeName) {
   const origin = creds.origin;
@@ -357,43 +307,21 @@ async function postFindWithBearer(app, tab, creds, hints, shapeName) {
     },
     body: JSON.stringify(findConversationBody(shapeName)),
     cookieHosts: hosts,
-    cookieHeader: requestCookies(cookies, requestPath, canary)
-  });
-}
-
-// Fallback for work/Exchange tenants that still accept cookie + canary auth.
-async function postFindWithCookies(app, tab, origin, hints, shapeName) {
-  const hosts = cookieHosts(origin);
-  const userContextId = getTabUserContextId(tab);
-  const canary = await loadCanary(app, tab, origin, hints);
-  const url = serviceUrl(origin, hints, canary.path);
-  let requestPath = '/';
-  try { requestPath = new URL(url).pathname || '/'; } catch (e) {}
-  const cookies = hostCookies(userContextId, hosts);
-  const anchor = cookieValue(cookies, 'DefaultAnchorMailbox') || cookieValue(cookies, 'X-AnchorMailbox');
-  debugLog('Outlook canary path', canary.path || '/');
-  return httpRequest(app.window, {
-    url,
-    userContextId,
-    method: 'POST',
-    headers: {
-      Action: 'FindConversation',
-      Accept: 'application/json',
-      'Content-Type': 'application/json; charset=utf-8',
-      'X-OWA-CANARY': canary.value,
-      'X-Requested-With': 'XMLHttpRequest',
-      'X-AnchorMailbox': anchor
-    },
-    body: JSON.stringify(findConversationBody(shapeName)),
-    cookieHosts: hosts,
-    cookieHeader: requestCookies(cookies, requestPath, canary)
+    // Empty on purpose. A built Cookie header replaced Outlook's own cookies
+    // and signed the mailbox out. Leave the header unset.
+    cookieHeader: ''
   });
 }
 
 async function postFind(app, tab, origin, hints, shapeName) {
   const creds = app.outlookAuth?.get(getTabUserContextId(tab));
-  if (creds?.bearer) return postFindWithBearer(app, tab, creds, hints, shapeName);
-  return postFindWithCookies(app, tab, origin, hints, shapeName);
+  if (!creds?.bearer) {
+    debugLog('Outlook has no captured token yet');
+    const error = new Error('Sign-in required');
+    error.signin = true;
+    throw error;
+  }
+  return postFindWithBearer(app, tab, creds, hints, shapeName);
 }
 
 export const outlookProvider = {
