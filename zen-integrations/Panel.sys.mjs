@@ -90,7 +90,6 @@ export class ZenPanel {
     });
     content.appendChild(loading);
     content.appendChild(emails);
-    content.appendChild(error);
 
     const wrapper = document.createElement('div');
     wrapper.className = 'zi-wrapper';
@@ -107,6 +106,7 @@ export class ZenPanel {
     });
 
     wrapper.appendChild(header);
+    wrapper.appendChild(error);
     wrapper.appendChild(content);
     wrapper.appendChild(composeButton);
     panel.appendChild(wrapper);

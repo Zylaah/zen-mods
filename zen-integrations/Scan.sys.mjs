@@ -109,12 +109,7 @@ export class ZenScan {
       app.loadScansInFlight.delete(contextKey);
       if (app.scanContextKey === contextKey) app.scanContextKey = null;
       app.panel.updateDisplay();
-      if (
-        e?.signin &&
-        app.activePanelContextKey === contextKey &&
-        app.currentEmails.length === 0 &&
-        app.cachedEmails.length === 0
-      ) {
+      if (e?.signin && app.activePanelContextKey === contextKey) {
         app.panel.showError(provider.signInMessage, { signin: true });
       }
     } finally {
