@@ -233,7 +233,7 @@ export function httpRequest(win, { url, userContextId, method = 'GET', headers =
     uri,
     loadingPrincipal: principal,
     triggeringPrincipal: principal,
-    contentPolicyType: Ci.nsIContentPolicy.TYPE_DOCUMENT,
+    contentPolicyType: Ci.nsIContentPolicy.TYPE_XMLHTTPREQUEST,
     securityFlags: Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_INHERITS_SEC_CONTEXT
   }).QueryInterface(Ci.nsIHttpChannel);
 
@@ -248,8 +248,9 @@ export function httpRequest(win, { url, userContextId, method = 'GET', headers =
   // setUploadStream forces PUT. Set the real method after it.
   channel.requestMethod = method;
   channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE | Ci.nsIRequest.INHIBIT_CACHING;
-  // LOAD_ANONYMOUS drops an Authorization header. Use it for the token POST only.
-  if (anonymous && !headers.Authorization) channel.loadFlags |= Ci.nsIRequest.LOAD_ANONYMOUS;
+  // Keep Microsoft token and Graph calls out of the Outlook cookie jar.
+  // LOAD_ANONYMOUS also drops Authorization; the observer puts it back.
+  if (anonymous) channel.loadFlags |= Ci.nsIRequest.LOAD_ANONYMOUS;
   for (const [name, value] of Object.entries(headers)) {
     if (value == null || value === '') continue;
     try { channel.setRequestHeader(name, String(value), false); } catch (e) {}
@@ -267,6 +268,7 @@ export function httpRequest(win, { url, userContextId, method = 'GET', headers =
         const ident = subject.QueryInterface(Ci.nsIIdentChannel);
         if (ident.channelId !== channelId) return;
         if (anonymous) {
+          if (headers.Authorization) http.setRequestHeader('Authorization', headers.Authorization, false);
           // Necko adds Origin after our headers. A native public client token
           // POST that still carries Origin is rejected as AADSTS90023.
           const spec = http.URI?.spec || '';
@@ -276,14 +278,19 @@ export function httpRequest(win, { url, userContextId, method = 'GET', headers =
           }
           return;
         }
-        if (!cookieString) return;
+        if (!cookieString || !cookieHosts) return;
+        let host = '';
+        try { host = http.URI?.host || ''; } catch (e) { return; }
+        if (!hostAllowed(host, cookieHosts)) return;
         http.setRequestHeader('Cookie', cookieString, false);
       } catch (e) {}
     }
   };
   Services.obs.addObserver(observer, 'http-on-modify-request');
+  try { Services.obs.addObserver(observer, 'http-on-before-connect'); } catch (e) {}
   const stopObserving = () => {
     try { Services.obs.removeObserver(observer, 'http-on-modify-request'); } catch (e) {}
+    try { Services.obs.removeObserver(observer, 'http-on-before-connect'); } catch (e) {}
   };
 
   return new Promise((resolve, reject) => {

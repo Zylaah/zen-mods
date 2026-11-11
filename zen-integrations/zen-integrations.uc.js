@@ -59,7 +59,7 @@
           '*://outlook.office365.com/*',
           '*://outlook.cloud.microsoft/*'
         ],
-        allFrames: true,
+        allFrames: false,
         messageManagerGroups: ['browsers'],
         safeForUntrustedWebProcess: true
       });
