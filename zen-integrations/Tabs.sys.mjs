@@ -336,6 +336,11 @@ export class ZenTabs {
   }
 
   openOutlook(tab, email) {
+    const link = String(email?.url || '');
+    if (link.startsWith('https://')) {
+      this.loadMailUrl(tab?.linkedBrowser, link);
+      return;
+    }
     const provider = this.providerFor(tab) || this.app.providerForKey(this.app.activePanelContextKey);
     const browser = tab?.linkedBrowser;
     if (browser && !this.isLoadedMailBrowser(tab)) {

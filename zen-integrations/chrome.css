@@ -106,6 +106,10 @@
   line-height: 1.5;
 }
 
+.zi-error[data-signin='1'] {
+  cursor: pointer;
+}
+
 .zi-emails {
   padding: 0;
 }

@@ -82,6 +82,14 @@ export class ZenPanel {
     const error = document.createElement('div');
     error.className = 'zi-error';
     error.style.display = 'none';
+    error.addEventListener('click', (event) => {
+      if (error.dataset.signin !== '1') return;
+      event.preventDefault();
+      event.stopPropagation();
+      const provider = app.providerForKey(app.activePanelContextKey);
+      const anchor = app.tabs.findAnchor(app.activePanelContextKey);
+      if (provider?.beginSignIn && anchor) provider.beginSignIn(app, anchor);
+    });
     content.appendChild(loading);
     content.appendChild(emails);
     content.appendChild(error);
@@ -302,13 +310,14 @@ export class ZenPanel {
     this.app.hoveredTab = null;
   }
 
-  showError(message) {
+  showError(message, options) {
     const panel = this.app.panelElement;
     if (!panel) return;
     const el = panel.querySelector('.zi-error');
     const loading = panel.querySelector('.zi-loading');
     if (el) {
       el.textContent = message;
+      el.dataset.signin = options?.signin ? '1' : '';
       el.style.display = 'block';
     }
     if (loading) loading.style.display = 'none';
@@ -318,6 +327,7 @@ export class ZenPanel {
     const el = this.app.panelElement?.querySelector('.zi-error');
     if (!el) return;
     el.style.display = 'none';
+    el.dataset.signin = '';
     el.textContent = '';
   }
 

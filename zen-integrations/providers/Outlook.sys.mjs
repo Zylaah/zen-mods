@@ -4,6 +4,17 @@ const { CONFIG, debugLog, fnv1a, getTabUserContextId } = ChromeUtils.importESMod
 const { normalizeOutlookFields } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/providers/OutlookDate.sys.mjs' + new URL(import.meta.url).search
 );
+const { outlookClientState } = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/providers/OutlookGraph.sys.mjs' + new URL(import.meta.url).search
+);
+const {
+  beginOutlookSignIn,
+  fetchOutlookGraph,
+  outlookSignInMessage,
+  readOutlookClientId
+} = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/providers/OutlookAuth.sys.mjs' + new URL(import.meta.url).search
+);
 
 const HOSTS = [
   'outlook.office.com',
@@ -59,10 +70,58 @@ function outlookActor(tab) {
   }
 }
 
+async function scrapeUnread(app, tab) {
+  const browser = tab?.linkedBrowser;
+  let discarded = true;
+  try {
+    discarded = !browser?.browsingContext || browser.browsingContext.discarded;
+  } catch (e) {}
+  if (discarded) return null;
+  const actor = outlookActor(tab);
+  if (!actor?.sendQuery) return null;
+  let scraped;
+  try {
+    scraped = await actor.sendQuery('ZenOutlook:Scrape');
+  } catch (e) {
+    debugLog('Outlook scrape failed', e && e.message ? e.message : e);
+    return null;
+  }
+  if (!scraped?.ready) return null;
+  const scrapedRows = scraped.rows || [];
+  if (scrapedRows[0]) {
+    debugLog('Outlook row', scrapedRows[0].date, scrapedRows[0].from, scrapedRows[0].subject, scrapedRows[0].snippet);
+  }
+  return scrapedRows.slice(0, CONFIG.MAX_EMAILS).map((row, sourceRank) => {
+    const threadId = row.id || row.key || '';
+    const fields = normalizeOutlookFields(row);
+    return {
+      id: 'outlook:' + fnv1a(threadId || row.subject + '|' + row.from),
+      threadId,
+      gmailThreadId: '',
+      legacyThreadId: '',
+      from: row.from || 'Unknown',
+      subject: row.subject || '(No subject)',
+      snippet: fields.snippet,
+      date: fields.date,
+      ts: 0,
+      isUnread: true,
+      url: '',
+      rowIndex: sourceRank
+    };
+  });
+}
+
 export const outlookProvider = {
   id: 'outlook',
   label: 'Outlook',
-  signInMessage: 'Open the Outlook tab to load unread mail',
+  get signInMessage() {
+    return outlookSignInMessage() || 'Open the Outlook tab to load unread mail';
+  },
+
+  beginSignIn(app, tab) {
+    const hints = app.tabs.getUrlHints(tab);
+    return beginOutlookSignIn(app, tab, this.contextKey(tab, hints));
+  },
 
   matches(hints) {
     if ((hints || []).some((hint) => String(hint).includes('mail.google.com'))) return false;
@@ -104,44 +163,9 @@ export const outlookProvider = {
 
   // null means the tab is unloaded or the list is not in the page yet.
   // The panel keeps the cached rows in that case.
-  async fetchUnread(app, tab) {
-    const browser = tab?.linkedBrowser;
-    let discarded = true;
-    try {
-      discarded = !browser?.browsingContext || browser.browsingContext.discarded;
-    } catch (e) {}
-    if (discarded) return null;
-    const actor = outlookActor(tab);
-    if (!actor?.sendQuery) return null;
-    let scraped;
-    try {
-      scraped = await actor.sendQuery('ZenOutlook:Scrape');
-    } catch (e) {
-      debugLog('Outlook scrape failed', e && e.message ? e.message : e);
-      return null;
-    }
-    if (!scraped?.ready) return null;
-    const scrapedRows = scraped.rows || [];
-    if (scrapedRows[0]) {
-      debugLog('Outlook row', scrapedRows[0].date, scrapedRows[0].from, scrapedRows[0].subject, scrapedRows[0].snippet);
-    }
-    return scrapedRows.slice(0, CONFIG.MAX_EMAILS).map((row, sourceRank) => {
-      const threadId = row.id || row.key || '';
-      const fields = normalizeOutlookFields(row);
-      return {
-        id: 'outlook:' + fnv1a(threadId || row.subject + '|' + row.from),
-        threadId,
-        gmailThreadId: '',
-        legacyThreadId: '',
-        from: row.from || 'Unknown',
-        subject: row.subject || '(No subject)',
-        snippet: fields.snippet,
-        date: fields.date,
-        ts: 0,
-        isUnread: true,
-        url: '',
-        rowIndex: sourceRank
-      };
-    });
+  // A Microsoft app id switches this container to Graph. No id keeps the tab scrape.
+  async fetchUnread(app, tab, hints) {
+    if (outlookClientState(readOutlookClientId()) === 'missing') return scrapeUnread(app, tab);
+    return fetchOutlookGraph(app, tab, this.contextKey(tab, hints));
   }
 };

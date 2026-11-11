@@ -2,7 +2,7 @@
 // @name           Zen Integrations
 // @description    Unread Gmail and Outlook when hovering an essential or pinned tab
 // @author         Bxth
-// @version        1.0.0
+// @version        1.1.0
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 

@@ -5,6 +5,8 @@ export const CONFIG = {
   LEGACY_GMAIL_URL_PREF: 'live-gmail.url',
   DEBUG_PREF: 'zen-integrations.debug',
   LEGACY_DEBUG_PREF: 'live-gmail.debug',
+  OUTLOOK_CLIENT_PREF: 'zen-integrations.outlook.clientId',
+  OUTLOOK_TOKEN_FILE: 'zen-integrations-outlook-tokens.json',
   DEFAULT_GMAIL_URL: 'mail.google.com',
   MAX_EMAILS: 20,
   PANEL_ID: 'zi-panel',
@@ -216,7 +218,7 @@ function principalCookieHeader(pageUrl, userContextId) {
   }
 }
 
-export function httpRequest(win, { url, userContextId, method = 'GET', headers = {}, body = '', cookieHosts, cookieHeader, timeoutMs, maxBytes }) {
+export function httpRequest(win, { url, userContextId, method = 'GET', headers = {}, body = '', cookieHosts, cookieHeader, timeoutMs, maxBytes, contentType, anonymous = false }) {
   const uri = Services.io.newURI(url);
   const principal = Services.scriptSecurityManager.createContentPrincipal(uri, { userContextId });
   const jar = cookieJar(userContextId, url, cookieHosts);
@@ -237,11 +239,12 @@ export function httpRequest(win, { url, userContextId, method = 'GET', headers =
     if (typeof stream.setUTF8Data === 'function') stream.setUTF8Data(body);
     else stream.setByteStringData(body);
     channel.QueryInterface(Ci.nsIUploadChannel);
-    channel.setUploadStream(stream, 'application/json; charset=utf-8', -1);
+    channel.setUploadStream(stream, contentType || 'application/json; charset=utf-8', -1);
   }
   // setUploadStream forces PUT. Set the real method after it.
   channel.requestMethod = method;
   channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE | Ci.nsIRequest.INHIBIT_CACHING;
+  if (anonymous) channel.loadFlags |= Ci.nsIRequest.LOAD_ANONYMOUS;
   for (const [name, value] of Object.entries(headers)) {
     if (value == null || value === '') continue;
     try { channel.setRequestHeader(name, String(value), false); } catch (e) {}
@@ -253,7 +256,7 @@ export function httpRequest(win, { url, userContextId, method = 'GET', headers =
     observe(subject) {
       // A missing channel id used to match every request and replace its
       // Cookie header. That signed Outlook out. Never touch another channel.
-      if (!cookieString || !channelId) return;
+      if (anonymous || !cookieString || !channelId) return;
       try {
         const http = subject.QueryInterface(Ci.nsIHttpChannel);
         const ident = subject.QueryInterface(Ci.nsIIdentChannel);

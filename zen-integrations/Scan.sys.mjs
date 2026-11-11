@@ -112,7 +112,7 @@ export class ZenScan {
         app.currentEmails.length === 0 &&
         app.cachedEmails.length === 0
       ) {
-        app.panel.showError(provider.signInMessage);
+        app.panel.showError(provider.signInMessage, { signin: true });
       }
     } finally {
       app.scanInFlight.delete(contextKey);

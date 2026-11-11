@@ -1,7 +1,7 @@
 # Zen Integrations — LLM Context
 
-> Version `1.0.0` (`theme.json` and `@version` in `zen-integrations.uc.js`).
-> One Sine mod. Gmail and Outlook unread panels. No OAuth. No Microsoft Graph.
+> Version `1.1.0` (`theme.json` and `@version` in `zen-integrations.uc.js`).
+> One Sine mod. Gmail and Outlook unread panels. Gmail has no OAuth. Outlook Graph uses this mod's own Microsoft app id.
 
 ## What it does
 
@@ -9,7 +9,7 @@ Hover an essential or pinned Gmail or Outlook tab. A XUL panel lists unread mail
 
 Gmail source: `https://mail.google.com/mail/u/N/feed/atom` with that container's cookies. XML is parsed in chrome. Do not navigate a tab to `/feed/atom` (HTTP Basic auth).
 
-Outlook source: the loaded tab's message list, read by the `ZenOutlook` actor. Unread rows are the list options marked unread. If the tab is unloaded, or the list is not in the page yet, the scan leaves the saved rows in place. Clicking a row selects that tab and clicks the matching conversation. No OWA JSON, no bearer token, no Graph.
+Outlook source: Microsoft Graph when `zen-integrations.outlook.clientId` is this install's own app id. The scope is `Mail.Read` plus `offline_access`. Sign-in is an auth-code tab with PKCE. The redirect is `https://login.microsoftonline.com/common/oauth2/nativeclient`. Tokens sit in `<profile>/zen-integrations-outlook-tokens.json`, one entry per context key. Unread mail is `GET /v1.0/me/mailFolders/Inbox/messages` with `isRead eq false`. A click loads the message `webLink`. Arc's client id `74d1363b-cbb0-4149-9619-f1594fefa6f4` is refused. With no client id, the `ZenOutlook` actor still reads the loaded tab's message list, and a click still selects that conversation. An unloaded tab keeps the saved rows.
 
 ## Layout
 
@@ -24,6 +24,8 @@ zen-integrations/
 ├── Tabs.sys.mjs               # pin match, hover, Gmail open-thread
 ├── providers/Gmail.sys.mjs
 ├── providers/Outlook.sys.mjs
+├── providers/OutlookGraph.sys.mjs
+├── providers/OutlookAuth.sys.mjs
 ├── GmailFrame.js              # inbox read-state in the Gmail tab
 ├── actors/LiveGmailParent.sys.mjs
 ├── actors/LiveGmailChild.sys.mjs
@@ -45,11 +47,12 @@ Context keys are `gmail:<container>` and `outlook:<family>:<container>`. Family 
 
 ## Gmail open path
 
-Clicking Gmail does not only load the permalink. `Tabs.sys.mjs` waits for the inbox actor (`LiveGmail:InboxReady`), then `LiveGmail:OpenThread`. The frame script `GmailFrame.js` reports rows the user opened so they drop off the list. Outlook clicks load `email.url` (`/mail/deeplink/read/<id>`).
+Clicking Gmail does not only load the permalink. `Tabs.sys.mjs` waits for the inbox actor (`LiveGmail:InboxReady`), then `LiveGmail:OpenThread`. The frame script `GmailFrame.js` reports rows the user opened so they drop off the list. An Outlook Graph row loads its `webLink`. A scraped row still asks the `ZenOutlook` actor to click that conversation.
 
 ## Prefs
 
 - `zen-integrations.debug`
 - `zen-integrations.gmail.url` (falls back to `live-gmail.url`)
+- `zen-integrations.outlook.clientId` (empty keeps the tab scrape)
 
 Poll interval is `CONFIG.POLL_MS` (60 seconds), not a pref.
