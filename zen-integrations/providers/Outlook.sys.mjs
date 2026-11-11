@@ -330,7 +330,39 @@ async function loadCanary(app, tab, origin, hints) {
   throw signInError();
 }
 
-async function postFind(app, tab, origin, hints, shapeName) {
+// Preferred path: reuse the Authorization bearer the loaded Outlook tab sends.
+async function postFindWithBearer(app, tab, creds, hints, shapeName) {
+  const origin = creds.origin;
+  const hosts = cookieHosts(origin);
+  const userContextId = getTabUserContextId(tab);
+  const url = origin + creds.prefix + '/service.svc?action=FindConversation&app=Mail';
+  let requestPath = '/';
+  try { requestPath = new URL(url).pathname || '/'; } catch (e) {}
+  const cookies = hostCookies(userContextId, hosts);
+  const canary = { value: creds.canary, path: creds.prefix + '/' };
+  const anchor = creds.anchor || cookieValue(cookies, 'DefaultAnchorMailbox');
+  debugLog('Outlook via captured bearer', creds.prefix);
+  return httpRequest(app.window, {
+    url,
+    userContextId,
+    method: 'POST',
+    headers: {
+      Authorization: creds.bearer,
+      Action: 'FindConversation',
+      Accept: 'application/json',
+      'Content-Type': 'application/json; charset=utf-8',
+      'X-OWA-CANARY': creds.canary,
+      'X-Requested-With': 'XMLHttpRequest',
+      'X-AnchorMailbox': anchor
+    },
+    body: JSON.stringify(findConversationBody(shapeName)),
+    cookieHosts: hosts,
+    cookieHeader: requestCookies(cookies, requestPath, canary)
+  });
+}
+
+// Fallback for work/Exchange tenants that still accept cookie + canary auth.
+async function postFindWithCookies(app, tab, origin, hints, shapeName) {
   const hosts = cookieHosts(origin);
   const userContextId = getTabUserContextId(tab);
   const canary = await loadCanary(app, tab, origin, hints);
@@ -358,10 +390,16 @@ async function postFind(app, tab, origin, hints, shapeName) {
   });
 }
 
+async function postFind(app, tab, origin, hints, shapeName) {
+  const creds = app.outlookAuth?.get(getTabUserContextId(tab));
+  if (creds?.bearer) return postFindWithBearer(app, tab, creds, hints, shapeName);
+  return postFindWithCookies(app, tab, origin, hints, shapeName);
+}
+
 export const outlookProvider = {
   id: 'outlook',
   label: 'Outlook',
-  signInMessage: 'Sign in to Outlook to see unread mail',
+  signInMessage: 'Open your Outlook tab once to connect',
 
   matches(hints) {
     if ((hints || []).some((hint) => String(hint).includes('mail.google.com'))) return false;

@@ -9,7 +9,9 @@ Hover an essential or pinned Gmail or Outlook tab. A XUL panel lists unread mail
 
 Gmail source: `https://mail.google.com/mail/u/N/feed/atom` with that container's cookies. XML is parsed in chrome. Do not navigate a tab to `/feed/atom` (HTTP Basic auth).
 
-Outlook source: `POST /owa/service.svc?action=FindConversation` (consumer: `/owa/0/service.svc`) with that container's cookies and header `X-OWA-CANARY`. `ViewFilter` is `Unread`. Hosts: `outlook.office.com`, `outlook.office365.com`, `outlook.live.com`, `outlook.cloud.microsoft`.
+Outlook source: `POST /owa/service.svc?action=FindConversation` (consumer: `/owa/0/service.svc`), `ViewFilter` is `Unread`. Hosts: `outlook.office.com`, `outlook.office365.com`, `outlook.live.com`, `outlook.cloud.microsoft`.
+
+Modern Outlook rejects cookie-only requests (401). It signs `service.svc` with a short-lived `Authorization: Bearer` token the page holds; the mod cannot mint it. `createOutlookAuthCapture` in `Util.sys.mjs` registers an `http-on-modify-request` observer that reads the `Authorization`, `X-OWA-CANARY`, and anchor headers off the loaded Outlook tab's own `service.svc` calls, keyed by `userContextId`. `Outlook.sys.mjs` replays `FindConversation` with those headers. So Outlook needs the tab loaded once per session; the token expires in roughly an hour and is recaptured when the tab reloads. `postFindWithCookies` (canary cookie, no bearer) is a fallback for work/Exchange tenants that still accept it. No Graph.
 
 ## Layout
 

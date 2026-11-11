@@ -205,6 +205,73 @@ export function cookieHeaderFromJar(jar) {
   return [...jar.entries()].map(([name, cookie]) => name + '=' + cookie.value).join('; ');
 }
 
+const OUTLOOK_AUTH_HOSTS = [
+  'outlook.live.com',
+  'outlook.office.com',
+  'outlook.office365.com',
+  'outlook.cloud.microsoft'
+];
+
+// Modern Outlook on the web authenticates service.svc with an Authorization
+// bearer header, not cookies. We cannot mint that token. Instead we watch the
+// requests the loaded Outlook tab makes and reuse its headers. Keyed by the
+// tab's Firefox container so each account stays separate.
+export function createOutlookAuthCapture() {
+  const byContext = new Map();
+  const header = (http, name) => {
+    try {
+      return http.getRequestHeader(name) || '';
+    } catch (e) {
+      return '';
+    }
+  };
+  const observer = {
+    observe(subject) {
+      let http;
+      try {
+        http = subject.QueryInterface(Ci.nsIHttpChannel);
+      } catch (e) {
+        return;
+      }
+      let host = '';
+      let path = '';
+      try {
+        host = http.URI?.host?.toLowerCase() || '';
+        path = http.URI?.filePath || '';
+      } catch (e) {}
+      if (!OUTLOOK_AUTH_HOSTS.includes(host)) return;
+      if (!/\/owa(\/\d+)?\/service\.svc/i.test(path)) return;
+      const bearer = header(http, 'Authorization');
+      if (!/^bearer\s+/i.test(bearer)) return;
+      let contextId = 0;
+      try {
+        contextId = Number(http.loadInfo?.originAttributes?.userContextId || 0);
+      } catch (e) {}
+      const prefix = (path.match(/\/owa(?:\/\d+)?/i) || ['/owa'])[0];
+      byContext.set(String(contextId), {
+        origin: 'https://' + host,
+        prefix,
+        bearer,
+        canary: header(http, 'X-OWA-CANARY'),
+        anchor: header(http, 'X-AnchorMailbox') || header(http, 'X-OWA-ExplicitLogonUser'),
+        ts: Date.now()
+      });
+    }
+  };
+  try {
+    Services.obs.addObserver(observer, 'http-on-modify-request');
+  } catch (e) {}
+  return {
+    get(contextId) {
+      return byContext.get(String(contextId || 0)) || null;
+    },
+    stop() {
+      try { Services.obs.removeObserver(observer, 'http-on-modify-request'); } catch (e) {}
+      byContext.clear();
+    }
+  };
+}
+
 function principalCookieHeader(pageUrl, userContextId) {
   try {
     const uri = Services.io.newURI(pageUrl);
