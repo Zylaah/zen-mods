@@ -39,6 +39,9 @@
   }
 
   function registerOutlookActor() {
+    if (typeof ChromeUtils.unregisterWindowActor === 'function') {
+      try { ChromeUtils.unregisterWindowActor('ZenOutlook'); } catch (e) {}
+    }
     try {
       ChromeUtils.registerWindowActor('ZenOutlook', {
         parent: {

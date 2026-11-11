@@ -203,6 +203,69 @@ function fieldsFromLines(lines, now, titled) {
   };
 }
 
+function fieldsFromLeafList(leaves, now) {
+  const items = (leaves || []).filter((leaf) => leaf.text && leaf.text.length > 1 && !/^[-–—|•·]+$/.test(leaf.text));
+  if (items.length < 2) return null;
+  items.sort((a, b) => a.top - b.top);
+  const dateLeaf = items.find((leaf) => parseDateLabel(leaf.text, now));
+  const parsedTitle = dateLeaf ? Date.parse(dateLeaf.title) : NaN;
+  const date = dateLeaf
+    ? (Number.isFinite(parsedTitle) ? new Date(parsedTitle) : parseDateLabel(dateLeaf.text, now))
+    : null;
+  const body = items.filter((leaf) => leaf !== dateLeaf);
+  const groups = [];
+  for (const leaf of body) {
+    const last = groups[groups.length - 1];
+    if (last && Math.abs(last.top - leaf.top) <= 4) last.items.push(leaf);
+    else groups.push({ top: leaf.top, items: [leaf] });
+  }
+  if (!groups.length) return null;
+  const subjectItems = groups[1]?.items || [];
+  let subjectLeaf = subjectItems.find((leaf) => leaf.title && !parseDateLabel(leaf.text, now));
+  if (!subjectLeaf && subjectItems.length) {
+    const maxWeight = Math.max(...subjectItems.map((leaf) => leaf.weight || 0));
+    subjectLeaf = subjectItems.find((leaf) => (leaf.weight || 0) === maxWeight);
+  }
+  const snippetParts = [];
+  if (subjectLeaf) {
+    for (const leaf of subjectItems) {
+      if (leaf !== subjectLeaf) snippetParts.push(leaf.text);
+    }
+  }
+  for (const group of groups.slice(2)) {
+    for (const leaf of group.items) snippetParts.push(leaf.text);
+  }
+  return {
+    from: groups[0].items.map((leaf) => leaf.text).join(' ').trim() || 'Unknown',
+    subject: subjectLeaf?.text || '(No subject)',
+    snippet: snippetParts.join(' ').replace(/\s+/g, ' ').trim().slice(0, 200),
+    date: date ? isoLocal(date) : ''
+  };
+}
+
+function rowLeaves(row) {
+  const view = row.ownerDocument.defaultView;
+  const leaves = [];
+  for (const el of row.querySelectorAll('span, time, div')) {
+    if (el.closest('button, [role="button"]')) continue;
+    if (el.querySelector('span, time, div')) continue;
+    const text = String(el.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!text || text.length > 500) continue;
+    let style;
+    try { style = view.getComputedStyle(el); } catch (e) { continue; }
+    if (style.display === 'none' || style.visibility === 'hidden') continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) continue;
+    leaves.push({
+      text,
+      title: String(el.getAttribute('title') || '').trim(),
+      weight: parseInt(style.fontWeight, 10) || 400,
+      top: rect.top
+    });
+  }
+  return leaves;
+}
+
 function isUnread(row) {
   const label = row.getAttribute('aria-label') || '';
   if (UNREAD_WORD.test(label)) return true;
@@ -237,7 +300,16 @@ function scrapeDocument(doc) {
     if (seen.has(key)) continue;
     seen.add(key);
     const now = new Date();
-    const fields = fieldsFromLines(lines, now, dateFromTitles(row, now));
+    const fromLines = fieldsFromLines(lines, now, dateFromTitles(row, now));
+    const fromLeaves = fieldsFromLeafList(rowLeaves(row), now);
+    const fields = fromLeaves?.snippet || fromLeaves?.date
+      ? {
+          from: fromLeaves.from || fromLines.from,
+          subject: fromLeaves.subject && fromLeaves.subject !== '(No subject)' ? fromLeaves.subject : fromLines.subject,
+          snippet: fromLeaves.snippet || fromLines.snippet,
+          date: fromLeaves.date || fromLines.date
+        }
+      : fromLines;
     rows.push({
       id,
       key,

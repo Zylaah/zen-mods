@@ -118,7 +118,11 @@ export const outlookProvider = {
       return null;
     }
     if (!scraped?.ready) return null;
-    return (scraped.rows || []).slice(0, CONFIG.MAX_EMAILS).map((row, sourceRank) => {
+    const scrapedRows = scraped.rows || [];
+    if (scrapedRows[0]) {
+      debugLog('Outlook row', scrapedRows[0].date, scrapedRows[0].from, scrapedRows[0].subject, scrapedRows[0].snippet);
+    }
+    return scrapedRows.slice(0, CONFIG.MAX_EMAILS).map((row, sourceRank) => {
       const threadId = row.id || row.key || '';
       return {
         id: 'outlook:' + fnv1a(threadId || row.subject + '|' + row.from),
