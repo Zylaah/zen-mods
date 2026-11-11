@@ -96,6 +96,15 @@
   font-size: 12px;
 }
 
+button.zi-signin {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
 .zi-error {
   padding: 16px;
   background: light-dark(rgba(255, 0, 0, 0.1), rgba(255, 0, 0, 0.2));

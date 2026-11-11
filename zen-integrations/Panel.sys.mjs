@@ -86,9 +86,7 @@ export class ZenPanel {
       if (error.dataset.signin !== '1') return;
       event.preventDefault();
       event.stopPropagation();
-      const provider = app.providerForKey(app.activePanelContextKey);
-      const anchor = app.tabs.findAnchor(app.activePanelContextKey);
-      if (provider?.beginSignIn && anchor) provider.beginSignIn(app, anchor);
+      this.startSignIn();
     });
     content.appendChild(loading);
     content.appendChild(emails);
@@ -310,6 +308,21 @@ export class ZenPanel {
     this.app.hoveredTab = null;
   }
 
+  startSignIn() {
+    const app = this.app;
+    const key = app.activePanelContextKey;
+    const provider = app.providerForKey(key);
+    if (!provider?.beginSignIn) return;
+    const hovered = app.hoveredTab;
+    const tab =
+      (hovered && app.tabs.isAnchor(hovered, key) ? hovered : null) ||
+      app.tabs.findAnchor(key) ||
+      app.tabs.resolveTarget(key);
+    if (!tab) return;
+    this.hide();
+    provider.beginSignIn(app, tab);
+  }
+
   showError(message, options) {
     const panel = this.app.panelElement;
     if (!panel) return;
@@ -366,7 +379,20 @@ export class ZenPanel {
         isUnloaded && !hasScanned
           ? (provider?.signInMessage || 'Sign in to see unread mail')
           : 'No unread mail';
-      emailsContainer.innerHTML = `<div class="zi-empty">${emptyMessage}</div>`;
+      if (provider?.beginSignIn && emptyMessage === provider.signInMessage) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'zi-empty zi-signin';
+        button.textContent = emptyMessage;
+        button.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          this.startSignIn();
+        });
+        emailsContainer.appendChild(button);
+      } else {
+        emailsContainer.innerHTML = `<div class="zi-empty">${emptyMessage}</div>`;
+      }
       setComposeVisible(false);
       return;
     }

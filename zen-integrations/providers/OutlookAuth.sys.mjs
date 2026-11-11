@@ -234,6 +234,7 @@ export async function beginOutlookSignIn(app, tab, contextKey) {
     debugLog('Outlook signed in', contextKey);
     app.scan.requestScan(tab, { force: true });
   } catch (e) {
+    console.warn('[Zen Integrations] Outlook sign-in failed:', e && e.message ? e.message : e);
     debugLog('Outlook sign-in failed', e && e.message ? e.message : e);
     if (app.activePanelContextKey === contextKey) {
       app.panel.showError(e?.message || 'Microsoft sign-in failed', { signin: true });
