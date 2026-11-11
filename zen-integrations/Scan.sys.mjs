@@ -90,6 +90,13 @@ export class ZenScan {
 
     try {
       const emails = await provider.fetchUnread(app, tab, hints);
+      if (!emails) {
+        app.scanInProgress = false;
+        app.loadScansInFlight.delete(contextKey);
+        if (app.scanContextKey === contextKey) app.scanContextKey = null;
+        if (contextKey === app.activePanelContextKey) app.panel.updateDisplay();
+        return;
+      }
       app.scanMemCache[contextKey] = { ts: Date.now(), token, emails };
       debugLog(provider.label, 'scan', emails.length, 'unread, context=', contextKey);
       this.applyEmails(emails, contextKey);
@@ -98,6 +105,7 @@ export class ZenScan {
       app.scanInProgress = false;
       app.loadScansInFlight.delete(contextKey);
       if (app.scanContextKey === contextKey) app.scanContextKey = null;
+      app.panel.updateDisplay();
       if (
         e?.signin &&
         app.activePanelContextKey === contextKey &&
@@ -106,7 +114,6 @@ export class ZenScan {
       ) {
         app.panel.showError(provider.signInMessage);
       }
-      app.panel.updateDisplay();
     } finally {
       app.scanInFlight.delete(contextKey);
       app.tabs.finishLoadScan(tab);

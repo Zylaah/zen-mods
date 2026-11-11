@@ -38,6 +38,35 @@
     }
   }
 
+  function registerOutlookActor() {
+    try {
+      ChromeUtils.registerWindowActor('ZenOutlook', {
+        parent: {
+          esModuleURI: `${MOD_ROOT}/actors/ZenOutlookParent.sys.mjs${MODULE_VERSION}`
+        },
+        child: {
+          esModuleURI: `${MOD_ROOT}/actors/ZenOutlookChild.sys.mjs${MODULE_VERSION}`,
+          events: {
+            DOMContentLoaded: {}
+          }
+        },
+        matches: [
+          '*://outlook.live.com/*',
+          '*://outlook.office.com/*',
+          '*://outlook.office365.com/*',
+          '*://outlook.cloud.microsoft/*'
+        ],
+        allFrames: true,
+        messageManagerGroups: ['browsers'],
+        safeForUntrustedWebProcess: true
+      });
+    } catch (err) {
+      if (err?.name !== 'NotSupportedError') {
+        console.error('[Zen Integrations] Could not register Outlook actor:', err);
+      }
+    }
+  }
+
   function start() {
     if (!window.gBrowser) {
       window.setTimeout(start, 200);
@@ -45,6 +74,7 @@
     }
 
     registerReadStateActor();
+    registerOutlookActor();
 
     const { createZenIntegrations } = ChromeUtils.importESModule(
       `${MOD_ROOT}/App.sys.mjs${MODULE_VERSION}`

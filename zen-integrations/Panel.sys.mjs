@@ -313,13 +313,16 @@ export class ZenPanel {
 
   hideError() {
     const el = this.app.panelElement?.querySelector('.zi-error');
-    if (el) el.style.display = 'none';
+    if (!el) return;
+    el.style.display = 'none';
+    el.textContent = '';
   }
 
   updateDisplay() {
     const app = this.app;
     const panel = app.panelElement;
     if (!panel) return;
+    this.hideError();
     const document = this.document;
     const emailsContainer = panel.querySelector('.zi-emails');
     const loadingContainer = panel.querySelector('.zi-loading');

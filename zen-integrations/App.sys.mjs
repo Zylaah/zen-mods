@@ -1,4 +1,4 @@
-const { createOutlookAuthCapture, debugLog } = ChromeUtils.importESModule(
+const { debugLog } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
 );
 const { ZenCache } = ChromeUtils.importESModule(
@@ -49,7 +49,6 @@ export class ZenIntegrations {
     this.scan = new ZenScan(this);
     this.panel = new ZenPanel(this);
     this.tabs = new ZenTabs(this);
-    this.outlookAuth = createOutlookAuthCapture();
   }
 
   providerForKey(key) {
@@ -83,7 +82,6 @@ export class ZenIntegrations {
 
   destroy() {
     this.tabs.stopInboxWatch();
-    try { this.outlookAuth?.stop(); } catch (e) {}
     this.scan.stopPoll();
     this.panel.hide();
     if (this.panelElement?.remove) {

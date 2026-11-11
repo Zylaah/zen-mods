@@ -327,6 +327,39 @@ export class ZenTabs {
     } catch (e) {}
   }
 
+  outlookActor(browser) {
+    try {
+      return browser?.browsingContext?.currentWindowGlobal?.getActor('ZenOutlook') || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  openOutlook(tab, email) {
+    const provider = this.providerFor(tab) || this.app.providerForKey(this.app.activePanelContextKey);
+    const browser = tab?.linkedBrowser;
+    if (browser && !this.isLoadedMailBrowser(tab)) {
+      this.loadMailUrl(browser, provider?.homeUrl(this.getUrlHints(tab)) || '');
+    }
+    const win = this.app.window;
+    const started = Date.now();
+    const tick = () => {
+      const actor = this.outlookActor(tab?.linkedBrowser);
+      if (actor?.sendQuery) {
+        actor.sendQuery('ZenOutlook:Open', {
+          id: email?.threadId || '',
+          subject: email?.subject || ''
+        }).catch((err) => {
+          debugLog('Outlook open failed', err && err.message ? err.message : err);
+        });
+        return;
+      }
+      if (Date.now() - started > 8000) return;
+      win.setTimeout(tick, 200);
+    };
+    tick();
+  }
+
   gmailActor(browser) {
     try {
       return browser?.browsingContext?.currentWindowGlobal?.getActor('LiveGmail') || null;
@@ -531,6 +564,9 @@ export class ZenTabs {
       const gmailUrl = normalizeGmailOpenUrl(email.url) || provider.homeUrl(this.getUrlHints(targetTab));
       debugLog('Opening Gmail', gmailUrl);
       this.openThreadWhenReady(targetTab, email, gmailUrl);
+    } else if (provider?.id === 'outlook') {
+      debugLog('Opening Outlook row', email.subject);
+      this.openOutlook(targetTab, email);
     } else {
       const url = email.url || provider?.homeUrl(this.getUrlHints(targetTab)) || '';
       debugLog('Opening mail', url);

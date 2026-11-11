@@ -10,9 +10,7 @@ A Zen Browser mod for Sine. Hover an essential or pinned Gmail or Outlook tab to
 - Floating **+** button to start a new message
 - Each Firefox container keeps its own mailbox
 
-Gmail reads the Atom feed with that tab's cookies. Outlook reads Outlook on the web's own JSON. There is no OAuth and no Microsoft Graph.
-
-Modern Outlook (`outlook.live.com` and the Microsoft 365 web app) no longer accepts a cookie-only request: it signs each call with a short-lived token the page holds. This mod does not mint that token. It watches the requests your loaded Outlook tab already makes and reuses their `Authorization` header and `X-OWA-CANARY`, scoped to that tab's Firefox container. So Outlook needs the tab loaded once per session, and the panel keeps working after the tab unloads until the token expires (about an hour), when you open Outlook again.
+Gmail reads the Atom feed with that tab's cookies. Outlook reads the message list in the loaded Outlook tab. There is no OAuth and no Microsoft Graph. When the Outlook tab is unloaded, the panel shows the last list it saved.
 
 ## Installation (Sine)
 
@@ -24,7 +22,7 @@ Modern Outlook (`outlook.live.com` and the Microsoft 365 web app) no longer acce
 ## Usage
 
 1. Pin Gmail (`mail.google.com`) or Outlook (`outlook.office.com`, `outlook.office365.com`, `outlook.live.com`, or `outlook.cloud.microsoft`) as an essential or pinned tab.
-2. Sign in once in that tab so the container has a session. For Outlook, let the mailbox finish loading once so the mod can capture its token.
+2. Sign in once in that tab. Outlook has to be loaded for a new unread list. After that, hovering an unloaded pin shows the saved list.
 3. Hover the tab.
 4. Click a row to open it. **+** opens compose.
 
