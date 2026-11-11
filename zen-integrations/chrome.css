@@ -103,6 +103,8 @@ button.zi-signin {
   background: transparent;
   font: inherit;
   cursor: pointer;
+  --zen-squircle-value: 1;
+  corner-shape: round !important;
 }
 
 .zi-error {
@@ -117,6 +119,8 @@ button.zi-signin {
 
 .zi-error[data-signin='1'] {
   cursor: pointer;
+  --zen-squircle-value: 1;
+  corner-shape: round !important;
 }
 
 .zi-emails {

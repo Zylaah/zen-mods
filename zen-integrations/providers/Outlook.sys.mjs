@@ -123,10 +123,6 @@ export const outlookProvider = {
     return beginOutlookSignIn(app, tab, this.contextKey(tab, hints));
   },
 
-  prefersFreshScan() {
-    return outlookClientState(readOutlookClientId()) === 'ok';
-  },
-
   matches(hints) {
     if ((hints || []).some((hint) => String(hint).includes('mail.google.com'))) return false;
     if ((hints || []).some((hint) => HOSTS.includes(hostOf(hint)))) return true;

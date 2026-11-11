@@ -281,7 +281,7 @@ export class ZenPanel {
     this.pinCompactChrome(tab);
     this.openAt(tab);
     this.updateDisplay();
-    app.scan.requestScan(tab, { force: !!provider.prefersFreshScan?.() });
+    app.scan.requestScan(tab, { force: false });
   }
 
   scheduleHide() {
