@@ -151,6 +151,21 @@ function takeDate(text, now) {
   return { date: null, rest: raw };
 }
 
+function slashDate(value) {
+  return /\d{1,4}[/\-.]\d{1,2}/.test(String(value || ''));
+}
+
+export function resolveDate(visible, title, now) {
+  const shown = parseDateLabel(visible, now);
+  const fromTitle = parseDateLabel(title, now);
+  if (slashDate(title)) return shown || fromTitle;
+  if (title && !slashDate(title) && /[A-Za-zÀ-ÿ]{3,}/.test(title)) {
+    const ts = Date.parse(title);
+    if (Number.isFinite(ts)) return new Date(ts);
+  }
+  return shown || fromTitle;
+}
+
 function isoLocal(date) {
   const pad = (n) => String(n).padStart(2, '0');
   return (

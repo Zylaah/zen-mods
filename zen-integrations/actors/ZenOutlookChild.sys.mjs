@@ -1,4 +1,4 @@
-const UNREAD_WORD = /^(unread|non lu|no le[ií]do|ungelesen|n[aã]o lid[ao]|ongelezen|non letto|ol[aä]st|ul[aæ]st|непрочитан)/i;
+const UNREAD_WORD = /\b(unread|non lu|no le[ií]do|ungelesen|n[aã]o lid[ao]|ongelezen|non letto|ol[aä]st|ul[aæ]st|непрочитан)\b/i;
 
 function linesOf(row) {
   return String(row?.innerText || '')
@@ -13,7 +13,7 @@ function contentLines(row) {
   return body.length ? body : lines;
 }
 
-const { parseDateLabel, isoLocal, takeDate } = ChromeUtils.importESModule(
+const { parseDateLabel, isoLocal, takeDate, resolveDate } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/providers/OutlookDate.sys.mjs' + new URL(import.meta.url).search
 );
 
@@ -22,8 +22,9 @@ function dateFromTitles(row, now) {
   for (const el of row.querySelectorAll('[title]')) {
     const text = String(el.innerText || '').replace(/\s+/g, ' ').trim();
     if (!text || text.length > 32 || !parseDateLabel(text, now)) continue;
-    const ts = Date.parse(el.getAttribute('title') || '');
-    return { text, date: Number.isFinite(ts) ? new Date(ts) : parseDateLabel(text, now) };
+    const date = resolveDate(text, el.getAttribute('title') || '', now);
+    if (!date) continue;
+    return { text, date };
   }
   return null;
 }
@@ -73,10 +74,7 @@ function fieldsFromLeafList(leaves, now) {
   if (items.length < 2) return null;
   items.sort((a, b) => a.top - b.top);
   const dateLeaf = items.find((leaf) => parseDateLabel(leaf.text, now));
-  const parsedTitle = dateLeaf ? Date.parse(dateLeaf.title) : NaN;
-  const date = dateLeaf
-    ? (Number.isFinite(parsedTitle) ? new Date(parsedTitle) : parseDateLabel(dateLeaf.text, now))
-    : null;
+  const date = dateLeaf ? resolveDate(dateLeaf.text, dateLeaf.title, now) : null;
   const body = items.filter((leaf) => leaf !== dateLeaf);
   const groups = [];
   for (const leaf of body) {
@@ -132,15 +130,14 @@ function rowLeaves(row) {
 }
 
 function isUnread(row) {
-  const label = row.getAttribute('aria-label') || '';
+  const label = row.getAttribute('aria-label') || row.querySelector('[aria-label]')?.getAttribute('aria-label') || '';
   if (UNREAD_WORD.test(label)) return true;
-  const icon = row.querySelector('[data-icon-name]');
-  const iconName = icon?.getAttribute('data-icon-name') || '';
-  if (/unread|circlefill|circlesmallfilled|statuscircle/i.test(iconName)) return true;
-  const first = row.querySelector('span');
-  if (!first) return false;
-  const weight = parseInt(row.ownerDocument.defaultView.getComputedStyle(first).fontWeight, 10);
-  return weight >= 600;
+  if (label) return false;
+  for (const icon of row.querySelectorAll('[data-icon-name]')) {
+    const iconName = icon.getAttribute('data-icon-name') || '';
+    if (/unread|circlefill|circlesmallfilled/i.test(iconName)) return true;
+  }
+  return false;
 }
 
 function messageList(doc) {

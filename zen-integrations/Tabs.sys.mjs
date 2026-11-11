@@ -578,6 +578,8 @@ export class ZenTabs {
     if (idx !== -1) app.currentEmails.splice(idx, 1);
     const cacheIdx = app.cachedEmails.findIndex((item) => item.id === email.id);
     if (cacheIdx !== -1) app.cachedEmails.splice(cacheIdx, 1);
+    app.cache.persistActive(app.activePanelContextKey);
+    app.cache.save();
     app.panel.updateDisplay();
     app.scan.scanContext(app.activePanelContextKey);
     app.panel.hide();
