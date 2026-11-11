@@ -342,7 +342,11 @@ export async function fetchOutlookGraph(app, tab, contextKey) {
     fetched = await load(bearer);
   }
   if (fetched.status === 401 || fetched.status === 403) throw signInError(outlookSignInMessage());
-  if (fetched.status < 200 || fetched.status >= 300) throw new Error('Graph HTTP ' + fetched.status);
+  if (fetched.status < 200 || fetched.status >= 300) {
+    let detail = '';
+    try { detail = JSON.parse(fetched.text || '{}').error?.message || ''; } catch (e) {}
+    throw new Error(detail ? 'Graph HTTP ' + fetched.status + ': ' + detail : 'Graph HTTP ' + fetched.status);
+  }
   let payload = {};
   try { payload = JSON.parse(fetched.text || '{}'); } catch (e) {
     throw new Error('Graph response was not JSON');

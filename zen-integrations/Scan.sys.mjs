@@ -79,7 +79,10 @@ export class ZenScan {
       return;
     }
 
-    if (app.scanInFlight.has(contextKey)) return;
+    if (app.scanInFlight.has(contextKey)) {
+      if (force) app.scanForcePending.add(contextKey);
+      return;
+    }
     app.scanInFlight.add(contextKey);
     app.scanContextKey = contextKey;
     app.loadScansInFlight.add(contextKey);
@@ -117,6 +120,10 @@ export class ZenScan {
     } finally {
       app.scanInFlight.delete(contextKey);
       app.tabs.finishLoadScan(tab);
+      if (app.scanForcePending.has(contextKey)) {
+        app.scanForcePending.delete(contextKey);
+        this.requestScan(tab, { force: true });
+      }
     }
   }
 

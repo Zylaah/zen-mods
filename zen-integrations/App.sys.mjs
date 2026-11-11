@@ -32,6 +32,7 @@ export class ZenIntegrations {
     this.scanInProgress = false;
     this.scanMemCache = {};
     this.scanInFlight = new Set();
+    this.scanForcePending = new Set();
     this.readStateTimers = new Map();
     this.hideTimer = null;
     this.showTimer = null;

@@ -35,7 +35,6 @@ export function formEncode(fields) {
 
 export function graphMessagesUrl() {
   const query = [
-    ['$filter', 'isRead eq false'],
     ['$select', 'id,subject,bodyPreview,from,receivedDateTime,webLink,conversationId,isRead'],
     ['$top', '50']
   ];

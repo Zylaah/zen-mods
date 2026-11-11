@@ -248,7 +248,8 @@ export function httpRequest(win, { url, userContextId, method = 'GET', headers =
   // setUploadStream forces PUT. Set the real method after it.
   channel.requestMethod = method;
   channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE | Ci.nsIRequest.INHIBIT_CACHING;
-  if (anonymous) channel.loadFlags |= Ci.nsIRequest.LOAD_ANONYMOUS;
+  // LOAD_ANONYMOUS drops an Authorization header. Use it for the token POST only.
+  if (anonymous && !headers.Authorization) channel.loadFlags |= Ci.nsIRequest.LOAD_ANONYMOUS;
   for (const [name, value] of Object.entries(headers)) {
     if (value == null || value === '') continue;
     try { channel.setRequestHeader(name, String(value), false); } catch (e) {}
