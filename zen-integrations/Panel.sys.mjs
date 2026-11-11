@@ -319,7 +319,6 @@ export class ZenPanel {
       app.tabs.findAnchor(key) ||
       app.tabs.resolveTarget(key);
     if (!tab) return;
-    this.hide();
     provider.beginSignIn(app, tab);
   }
 

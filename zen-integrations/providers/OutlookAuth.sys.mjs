@@ -50,17 +50,46 @@ function base64Url(bytes) {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
-function randomToken() {
-  const rng = Cc['@mozilla.org/security/random-generator;1'].createInstance(Ci.nsIRandomGenerator);
-  const bytes = rng.generateRandomBytes(32);
-  return base64Url(typeof bytes === 'string' ? Array.from(bytes, (ch) => ch.charCodeAt(0)) : bytes);
+function cryptoApi(win) {
+  return win?.crypto || globalThis.crypto || null;
 }
 
-function codeChallenge(verifier) {
+function randomToken(win) {
+  const bytes = new Uint8Array(32);
+  const api = cryptoApi(win);
+  if (api?.getRandomValues) {
+    api.getRandomValues(bytes);
+    return base64Url(bytes);
+  }
+  const rng = Cc['@mozilla.org/security/random-generator;1'].createInstance(Ci.nsIRandomGenerator);
+  let raw;
+  try {
+    raw = rng.generateRandomBytes(32);
+  } catch (e) {
+    const out = {};
+    rng.generateRandomBytes(32, out);
+    raw = out.value;
+  }
+  if (typeof raw === 'string') raw = Array.from(raw, (ch) => ch.charCodeAt(0));
+  return base64Url(raw);
+}
+
+async function codeChallenge(win, verifier) {
+  const data = new TextEncoder().encode(verifier);
+  const api = cryptoApi(win);
+  if (api?.subtle?.digest) {
+    const digest = await api.subtle.digest('SHA-256', data);
+    return base64Url(new Uint8Array(digest));
+  }
   const hasher = Cc['@mozilla.org/security/crypto-hash;1'].createInstance(Ci.nsICryptoHash);
   hasher.init(Ci.nsICryptoHash.SHA256);
-  const data = new TextEncoder().encode(verifier);
-  hasher.update(data, data.length);
+  try {
+    hasher.update(data, data.length);
+  } catch (e) {
+    let binary = '';
+    for (const value of data) binary += String.fromCharCode(value);
+    hasher.update(binary, binary.length);
+  }
   return hasher.finish(true).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
@@ -150,10 +179,15 @@ async function accessToken(win, userContextId, contextKey, clientId) {
   return entry?.accessToken || null;
 }
 
+function tabIsOpen(tab) {
+  return !!(tab && tab.isConnected && tab.linkedBrowser);
+}
+
 function waitForAuthCode(win, tab, state) {
   return new Promise((resolve, reject) => {
-    const browser = tab.linkedBrowser;
     let settled = false;
+    let browser = null;
+    let armTimer = 0;
     const listener = {
       QueryInterface: ChromeUtils.generateQI(['nsIWebProgressListener', 'nsISupportsWeakReference']),
       onLocationChange(_progress, _request, location) {
@@ -184,13 +218,35 @@ function waitForAuthCode(win, tab, state) {
       if (settled) return;
       settled = true;
       win.clearTimeout(timer);
-      try { browser.removeProgressListener(listener); } catch (e) {}
+      win.clearTimeout(armTimer);
+      try { browser?.removeProgressListener(listener); } catch (e) {}
       try { tab.removeEventListener('TabClose', onClose); } catch (e) {}
       try { win.gBrowser.removeTab(tab); } catch (e) {}
       done();
     }
-    tab.addEventListener('TabClose', onClose);
-    browser.addProgressListener(listener, Ci.nsIWebProgress.NOTIFY_LOCATION);
+    function arm(tries) {
+      if (settled) return;
+      if (!tab.isConnected) {
+        finish(() => reject(new Error('Zen closed the sign-in tab')));
+        return;
+      }
+      browser = tab.linkedBrowser || null;
+      if (!browser) {
+        if (tries > 40) {
+          finish(() => reject(new Error('Zen did not attach a browser to the sign-in tab')));
+          return;
+        }
+        armTimer = win.setTimeout(() => arm(tries + 1), 50);
+        return;
+      }
+      tab.addEventListener('TabClose', onClose);
+      try {
+        browser.addProgressListener(listener, Ci.nsIWebProgress.NOTIFY_LOCATION);
+      } catch (e) {
+        finish(() => reject(e));
+      }
+    }
+    arm(0);
   });
 }
 
@@ -202,21 +258,27 @@ export async function beginOutlookSignIn(app, tab, contextKey) {
   authInFlight.add(contextKey);
   const win = app.window;
   const userContextId = getTabUserContextId(tab);
-  const verifier = randomToken();
-  const state = randomToken();
-  const url = authorizeUrl({
-    clientId,
-    redirectUri: OUTLOOK_REDIRECT_URI,
-    state,
-    challenge: codeChallenge(verifier)
-  });
   let authTab = null;
   try {
-    authTab = win.gBrowser.addTab(url, {
-      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-      userContextId
+    if (!win?.gBrowser?.addTab) throw new Error('Zen tab browser is missing');
+    const verifier = randomToken(win);
+    const state = randomToken(win);
+    const url = authorizeUrl({
+      clientId,
+      redirectUri: OUTLOOK_REDIRECT_URI,
+      state,
+      challenge: await codeChallenge(win, verifier)
     });
+    const addTabArgs = {
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+      inBackground: false
+    };
+    if (userContextId) addTabArgs.userContextId = userContextId;
+    authTab = win.gBrowser.addTab(url, addTabArgs);
     win.gBrowser.selectedTab = authTab;
+    await new Promise((resolve) => win.setTimeout(resolve, 0));
+    if (!tabIsOpen(authTab)) throw new Error('Zen closed the sign-in tab before it opened');
+    app.panel.hide();
     const code = await waitForAuthCode(win, authTab, state);
     authTab = null;
     const { status, payload } = await postToken(win, userContextId, {
