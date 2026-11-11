@@ -160,6 +160,26 @@ function cookieSent(cookie, userContextId, requestPath, allowedHosts) {
   return path === '/' || requestPath.startsWith(path);
 }
 
+export function hostCookies(userContextId, allowedHosts) {
+  const seen = new Set();
+  const list = [];
+  const add = (cookie) => {
+    if (!cookie || !hostAllowed(cookie.host || cookie.rawHost, allowedHosts)) return;
+    const contextId = Number(cookie.originAttributes?.userContextId || 0);
+    if (contextId !== userContextId) return;
+    if (!cookie.isSession && cookie.expiry && cookie.expiry * 1000 < Date.now()) return;
+    const key = cookie.name + '\n' + (cookie.path || '/') + '\n' + (cookie.originAttributes?.partitionKey || '');
+    if (seen.has(key)) return;
+    seen.add(key);
+    list.push(cookie);
+  };
+  for (const host of allowedHosts) {
+    for (const cookie of cookieList(host, { userContextId })) add(cookie);
+  }
+  for (const cookie of allCookies()) add(cookie);
+  return list;
+}
+
 export function cookieJar(userContextId, pageUrl, allowedHosts) {
   let requestPath = '/';
   try { requestPath = new URL(pageUrl).pathname || '/'; } catch (e) {}
@@ -196,11 +216,13 @@ function principalCookieHeader(pageUrl, userContextId) {
   }
 }
 
-export function httpRequest(win, { url, userContextId, method = 'GET', headers = {}, body = '', cookieHosts, timeoutMs, maxBytes }) {
+export function httpRequest(win, { url, userContextId, method = 'GET', headers = {}, body = '', cookieHosts, cookieHeader, timeoutMs, maxBytes }) {
   const uri = Services.io.newURI(url);
   const principal = Services.scriptSecurityManager.createContentPrincipal(uri, { userContextId });
   const jar = cookieJar(userContextId, url, cookieHosts);
-  const cookieString = principalCookieHeader(url, userContextId) || cookieHeaderFromJar(jar);
+  const cookieString = cookieHeader != null
+    ? cookieHeader
+    : (principalCookieHeader(url, userContextId) || cookieHeaderFromJar(jar));
   const channel = NetUtil.newChannel({
     uri,
     loadingPrincipal: principal,

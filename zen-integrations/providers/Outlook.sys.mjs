@@ -1,9 +1,10 @@
 const {
   CONFIG,
-  cookieJar,
+  cookieHeaderFromJar,
   debugLog,
   fnv1a,
   getTabUserContextId,
+  hostCookies,
   httpRequest
 } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
@@ -63,11 +64,22 @@ function mailSlot(hints) {
   return '';
 }
 
-function serviceUrl(origin, hints) {
+function owaPrefix(origin, hints, canaryPath) {
+  const fromCanary = String(canaryPath || '').match(/\/owa\/(\d+)/i);
+  if (fromCanary) return '/owa/' + fromCanary[1];
   const host = hostOf(origin);
-  const useZero = host === 'outlook.live.com' || (hints || []).some((hint) => /\/owa\/0\//.test(String(hint)));
-  const prefix = useZero ? '/owa/0' : '/owa';
-  return origin + prefix + '/service.svc?action=FindConversation&app=Mail';
+  if (host === 'outlook.live.com' || (hints || []).some((hint) => /\/owa\/0\//.test(String(hint)))) {
+    return '/owa/' + (mailSlot(hints) || '0');
+  }
+  return '/owa';
+}
+
+function serviceUrl(origin, hints, canaryPath) {
+  return origin + owaPrefix(origin, hints, canaryPath) + '/service.svc?action=FindConversation&app=Mail';
+}
+
+function startupUrl(origin, hints) {
+  return origin + owaPrefix(origin, hints) + '/startupdata.ashx?app=Mail&n=0';
 }
 
 function findConversationBody(shapeName) {
@@ -220,27 +232,120 @@ function thinConversations(data) {
   return list.every((item) => !item?.ConversationTopic && !item?.Preview && !item?.UniqueSenders);
 }
 
-async function postFind(app, tab, origin, hints, shapeName) {
-  const url = serviceUrl(origin, hints);
+function pathMatches(cookiePath, requestPath) {
+  const path = String(cookiePath || '/');
+  const normalized = path.startsWith('/') ? path : '/' + path;
+  if (normalized === '/') return true;
+  if (requestPath === normalized) return true;
+  const prefix = normalized.endsWith('/') ? normalized : normalized + '/';
+  return requestPath.startsWith(prefix);
+}
+
+function canaryFrom(cookies) {
+  let best = null;
+  for (const cookie of cookies) {
+    if (String(cookie.name || '').toLowerCase() !== 'x-owa-canary') continue;
+    const path = cookie.path || '/';
+    if (!best || (path.toLowerCase().includes('/owa') && !String(best.path).toLowerCase().includes('/owa'))) {
+      best = { value: canaryValue(cookie.value), path };
+    }
+  }
+  return best;
+}
+
+function cookieValue(cookies, name) {
+  const wanted = name.toLowerCase();
+  for (const cookie of cookies) {
+    if (String(cookie.name || '').toLowerCase() === wanted && cookie.value) return cookie.value;
+  }
+  return '';
+}
+
+function requestCookies(cookies, requestPath, canary) {
+  const jar = new Map();
+  for (const cookie of cookies) {
+    const name = cookie.name;
+    if (!name) continue;
+    const isCanary = name.toLowerCase() === 'x-owa-canary';
+    if (!isCanary && !pathMatches(cookie.path, requestPath)) continue;
+    const partitioned = !!cookie.originAttributes?.partitionKey;
+    const current = jar.get(name);
+    if (!current || (current.partitioned && !partitioned)) {
+      jar.set(name, { value: isCanary ? canary.value : cookie.value, partitioned });
+    }
+  }
+  if (canary?.value && ![...jar.keys()].some((name) => name.toLowerCase() === 'x-owa-canary')) {
+    jar.set('X-OWA-CANARY', { value: canary.value, partitioned: false });
+  }
+  return cookieHeaderFromJar(jar);
+}
+
+function canaryInText(text) {
+  const match = String(text || '').match(/X-OWA-CANARY["']?\s*[:=]\s*["']([^"'\s;]+)/i);
+  return match ? canaryValue(match[1]) : '';
+}
+
+async function loadCanary(app, tab, origin, hints) {
   const hosts = cookieHosts(origin);
-  const jar = cookieJar(getTabUserContextId(tab), url, hosts);
-  const canary = canaryValue(jar.get('X-OWA-CANARY')?.value || '');
-  if (!canary) throw signInError();
-  const anchor = jar.get('DefaultAnchorMailbox')?.value || jar.get('X-AnchorMailbox')?.value || '';
+  const userContextId = getTabUserContextId(tab);
+  const read = () => canaryFrom(hostCookies(userContextId, hosts));
+  const found = read();
+  if (found?.value) return found;
+
+  const startup = startupUrl(origin, hints);
+  debugLog('Outlook canary cookie missing, calling', startup);
+  let fetched = null;
+  try {
+    fetched = await httpRequest(app.window, {
+      url: startup,
+      userContextId,
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json; charset=utf-8'
+      },
+      body: '{}',
+      cookieHosts: hosts
+    });
+  } catch (e) {
+    debugLog('Outlook startupdata failed', e && e.message ? e.message : e);
+  }
+  if (fetched) debugLog('Outlook startupdata', fetched.status, fetched.finalUrl);
+  const again = read();
+  if (again?.value) return again;
+  const fromBody = canaryInText(fetched?.text);
+  if (fromBody) return { value: fromBody, path: owaPrefix(origin, hints) + '/' };
+
+  const names = hostCookies(userContextId, hosts).map((cookie) => cookie.name + '@' + (cookie.path || '/'));
+  debugLog('Outlook canary still missing', names.slice(0, 40).join(', ') || '(no outlook cookies)');
+  throw signInError();
+}
+
+async function postFind(app, tab, origin, hints, shapeName) {
+  const hosts = cookieHosts(origin);
+  const userContextId = getTabUserContextId(tab);
+  const canary = await loadCanary(app, tab, origin, hints);
+  const url = serviceUrl(origin, hints, canary.path);
+  let requestPath = '/';
+  try { requestPath = new URL(url).pathname || '/'; } catch (e) {}
+  const cookies = hostCookies(userContextId, hosts);
+  const anchor = cookieValue(cookies, 'DefaultAnchorMailbox') || cookieValue(cookies, 'X-AnchorMailbox');
+  debugLog('Outlook canary path', canary.path || '/');
   return httpRequest(app.window, {
     url,
-    userContextId: getTabUserContextId(tab),
+    userContextId,
     method: 'POST',
     headers: {
       Action: 'FindConversation',
       Accept: 'application/json',
       'Content-Type': 'application/json; charset=utf-8',
-      'X-OWA-CANARY': canary,
+      'X-OWA-CANARY': canary.value,
       'X-Requested-With': 'XMLHttpRequest',
       'X-AnchorMailbox': anchor
     },
     body: JSON.stringify(findConversationBody(shapeName)),
-    cookieHosts: hosts
+    cookieHosts: hosts,
+    cookieHeader: requestCookies(cookies, requestPath, canary)
   });
 }
 
