@@ -6,6 +6,9 @@ const {
 } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
 );
+const { normalizeOutlookFields } = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/providers/OutlookDate.sys.mjs' + new URL(import.meta.url).search
+);
 
 function formatDate(dateString) {
   if (!dateString) return '';
@@ -363,14 +366,16 @@ export class ZenPanel {
       const el = document.createElement('div');
       el.className = 'zi-item';
       if (email.isUnread) el.classList.add('zi-unread');
+      const outlook = String(app.activePanelContextKey || '').startsWith('outlook:');
+      const fields = outlook ? normalizeOutlookFields(email) : email;
       const from = String(email.from || '').replace(/<[^>]*>/g, '').trim();
       el.innerHTML = `
         <div class="zi-item-header">
           <span class="zi-from">${escapeHtml(document, from)}</span>
-          <span class="zi-date">${escapeHtml(document, formatDate(email.date))}</span>
+          <span class="zi-date">${escapeHtml(document, formatDate(fields.date))}</span>
         </div>
         <div class="zi-subject">${escapeHtml(document, email.subject || '(No subject)')}</div>
-        <div class="zi-snippet-wrap"><div class="zi-snippet">${escapeHtml(document, email.snippet || '')}</div></div>
+        <div class="zi-snippet-wrap"><div class="zi-snippet">${escapeHtml(document, fields.snippet || '')}</div></div>
       `;
       el.addEventListener('click', (event) => {
         event.preventDefault();

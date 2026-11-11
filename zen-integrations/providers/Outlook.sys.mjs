@@ -1,6 +1,9 @@
 const { CONFIG, debugLog, fnv1a, getTabUserContextId } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
 );
+const { normalizeOutlookFields } = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/providers/OutlookDate.sys.mjs' + new URL(import.meta.url).search
+);
 
 const HOSTS = [
   'outlook.office.com',
@@ -124,6 +127,7 @@ export const outlookProvider = {
     }
     return scrapedRows.slice(0, CONFIG.MAX_EMAILS).map((row, sourceRank) => {
       const threadId = row.id || row.key || '';
+      const fields = normalizeOutlookFields(row);
       return {
         id: 'outlook:' + fnv1a(threadId || row.subject + '|' + row.from),
         threadId,
@@ -131,8 +135,8 @@ export const outlookProvider = {
         legacyThreadId: '',
         from: row.from || 'Unknown',
         subject: row.subject || '(No subject)',
-        snippet: row.snippet || '',
-        date: row.date || '',
+        snippet: fields.snippet,
+        date: fields.date,
         ts: 0,
         isUnread: true,
         url: '',
