@@ -7,6 +7,12 @@ function linesOf(row) {
     .filter(Boolean);
 }
 
+function contentLines(row) {
+  const lines = linesOf(row);
+  const body = lines.filter((line) => line.length > 1);
+  return body.length ? body : lines;
+}
+
 function isUnread(row) {
   const label = row.getAttribute('aria-label') || '';
   if (UNREAD_WORD.test(label)) return true;
@@ -34,7 +40,7 @@ function scrapeDocument(doc) {
   const seen = new Set();
   for (const row of list.querySelectorAll('[role="option"], [role="listitem"], [role="row"]')) {
     if (!isUnread(row)) continue;
-    const lines = linesOf(row);
+    const lines = contentLines(row);
     if (!lines.length) continue;
     const id = row.getAttribute('data-convid') || row.getAttribute('data-id') || row.id || '';
     const key = id || lines.slice(0, 2).join('|');
