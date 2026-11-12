@@ -3,6 +3,7 @@ const {
   debugLog,
   fnv1a,
   getGmailUrlPattern,
+  getTabOriginAttributes,
   getTabUserContextId,
   httpRequest
 } = ChromeUtils.importESModule(
@@ -256,6 +257,7 @@ export const gmailProvider = {
     const fetched = await httpRequest(app.window, {
       url: sourceUrl,
       userContextId: getTabUserContextId(tab),
+      originAttributes: getTabOriginAttributes(tab),
       method: 'GET',
       headers: { Accept: 'application/atom+xml,application/xml;q=0.9,*/*;q=0.8' },
       cookieHosts: GMAIL_HOSTS

@@ -68,6 +68,29 @@ export function getTabUserContextId(tab) {
   return parseInt(tab.getAttribute('usercontextid') || '0', 10) || 0;
 }
 
+export function getTabOriginAttributes(tab) {
+  const browser = tab?.linkedBrowser;
+  const sources = [];
+  try {
+    if (browser?.contentPrincipal?.originAttributes) sources.push(browser.contentPrincipal.originAttributes);
+  } catch (e) {}
+  try {
+    const attrs = browser?.browsingContext?.currentWindowGlobal?.documentPrincipal?.originAttributes;
+    if (attrs) sources.push(attrs);
+  } catch (e) {}
+  try {
+    const attrs = browser?.browsingContext?.originAttributes;
+    if (attrs) sources.push(attrs);
+  } catch (e) {}
+  const picked = sources.find((attrs) => attrs?.partitionKey) || sources[0] || {};
+  const copy = { userContextId: getTabUserContextId(tab) };
+  for (const key of ['privateBrowsingId', 'firstPartyDomain', 'partitionKey']) {
+    if (picked[key] == null || picked[key] === '') continue;
+    copy[key] = picked[key];
+  }
+  return copy;
+}
+
 export function getContextContainerId(contextKey) {
   const key = String(contextKey || '0');
   const parts = key.split(':');
@@ -182,16 +205,24 @@ export function hostCookies(userContextId, allowedHosts) {
   return list;
 }
 
-export function cookieJar(userContextId, pageUrl, allowedHosts) {
+export function cookieJar(userContextId, pageUrl, allowedHosts, partitionKey = '') {
   let requestPath = '/';
   try { requestPath = new URL(pageUrl).pathname || '/'; } catch (e) {}
   const jar = new Map();
   const add = (cookie) => {
     if (!cookieSent(cookie, userContextId, requestPath, allowedHosts)) return;
-    const partitioned = !!cookie.originAttributes?.partitionKey;
+    const partition = String(cookie.originAttributes?.partitionKey || '');
+    if (partitionKey && partition && partition !== partitionKey) return;
+    const next = { value: cookie.value, partition };
     const current = jar.get(cookie.name);
-    if (!current || (current.partitioned && !partitioned)) {
-      jar.set(cookie.name, { value: cookie.value, partitioned });
+    if (!current) {
+      jar.set(cookie.name, next);
+      return;
+    }
+    if (partitionKey && partition === partitionKey && current.partition !== partitionKey) {
+      jar.set(cookie.name, next);
+    } else if (!partitionKey && current.partition && !partition) {
+      jar.set(cookie.name, next);
     }
   };
   for (const host of allowedHosts) {
@@ -207,28 +238,58 @@ export function cookieHeaderFromJar(jar) {
   return [...jar.entries()].map(([name, cookie]) => name + '=' + cookie.value).join('; ');
 }
 
-function principalCookieHeader(pageUrl, userContextId) {
+function cookieHeaderForPrincipal(uri, attrs) {
   try {
-    const uri = Services.io.newURI(pageUrl);
     const service = Cc['@mozilla.org/cookieService;1'].getService(Ci.nsICookieService);
-    const principal = Services.scriptSecurityManager.createContentPrincipal(uri, { userContextId });
+    const principal = Services.scriptSecurityManager.createContentPrincipal(uri, attrs);
     return service.getCookieStringForPrincipal(principal) || '';
   } catch (e) {
     return '';
   }
 }
 
-export function httpRequest(win, { url, userContextId, method = 'GET', headers = {}, body = '', cookieHosts, cookieHeader, timeoutMs, maxBytes, contentType, anonymous = false }) {
+function hasSessionCookie(header) {
+  return /(?:^|;\s*)(?:SID|SAPISID|__Secure-1PSID|__Secure-3PSID)=/.test(header || '');
+}
+
+function cookieHeaderFor(uri, originAttributes, userContextId) {
+  const base = { userContextId: originAttributes?.userContextId ?? userContextId ?? 0 };
+  if (originAttributes?.privateBrowsingId) base.privateBrowsingId = originAttributes.privateBrowsingId;
+  if (originAttributes?.firstPartyDomain) base.firstPartyDomain = originAttributes.firstPartyDomain;
+  const plain = cookieHeaderForPrincipal(uri, base);
+  if (!originAttributes?.partitionKey) return plain;
+  let partitioned = '';
+  try {
+    partitioned = cookieHeaderForPrincipal(uri, { ...base, partitionKey: originAttributes.partitionKey });
+  } catch (e) {}
+  if (hasSessionCookie(partitioned) && !hasSessionCookie(plain)) return partitioned;
+  if (hasSessionCookie(plain) && !hasSessionCookie(partitioned)) return plain;
+  return (partitioned || '').length > (plain || '').length ? partitioned : plain;
+}
+
+function principalFor(uri, originAttributes, userContextId) {
+  const attrs = originAttributes || { userContextId: userContextId || 0 };
+  try {
+    return Services.scriptSecurityManager.createContentPrincipal(uri, attrs);
+  } catch (e) {
+    return Services.scriptSecurityManager.createContentPrincipal(uri, { userContextId: attrs.userContextId || 0 });
+  }
+}
+
+export function httpRequest(win, { url, userContextId, method = 'GET', headers = {}, body = '', cookieHosts, cookieHeader, timeoutMs, maxBytes, contentType, anonymous = false, originAttributes = null }) {
   const uri = Services.io.newURI(url);
-  const principal = Services.scriptSecurityManager.createContentPrincipal(uri, { userContextId });
+  const principal = principalFor(uri, originAttributes, userContextId);
+  const partitionKey = originAttributes?.partitionKey || '';
   // Anonymous calls (Microsoft token and Graph) have no cookie host list.
   // cookieJar iterates that list, so skip it instead of throwing.
-  const jar = anonymous ? new Map() : cookieJar(userContextId, url, cookieHosts);
+  const jar = anonymous ? new Map() : cookieJar(userContextId, url, cookieHosts, partitionKey);
+  const fromPrincipal = anonymous || cookieHeader != null ? '' : cookieHeaderFor(uri, originAttributes, userContextId);
+  const fromJar = anonymous ? '' : cookieHeaderFromJar(jar);
   const cookieString = anonymous
     ? ''
     : (cookieHeader != null
       ? cookieHeader
-      : (principalCookieHeader(url, userContextId) || cookieHeaderFromJar(jar)));
+      : (hasSessionCookie(fromPrincipal) ? fromPrincipal : (hasSessionCookie(fromJar) ? fromJar : (fromPrincipal || fromJar))));
   const channel = NetUtil.newChannel({
     uri,
     loadingPrincipal: principal,
