@@ -599,11 +599,7 @@ export class ZenTabs {
 
   onHover(event) {
     const tab = event.currentTarget;
-    if (!this.isAnchor(tab)) {
-      this.app.panel.cancelShowTimer();
-      this.app.panel.scheduleHide();
-      return;
-    }
+    if (!tab.hasAttribute('data-zi-mail')) return;
     this.app.panel.scheduleShow(tab);
   }
 
@@ -616,10 +612,13 @@ export class ZenTabs {
     const document = this.window.document;
     if (!this.gBrowser?.tabs) return;
     for (const tab of this.gBrowser.tabs) {
-      if (tab.hasAttribute('zen-essential') || (tab.pinned && this.providerFor(tab))) {
+      const mail = this.isAnchor(tab);
+      if (mail) tab.setAttribute('data-zi-mail', 'true');
+      else tab.removeAttribute('data-zi-mail');
+      if (tab.hasAttribute('zen-essential') || (tab.pinned && mail)) {
         this.attachHoverListener(tab);
       }
-      if (!this.isAnchor(tab)) continue;
+      if (!mail) continue;
       this.attachLoadListeners(tab);
       if (this.providerFor(tab)?.id === 'gmail') {
         this.wakeGmailActor(tab);
@@ -630,7 +629,7 @@ export class ZenTabs {
     for (const tab of document.querySelectorAll(
       '#zen-essentials .tabbrowser-tab[zen-essential], .zen-workspace-pinned-tabs-section .tabbrowser-tab[pinned]'
     )) {
-      if (tab.hasAttribute('zen-essential') || this.providerFor(tab)) this.attachHoverListener(tab);
+      if (tab.hasAttribute('data-zi-mail')) this.attachHoverListener(tab);
     }
   }
 
@@ -638,7 +637,7 @@ export class ZenTabs {
     const document = this.window.document;
     const onHover = (event) => {
       const tab = event.target.closest?.('.tabbrowser-tab');
-      if (!tab || !this.isAnchor(tab)) return;
+      if (!tab?.hasAttribute('data-zi-mail')) return;
       this.app.panel.scheduleShow(tab);
     };
     const roots = [
@@ -671,9 +670,17 @@ export class ZenTabs {
   setupMonitoring() {
     this.startInboxWatch();
     this.refreshAnchors();
+    let timer = null;
+    const debounced = () => {
+      if (timer) this.window.clearTimeout(timer);
+      timer = this.window.setTimeout(() => {
+        timer = null;
+        this.refreshAnchors();
+      }, 150);
+    };
     if (this.gBrowser?.tabContainer) {
       const onChange = () => this.refreshAnchors();
-      this.gBrowser.tabContainer.addEventListener('TabAttrModified', onChange);
+      this.gBrowser.tabContainer.addEventListener('TabAttrModified', debounced);
       this.gBrowser.tabContainer.addEventListener('TabOpen', onChange);
       this.gBrowser.tabContainer.addEventListener('TabClose', onChange);
       this.gBrowser.tabContainer.addEventListener('TabPinned', onChange);
@@ -682,17 +689,11 @@ export class ZenTabs {
     this.setupHoverDelegation();
     this.setupWorkspaceMonitoring();
 
-    let timer = null;
-    const debounced = () => {
-      if (timer) this.window.clearTimeout(timer);
-      timer = this.window.setTimeout(() => this.refreshAnchors(), 150);
-    };
     const observer = new this.window.MutationObserver(debounced);
     const document = this.window.document;
     const essentials = document.getElementById('zen-essentials');
     if (essentials) {
       observer.observe(essentials, {
-        childList: true,
         attributes: true,
         attributeFilter: ['zen-essential', 'pinned', 'data-url', 'pending', 'label', 'image']
       });
@@ -700,7 +701,6 @@ export class ZenTabs {
     const tabs = document.getElementById('tabbrowser-tabs');
     if (tabs) {
       observer.observe(tabs, {
-        childList: true,
         attributes: true,
         subtree: true,
         attributeFilter: ['zen-essential', 'pinned', 'data-url']

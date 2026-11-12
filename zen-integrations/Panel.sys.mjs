@@ -243,11 +243,7 @@ export class ZenPanel {
       this.app.window.clearTimeout(this.app.hideTimer);
       this.app.hideTimer = null;
     }
-    if (this.isOpen() && this.app.hoveredTab === tab) {
-      this.cancelShowTimer();
-      this.show(tab);
-      return;
-    }
+    if (this.isOpen() && this.app.hoveredTab === tab) return;
     if (this.isOpen()) this.hide();
     if (this.app.pendingShowTab === tab && this.app.showTimer) return;
     this.cancelShowTimer();
