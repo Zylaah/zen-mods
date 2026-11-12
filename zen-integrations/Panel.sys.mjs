@@ -312,14 +312,24 @@ export class ZenPanel {
     const app = this.app;
     const key = app.activePanelContextKey;
     const provider = app.providerForKey(key);
-    if (!provider?.beginSignIn) return;
     const hovered = app.hoveredTab;
     const tab =
       (hovered && app.tabs.isAnchor(hovered, key) ? hovered : null) ||
       app.tabs.findAnchor(key) ||
       app.tabs.resolveTarget(key);
     if (!tab) return;
-    provider.beginSignIn(app, tab);
+    if (provider?.beginSignIn) {
+      provider.beginSignIn(app, tab);
+      return;
+    }
+    if (app.tabs.gBrowser && app.tabs.gBrowser.selectedTab !== tab) {
+      app.tabs.gBrowser.selectedTab = tab;
+    }
+    const url = provider?.homeUrl?.(app.tabs.getUrlHints(tab)) || '';
+    if (url && !app.tabs.isLoadedMailBrowser(tab)) {
+      app.tabs.loadMailUrl(tab.linkedBrowser, url);
+    }
+    this.hide();
   }
 
   showError(message, options) {
@@ -378,7 +388,7 @@ export class ZenPanel {
         isUnloaded && !hasScanned
           ? (provider?.signInMessage || 'Sign in to see unread mail')
           : 'No unread mail';
-      if (provider?.beginSignIn && emptyMessage === provider.signInMessage) {
+      if (provider?.signInMessage && emptyMessage === provider.signInMessage) {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'zi-empty zi-signin';
