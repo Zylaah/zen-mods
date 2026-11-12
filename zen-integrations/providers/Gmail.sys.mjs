@@ -258,6 +258,7 @@ export const gmailProvider = {
       url: sourceUrl,
       userContextId: getTabUserContextId(tab),
       originAttributes: getTabOriginAttributes(tab),
+      readOnlyCookies: true,
       method: 'GET',
       headers: { Accept: 'application/atom+xml,application/xml;q=0.9,*/*;q=0.8' },
       cookieHosts: GMAIL_HOSTS

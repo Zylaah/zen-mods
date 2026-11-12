@@ -276,7 +276,7 @@ function principalFor(uri, originAttributes, userContextId) {
   }
 }
 
-export function httpRequest(win, { url, userContextId, method = 'GET', headers = {}, body = '', cookieHosts, cookieHeader, timeoutMs, maxBytes, contentType, anonymous = false, originAttributes = null }) {
+export function httpRequest(win, { url, userContextId, method = 'GET', headers = {}, body = '', cookieHosts, cookieHeader, timeoutMs, maxBytes, contentType, anonymous = false, originAttributes = null, readOnlyCookies = false }) {
   const uri = Services.io.newURI(url);
   const principal = principalFor(uri, originAttributes, userContextId);
   const partitionKey = originAttributes?.partitionKey || '';
@@ -309,9 +309,11 @@ export function httpRequest(win, { url, userContextId, method = 'GET', headers =
   // setUploadStream forces PUT. Set the real method after it.
   channel.requestMethod = method;
   channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE | Ci.nsIRequest.INHIBIT_CACHING;
-  // Keep Microsoft token and Graph calls out of the Outlook cookie jar.
-  // LOAD_ANONYMOUS also drops Authorization; the observer puts it back.
-  if (anonymous) channel.loadFlags |= Ci.nsIRequest.LOAD_ANONYMOUS;
+  // A Gmail preview must not store Set-Cookie. That write was landing in the
+  // other container and signing it out. LOAD_ANONYMOUS drops storage; the
+  // observer still attaches the container's existing Cookie header.
+  // Microsoft token and Graph calls stay anonymous so they never touch Outlook.
+  if (anonymous || readOnlyCookies) channel.loadFlags |= Ci.nsIRequest.LOAD_ANONYMOUS;
   for (const [name, value] of Object.entries(headers)) {
     if (value == null || value === '') continue;
     try { channel.setRequestHeader(name, String(value), false); } catch (e) {}
@@ -328,7 +330,14 @@ export function httpRequest(win, { url, userContextId, method = 'GET', headers =
         const http = subject.QueryInterface(Ci.nsIHttpChannel);
         const ident = subject.QueryInterface(Ci.nsIIdentChannel);
         if (ident.channelId !== channelId) return;
-        if (anonymous) {
+        if (readOnlyCookies && cookieString && cookieHosts) {
+          let host = '';
+          try { host = http.URI?.host || ''; } catch (e) { host = ''; }
+          if (host && hostAllowed(host, cookieHosts)) {
+            http.setRequestHeader('Cookie', cookieString, false);
+          }
+        }
+        if (anonymous || readOnlyCookies) {
           if (headers.Authorization) http.setRequestHeader('Authorization', headers.Authorization, false);
           // Necko adds Origin after our headers. A native public client token
           // POST that still carries Origin is rejected as AADSTS90023.
