@@ -35,12 +35,15 @@ export function formEncode(fields) {
 
 export function graphMessagesUrl(view, top) {
   const count = Number(top) > 0 ? Math.min(Math.floor(Number(top)), 50) : 20;
-  let filter = 'isRead eq false';
+  // receivedDateTime has to lead $filter or Graph rejects $orderby.
+  // Without that sort, $top is the oldest unread, so 2024 sits above 2026.
+  const filter = ['receivedDateTime ge 2000-01-01T00:00:00Z', 'isRead eq false'];
   if (view === 'focused' || view === 'other') {
-    filter += " and inferenceClassification eq '" + view + "'";
+    filter.push("inferenceClassification eq '" + view + "'");
   }
   const query = [
-    ['$filter', filter],
+    ['$filter', filter.join(' and ')],
+    ['$orderby', 'receivedDateTime desc'],
     ['$select', 'id,subject,bodyPreview,from,receivedDateTime,webLink,conversationId,isRead,inferenceClassification'],
     ['$top', String(count)]
   ];
