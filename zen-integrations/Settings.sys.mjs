@@ -580,10 +580,10 @@ export async function showAccountSettings(win) {
         accountActions(row, record, provider);
       }
 
-      for (const detected of detected) {
+      for (const item of detected) {
         const row = make('div', 'zi-accounts-row zi-accounts-detected', section);
         const copy = make('div', 'zi-accounts-copy', row);
-        make('div', 'zi-accounts-name', copy, `Detected — ${containerName(detected.container)}`);
+        make('div', 'zi-accounts-name', copy, `Detected — ${containerName(item.container)}`);
         make('div', 'zi-accounts-detail', copy, `${provider.detail} · Not connected`);
         const actions = make('div', 'zi-accounts-actions', row);
         const button = make('button', 'zi-accounts-action', actions);
@@ -591,8 +591,8 @@ export async function showAccountSettings(win) {
         button.textContent = 'Connect';
         button.addEventListener('click', () => {
           runAuth(provider.id, button, () => provider.id === 'google'
-            ? connectGoogle(win, googleAccountId(detected.container))
-            : connectOutlook(win, detected.id));
+            ? connectGoogle(win, googleAccountId(item.container))
+            : connectOutlook(win, item.id));
         });
       }
 
