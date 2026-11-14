@@ -123,7 +123,6 @@ button.zi-signin {
 .zi-item {
   padding: 8px 10px;
   cursor: pointer;
-  transition: background-color 0.15s ease;
   position: relative;
   border-bottom: 1px solid light-dark(rgba(0,0,0,0.07), rgba(255,255,255,0.07));
   min-height: 76px;
@@ -132,12 +131,28 @@ button.zi-signin {
   flex-direction: column;
 }
 
+/* Hover fill is an inset pill so the row keeps its full-bleed separator. */
+.zi-item::before {
+  content: '';
+  position: absolute;
+  inset: 2px 4px;
+  border-radius: 8px;
+  background-color: transparent;
+  pointer-events: none;
+  transition: background-color 0.15s ease;
+}
+
+.zi-item > * {
+  position: relative;
+  z-index: 1;
+}
+
 .zi-item:last-child {
   border-bottom: none;
 }
 
 .zi-item.zi-unread {
-  padding-left: 9px;
+  padding-left: 10px;
 }
 
 .zi-item.zi-unread .zi-from {
@@ -148,8 +163,8 @@ button.zi-signin {
   font-weight: 600;
 }
 
-.zi-item:hover {
-  background-color: rgba(0, 0, 0, 0.08) !important;
+.zi-item:hover::before {
+  background-color: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.1));
 }
 
 .zi-item-header {
@@ -340,6 +355,11 @@ button.zi-signin {
   right: 0;
   height: 1px;
   background: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
+}
+
+/* The topmost hour row has nothing above it, so its divider is just a stray line. */
+.live-calendar-hour:first-child .live-calendar-hour-line {
+  display: none;
 }
 
 .live-calendar-hour-label {
