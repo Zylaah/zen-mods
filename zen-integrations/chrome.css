@@ -496,6 +496,11 @@ button.zi-signin {
 }
 
 #zi-accounts {
+  --zi-fg: light-dark(#151518, #f4f4f5);
+  --zi-muted: light-dark(#6d6d74, #a1a1aa);
+  --zi-line: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.1));
+  --zi-fill: light-dark(rgba(0, 0, 0, 0.045), rgba(255, 255, 255, 0.06));
+  --zi-hover: light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.1));
   position: fixed;
   inset: 0;
   z-index: 2147483000;
@@ -506,11 +511,11 @@ button.zi-signin {
   height: 100%;
   max-width: none;
   max-height: none;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: light-dark(#0c0c0d, #f9f9fa);
+  color: var(--zi-fg);
   font: message-box;
   font-size: 13px;
 }
@@ -519,43 +524,77 @@ button.zi-signin {
   background: transparent;
 }
 
-.zi-accounts-card {
-  width: min(420px, calc(100vw - 32px));
-  border-radius: 12px;
+.zi-accounts-card,
+.zi-accounts-sheet-card {
+  width: min(400px, calc(100vw - 32px));
+  border-radius: 18px;
   background: var(--zen-themed-toolbar-bg, var(--toolbar-bgcolor, Canvas));
-  border: 1px solid light-dark(rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.12));
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
-  overflow: hidden;
+  border: 1px solid var(--zi-line);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
+  color: var(--zi-fg);
 }
 
 .zi-accounts-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px 8px;
+  gap: 12px;
+  padding: 16px 16px 4px;
 }
 
 .zi-accounts-title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.zi-accounts-close,
+.zi-accounts-more,
+.zi-accounts-action {
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  --zen-squircle-value: 1;
+  corner-shape: round !important;
+}
+
+.zi-accounts-close,
+.zi-accounts-more {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  padding: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--zi-muted);
 }
 
 .zi-accounts-close {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font-size: 20px;
-  cursor: pointer;
-  --zen-squircle-value: 1;
-  corner-shape: round !important;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.zi-accounts-close:hover,
+.zi-accounts-more:hover {
+  background: var(--zi-hover);
+  color: var(--zi-fg);
 }
 
 .zi-accounts-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 8px 16px 16px;
+  padding: 8px 12px 12px;
+}
+
+.zi-accounts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .zi-accounts-status:empty {
@@ -563,25 +602,9 @@ button.zi-signin {
 }
 
 .zi-accounts-status {
-  margin: 0;
-  color: light-dark(#737373, #b1b1b1);
-}
-
-.zi-accounts-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.zi-accounts-input {
-  width: 100%;
-  box-sizing: border-box;
-  border: 1px solid light-dark(rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.12));
-  border-radius: 8px;
-  padding: 6px 8px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
+  margin: 0 4px 4px;
+  color: var(--zi-muted);
+  font-size: 12px;
 }
 
 .zi-accounts-row {
@@ -589,30 +612,90 @@ button.zi-signin {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 0;
-  border-top: 1px solid light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--zi-fill);
+}
+
+.zi-accounts-copy {
+  min-width: 0;
 }
 
 .zi-accounts-name {
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .zi-accounts-detail {
-  color: light-dark(#737373, #b1b1b1);
+  color: var(--zi-muted);
   font-size: 12px;
+  line-height: 1.4;
+}
+
+.zi-accounts-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
 }
 
 .zi-accounts-action {
-  appearance: none;
-  border: 0;
+  height: 28px;
+  padding: 0 12px;
   border-radius: 999px;
-  padding: 6px 12px;
-  cursor: pointer;
-  background-color: light-dark(rgba(210, 210, 210), rgba(69, 69, 69));
+  background: light-dark(#151518, #f4f4f5);
+  color: light-dark(#f4f4f5, #151518);
+}
+
+.zi-accounts-action:disabled {
+  opacity: 0.55;
+}
+
+.zi-accounts-more {
+  font-size: 18px;
+  letter-spacing: 1px;
+}
+
+.zi-accounts-sheet {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.zi-accounts-sheet[hidden] {
+  display: none;
+}
+
+.zi-accounts-sheet-card {
+  width: min(360px, calc(100vw - 48px));
+}
+
+.zi-accounts-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.zi-accounts-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: var(--zi-fill);
   color: inherit;
   font: inherit;
-  --zen-squircle-value: 1;
-  corner-shape: round !important;
+}
+
+.zi-accounts-input:focus {
+  outline: 2px solid light-dark(rgba(0, 0, 0, 0.25), rgba(255, 255, 255, 0.35));
+  outline-offset: 1px;
 }
 
 .tabbrowser-tab[zen-essential] .live-calendar-pill {

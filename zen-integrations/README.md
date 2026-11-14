@@ -26,7 +26,7 @@ Gmail reads the Atom feed with that tab's cookies. Outlook reads Microsoft Graph
 2. Sign in once in that tab. For Graph, register a public Microsoft app with redirect `https://login.microsoftonline.com/common/oauth2/nativeclient` and delegated `Mail.Read`, then set `zen-integrations.outlook.clientId` to that app id. Hover the pin and click the sign-in line. Without that pref, Outlook has to be loaded for a new unread list.
 3. Hover the tab.
 4. Click a row to open it. **+** opens compose.
-5. Open the settings button on the Zen Integrations card in Sine, or run **Zen Integrations accounts** from the command palette. Paste the Google and Microsoft app ids there. **Connect** on Google turns on Gmail and starts the calendar sign-in. **Connect** on Outlook starts the mail sign-in. **Disconnect** hides that account's panels, stops fetching, and deletes its token.
+5. Open the settings button on the Zen Integrations card in Sine, or run **Zen Integrations accounts** from the command palette. **Connect** on Google turns on Gmail and starts the calendar sign-in. **Connect** on Outlook starts the mail sign-in. The **…** button on a row is where that account's client id and secret go. **Disconnect** hides that account's panels, stops fetching, and deletes its token.
 
 Work and personal Outlook are different hosts, so both can be pinned in the same container. They do not share a list.
 
