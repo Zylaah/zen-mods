@@ -1,6 +1,6 @@
 # Zen Integrations — LLM Context
 
-> Version `1.2.0` (`theme.json` and `@version` in `zen-integrations.uc.js`).
+> Version `1.3.0` (`theme.json` and `@version` in `zen-integrations.uc.js`).
 > One Sine mod. Gmail and Outlook unread panels, plus a Google Calendar day view. Gmail has no OAuth. Outlook Graph uses this mod's own Microsoft app id. Calendar uses this install's own Google desktop client.
 
 ## What it does
@@ -63,3 +63,5 @@ Poll interval is `CONFIG.POLL_MS` (60 seconds), not a pref.
 The day view is not a mailbox provider. `App.sys.mjs` owns a `LiveCalendar` next to the mail panel. Hovering a Calendar pin opens `#live-calendar-panel`. Hovering a mail pin still opens `#zi-panel`. Modules live in `calendar/`. The join pill is `data-zi-calendar` plus `.live-calendar-pill`.
 
 Google prefs stay `live-calendar.google.clientId` and `live-calendar.google.clientSecret`. Tokens stay in `<profile>/live-calendar-google-tokens.json`. The day cache stays `<profile>/live-calendar-cache.json`. Arc's Google client id is refused. Disable the separate Live Calendar mod so the tab strip does not get a second hover listener.
+
+Account state is `<profile>/zen-integrations-accounts.json`. The command palette entry is **Zen Integrations accounts**. Connect and disconnect happen there. A disabled account does not open a panel, does not fetch, and does not read cookies. An expired Outlook or calendar token keeps the account enabled and the panel shows Reconnect. Gmail stays on Atom. A signed-out Gmail container shows Open Gmail, which focuses that tab.

@@ -1,6 +1,9 @@
 const { CONFIG, debugLog } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
 );
+const { isEnabled, isExpired } = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/Accounts.sys.mjs' + new URL(import.meta.url).search
+);
 
 export class ZenScan {
   constructor(app) {
@@ -65,6 +68,9 @@ export class ZenScan {
     const app = this.app;
     const provider = app.tabs.providerFor(tab);
     if (!provider) return;
+    const account = provider.id === 'gmail' ? 'google' : provider.id;
+    if (!isEnabled(account)) return;
+    if (provider.id === 'outlook' && isExpired('outlook')) return;
     const hints = app.tabs.getUrlHints(tab);
     const contextKey = provider.contextKey(tab, hints);
     const token = provider.cacheToken(tab, hints);
@@ -93,6 +99,7 @@ export class ZenScan {
 
     try {
       const emails = await provider.fetchUnread(app, tab, hints);
+      app.mailSession?.delete(contextKey);
       if (!emails) {
         app.scanInProgress = false;
         app.loadScansInFlight.delete(contextKey);
@@ -108,10 +115,8 @@ export class ZenScan {
       app.scanInProgress = false;
       app.loadScansInFlight.delete(contextKey);
       if (app.scanContextKey === contextKey) app.scanContextKey = null;
+      if (e?.session) app.mailSession?.add(contextKey);
       app.panel.updateDisplay();
-      if (e?.signin && app.activePanelContextKey === contextKey) {
-        app.panel.showError(provider.signInMessage, { signin: true });
-      }
     } finally {
       app.scanInFlight.delete(contextKey);
       app.tabs.finishLoadScan(tab);

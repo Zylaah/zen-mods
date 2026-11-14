@@ -1,3 +1,6 @@
+const { isExpired, markConnected, markExpired, setAccountEmail, setAccountMessage } = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/Accounts.sys.mjs' + new URL(import.meta.url).search
+);
 const { CONFIG, debugLog, getTabUserContextId, httpRequest, profilePath } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
 );
@@ -169,6 +172,31 @@ async function dropToken(contextKey) {
   await saveTokens(store);
 }
 
+export async function clearOutlookTokens() {
+  await saveTokens({});
+}
+
+function reconnectError() {
+  const error = signInError('Reconnect Outlook');
+  error.expired = true;
+  return error;
+}
+
+async function rememberOutlook(win, userContextId, token) {
+  try {
+    const fetched = await httpRequest(win, {
+      url: 'https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName',
+      userContextId,
+      method: 'GET',
+      anonymous: true,
+      headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' }
+    });
+    const payload = JSON.parse(fetched.text || '{}');
+    const email = payload.mail || payload.userPrincipalName || '';
+    if (email) await setAccountEmail('outlook', email);
+  } catch (e) {}
+}
+
 async function postToken(win, userContextId, fields) {
   const fetched = await httpRequest(win, {
     url: OUTLOOK_TOKEN_URL,
@@ -198,6 +226,7 @@ async function refreshToken(win, userContextId, contextKey, entry, clientId) {
   if (status < 200 || status >= 300 || !payload.access_token) {
     debugLog('Outlook refresh failed', status, payload.error || '');
     await dropToken(key);
+    await markExpired('outlook');
     return null;
   }
   return putToken(key, payload, current);
@@ -324,15 +353,15 @@ export async function beginOutlookSignIn(app, tab, contextKey) {
     if (status < 200 || status >= 300 || !payload.access_token) {
       throw signInError(payload.error_description || payload.error || 'Microsoft token request failed');
     }
-    await putToken(contextKey, payload, null);
+    const saved = await putToken(contextKey, payload, null);
+    await markConnected('outlook', contextKey);
+    await rememberOutlook(win, userContextId, saved.accessToken);
     debugLog('Outlook signed in', contextKey);
-    app.scan.requestScan(tab, { force: true });
+    if (tab) app.scan.requestScan(tab, { force: true });
   } catch (e) {
     console.warn('[Zen Integrations] Outlook sign-in failed:', e && e.message ? e.message : e);
     debugLog('Outlook sign-in failed', e && e.message ? e.message : e);
-    if (app.activePanelContextKey === contextKey) {
-      app.panel.showError(e?.message || 'Microsoft sign-in failed', { signin: true });
-    }
+    await setAccountMessage('outlook', e?.message || 'Microsoft sign-in failed');
   } finally {
     authInFlight.delete(contextKey);
     if (authTab) {
@@ -351,7 +380,7 @@ export async function fetchOutlookGraph(app, tab, contextKey) {
   const win = app.window;
   const userContextId = getTabUserContextId(tab);
   let bearer = await accessToken(win, userContextId, contextKey, clientId);
-  if (!bearer) throw signInError(outlookSignInMessage());
+  if (!bearer) throw isExpired('outlook') ? reconnectError() : signInError(outlookSignInMessage());
 
   const load = (token) => httpRequest(win, {
     url: graphMessagesUrl(),
@@ -370,10 +399,11 @@ export async function fetchOutlookGraph(app, tab, contextKey) {
     const entry = await tokenFor(contextKey);
     const refreshed = await refreshToken(win, userContextId, contextKey, entry, clientId);
     bearer = refreshed?.accessToken || '';
-    if (!bearer) throw signInError(outlookSignInMessage());
+    if (!bearer) throw reconnectError();
     fetched = await load(bearer);
   }
-  if (fetched.status === 401 || fetched.status === 403) throw signInError(outlookSignInMessage());
+  if (fetched.status === 401) throw reconnectError();
+  if (fetched.status === 403) throw signInError(outlookSignInMessage());
   if (fetched.status < 200 || fetched.status >= 300) {
     let detail = '';
     try { detail = JSON.parse(fetched.text || '{}').error?.message || ''; } catch (e) {}

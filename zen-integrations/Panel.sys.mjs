@@ -9,6 +9,9 @@ const {
 const { normalizeOutlookFields } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/providers/OutlookDate.sys.mjs' + new URL(import.meta.url).search
 );
+const { isExpired } = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/Accounts.sys.mjs' + new URL(import.meta.url).search
+);
 
 function formatDate(dateString) {
   if (!dateString) return '';
@@ -339,12 +342,24 @@ export class ZenPanel {
     el.textContent = '';
   }
 
+  accountButton(container, label, onClick) {
+    const button = this.document.createElement('button');
+    button.type = 'button';
+    button.className = 'zi-reconnect';
+    button.textContent = label;
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onClick();
+    });
+    container.appendChild(button);
+  }
+
   updateDisplay() {
     const app = this.app;
     const panel = app.panelElement;
     if (!panel) return;
     this.hideError();
-    const document = this.document;
     const emailsContainer = panel.querySelector('.zi-emails');
     const loadingContainer = panel.querySelector('.zi-loading');
     const composeBtn = panel.querySelector('.zi-compose');
@@ -365,29 +380,21 @@ export class ZenPanel {
     if (loadingContainer) loadingContainer.style.display = 'none';
     emailsContainer.innerHTML = '';
 
+    const provider = app.providerForKey(app.activePanelContextKey);
+    const anchor = app.hoveredTab || app.tabs.findAnchor(app.activePanelContextKey);
+    if (provider?.id === 'outlook' && isExpired('outlook')) {
+      this.accountButton(emailsContainer, 'Reconnect Outlook', () => provider.beginSignIn(app, anchor));
+      setComposeVisible(false);
+      return;
+    }
+    if (provider?.id === 'gmail' && app.mailSession.has(app.activePanelContextKey)) {
+      this.accountButton(emailsContainer, 'Open Gmail', () => this.startSignIn());
+      setComposeVisible(false);
+      return;
+    }
+
     if (emailsToShow.length === 0) {
-      const contextAnchor = app.tabs.findAnchor(app.activePanelContextKey);
-      const isUnloaded = !contextAnchor || app.tabs.isDiscardedOrUnloaded(contextAnchor);
-      const hasScanned = app.cache.getOrCreateContext(app.activePanelContextKey).hasScanned;
-      const provider = app.providerForKey(app.activePanelContextKey);
-      const emptyMessage =
-        isUnloaded && !hasScanned
-          ? (provider?.signInMessage || 'Sign in to see unread mail')
-          : 'No unread mail';
-      if (provider?.signInMessage && emptyMessage === provider.signInMessage) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'zi-empty zi-signin';
-        button.textContent = emptyMessage;
-        button.addEventListener('click', (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          this.startSignIn();
-        });
-        emailsContainer.appendChild(button);
-      } else {
-        emailsContainer.innerHTML = `<div class="zi-empty">${emptyMessage}</div>`;
-      }
+      emailsContainer.innerHTML = '<div class="zi-empty">No unread mail</div>';
       setComposeVisible(false);
       return;
     }

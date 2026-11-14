@@ -7,6 +7,9 @@ const {
 } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
 );
+const { isEnabled } = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/Accounts.sys.mjs' + new URL(import.meta.url).search
+);
 const {
   emailMatchesThread,
   gmailAccountSlotFromHints,
@@ -612,7 +615,9 @@ export class ZenTabs {
     const document = this.window.document;
     if (!this.gBrowser?.tabs) return;
     for (const tab of this.gBrowser.tabs) {
-      const mail = this.isAnchor(tab);
+      const provider = this.providerFor(tab);
+      const account = provider?.id === 'gmail' ? 'google' : provider?.id;
+      const mail = this.isAnchor(tab) && !!account && isEnabled(account);
       if (mail) tab.setAttribute('data-zi-mail', 'true');
       else tab.removeAttribute('data-zi-mail');
       if (tab.hasAttribute('zen-essential') || (tab.pinned && mail)) {

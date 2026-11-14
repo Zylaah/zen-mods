@@ -2,7 +2,7 @@
 // @name           Zen Integrations
 // @description    Unread Gmail, Outlook, and today's Google Calendar on essential or pinned tabs
 // @author         Bxth
-// @version        1.2.0
+// @version        1.3.0
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 
@@ -70,6 +70,31 @@
     }
   }
 
+  function setupAccountCommand() {
+    const add = () => {
+      if (!window.ZenCommandPalette?.addCommands) return false;
+      window.ZenCommandPalette.addCommands([{
+        key: 'zen-integrations:accounts',
+        label: 'Zen Integrations accounts',
+        command: () => {
+          const { showAccountSettings } = ChromeUtils.importESModule(
+            `${MOD_ROOT}/Settings.sys.mjs${MODULE_VERSION}`
+          );
+          showAccountSettings(window);
+        },
+        icon: 'chrome://global/skin/icons/settings.svg',
+        tags: ['Zen', 'Integrations', 'Accounts']
+      }]);
+      return true;
+    };
+    if (add()) return;
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      tries += 1;
+      if (add() || tries > 10) window.clearInterval(timer);
+    }, 1000);
+  }
+
   function start() {
     if (!window.gBrowser) {
       window.setTimeout(start, 200);
@@ -85,6 +110,7 @@
     const app = createZenIntegrations(window);
     window.zenIntegrations = app;
     app.init();
+    setupAccountCommand();
 
     window.zenIntegrationsDebug = {
       showPanel: () => {

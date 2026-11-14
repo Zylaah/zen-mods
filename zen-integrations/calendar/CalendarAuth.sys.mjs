@@ -1,4 +1,7 @@
 const { NetUtil } = ChromeUtils.importESModule('resource://gre/modules/NetUtil.sys.mjs');
+const { isExpired, markConnected, markExpired, setAccountEmail, setAccountMessage } = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/Accounts.sys.mjs' + new URL(import.meta.url).search
+);
 const {
   CONFIG,
   debugLog,
@@ -180,6 +183,22 @@ async function dropToken(contextKey) {
   await saveTokens(store);
 }
 
+export async function clearGoogleTokens() {
+  await saveTokens({});
+}
+
+async function rememberGoogle(win, userContextId, token) {
+  try {
+    const fetched = await googleFetch(win, {
+      url: 'https://www.googleapis.com/oauth2/v1/userinfo',
+      userContextId,
+      headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' }
+    });
+    const payload = JSON.parse(fetched.text || '{}');
+    if (payload.email) await setAccountEmail('google', payload.email);
+  } catch (e) {}
+}
+
 function googleFetch(win, { url, method = 'GET', headers = {}, body = '', contentType, userContextId }) {
   const uri = Services.io.newURI(url);
   const principal = Services.scriptSecurityManager.createContentPrincipal(uri, {
@@ -282,6 +301,7 @@ async function refreshToken(win, userContextId, contextKey, entry, clientId) {
   if (status < 200 || status >= 300 || !payload.access_token) {
     debugLog('Calendar refresh failed', status, payload.error || '');
     await dropToken(contextKey);
+    await markExpired('google');
     return null;
   }
   return putToken(contextKey, payload, current);
@@ -444,14 +464,25 @@ export async function fetchGoogleDay(win, tab, contextKey) {
   if (state !== 'ok') throw signInError(googleSignInMessage(state), false);
   const userContextId = getTabUserContextId(tab);
   let bearer = await accessToken(win, userContextId, contextKey, clientId);
-  if (!bearer) throw signInError(googleSignInMessage('ok'), true);
+  if (!bearer) {
+    if (isExpired('google')) {
+      const error = signInError('Reconnect Google Calendar', true);
+      error.expired = true;
+      throw error;
+    }
+    throw signInError(googleSignInMessage('ok'), false);
+  }
 
   let day = await loadDay(win, userContextId, bearer);
   if (day.unauthorized) {
     const entry = await tokenFor(contextKey);
     const refreshed = await refreshToken(win, userContextId, contextKey, entry, clientId);
     bearer = refreshed?.accessToken || '';
-    if (!bearer) throw signInError(googleSignInMessage('ok'), true);
+    if (!bearer) {
+      const error = signInError('Reconnect Google Calendar', true);
+      error.expired = true;
+      throw error;
+    }
     day = await loadDay(win, userContextId, bearer);
   }
   if (day.unauthorized) throw signInError(googleSignInMessage('ok'), true);
@@ -633,15 +664,15 @@ export async function beginGoogleSignIn(app, tab, contextKey) {
       throw signInError(tokenError(payload), true);
     }
     await putToken(contextKey, payload, null);
+    await markConnected('google', contextKey);
+    await rememberGoogle(win, userContextId, payload.access_token);
     app.setNotice(contextKey, null);
     debugLog('Calendar signed in', contextKey);
-    app.refreshDay(tab, { force: true });
+    if (tab) app.refreshDay(tab, { force: true });
   } catch (e) {
     console.warn('[Live Calendar] Google sign-in failed:', e && e.message ? e.message : e);
-    app.setNotice(contextKey, {
-      text: e?.message || 'Google sign-in failed',
-      canSignIn: googleClientState() === 'ok'
-    });
+    await setAccountMessage('google', e?.message || 'Google sign-in failed');
+    app.setNotice?.(contextKey, null);
   } finally {
     authInFlight.delete(contextKey);
     if (loopback) {

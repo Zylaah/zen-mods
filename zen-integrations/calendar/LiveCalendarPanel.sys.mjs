@@ -262,7 +262,7 @@ export class LiveCalendarPanel {
 
   appendNotice(parent, notice, block) {
     const host = this.html('div', block ? 'live-calendar-gate' : 'live-calendar-note');
-    if (!notice.canSignIn) {
+    if (!notice.reconnect) {
       host.appendChild(this.html('p', 'live-calendar-note-text', notice.text));
       parent.appendChild(host);
       return;
@@ -288,6 +288,10 @@ export class LiveCalendarPanel {
 
     const events = this.visibleEvents();
     const notice = this.app.noticeFor();
+    if (notice?.reconnect) {
+      this.appendNotice(scroll, notice, true);
+      return;
+    }
     const now = Date.now();
     const dayStart = this.dayStartMs();
     const nowMin = (now - dayStart) / 60000;

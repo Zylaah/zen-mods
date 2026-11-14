@@ -7,6 +7,9 @@ const { normalizeOutlookFields } = ChromeUtils.importESModule(
 const { outlookClientState } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/providers/OutlookGraph.sys.mjs' + new URL(import.meta.url).search
 );
+const { isEnabled, isExpired } = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/Accounts.sys.mjs' + new URL(import.meta.url).search
+);
 const {
   beginOutlookSignIn,
   fetchOutlookGraph,
@@ -165,6 +168,13 @@ export const outlookProvider = {
   // The panel keeps the cached rows in that case.
   // A Microsoft app id switches this container to Graph. No id keeps the tab scrape.
   async fetchUnread(app, tab, hints) {
+    if (!isEnabled('outlook')) return null;
+    if (isExpired('outlook')) {
+      const error = new Error('Reconnect Outlook');
+      error.signin = true;
+      error.expired = true;
+      throw error;
+    }
     if (outlookClientState(readOutlookClientId()) === 'missing') return scrapeUnread(app, tab);
     return fetchOutlookGraph(app, tab, this.contextKey(tab, hints));
   }

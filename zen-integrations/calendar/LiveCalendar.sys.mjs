@@ -1,6 +1,9 @@
 const { CONFIG, debugLog, getTabUserContextId, localDay } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/calendar/LiveCalendarUtil.sys.mjs' + new URL(import.meta.url).search
 );
+const { hasToken, isEnabled, isExpired } = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/Accounts.sys.mjs' + new URL(import.meta.url).search
+);
 const { beginGoogleSignIn, fetchGoogleDay } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/calendar/CalendarAuth.sys.mjs' + new URL(import.meta.url).search
 );
@@ -83,7 +86,15 @@ export class LiveCalendar {
 
   refreshDay(tab, { force = false } = {}) {
     if (!tab || !this.tabs.isCalendarAnchor(tab)) return;
+    if (!isEnabled('google')) return;
     const key = this.getContextKey(tab);
+    if (isExpired('google') || !hasToken('google')) {
+      if (isExpired('google')) {
+        this.setNotice(key, { text: 'Reconnect Google Calendar', reconnect: true });
+      }
+      this.tabs.updatePills();
+      return;
+    }
     const ctx = this.cache.getOrCreateContext(key);
     const fresh = ctx.day === localDay() && Date.now() - (ctx.fetchedAt || 0) < CONFIG.CACHE_MS;
     if (!force && fresh) return;
@@ -103,7 +114,10 @@ export class LiveCalendar {
       this.setNotice(key, null);
     }).catch((error) => {
       const text = error?.message || 'Calendar request failed';
-      this.setNotice(key, { text, canSignIn: !!error?.canSignIn });
+      this.setNotice(key, {
+        text: error?.expired ? 'Reconnect Google Calendar' : text,
+        reconnect: !!error?.expired
+      });
       if (!error?.signin) console.warn('[Live Calendar]', text);
     }).finally(() => {
       this.dayInFlight.delete(key);

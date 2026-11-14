@@ -9,6 +9,9 @@ const {
 } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
 );
+const { isEnabled } = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/Accounts.sys.mjs' + new URL(import.meta.url).search
+);
 
 const GMAIL_HOSTS = ['mail.google.com', 'google.com'];
 
@@ -164,8 +167,9 @@ function feedUrl(hints) {
 }
 
 function signInError() {
-  const error = new Error('Sign-in required');
+  const error = new Error('Open Gmail');
   error.signin = true;
+  error.session = true;
   return error;
 }
 
@@ -253,6 +257,7 @@ export const gmailProvider = {
   },
 
   async fetchUnread(app, tab, hints) {
+    if (!isEnabled('google')) return null;
     const sourceUrl = feedUrl(hints);
     const fetched = await httpRequest(app.window, {
       url: sourceUrl,

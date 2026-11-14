@@ -22,6 +22,9 @@ const { outlookProvider } = ChromeUtils.importESModule(
 const { createLiveCalendar } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/calendar/LiveCalendar.sys.mjs' + new URL(import.meta.url).search
 );
+const { loadAccounts } = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/Accounts.sys.mjs' + new URL(import.meta.url).search
+);
 
 export class ZenIntegrations {
   constructor(window) {
@@ -54,6 +57,7 @@ export class ZenIntegrations {
     this.panel = new ZenPanel(this);
     this.tabs = new ZenTabs(this);
     this.calendar = createLiveCalendar(window);
+    this.mailSession = new Set();
   }
 
   providerForKey(key) {
@@ -69,7 +73,8 @@ export class ZenIntegrations {
 
   onFeedDocument() {}
 
-  init() {
+  async init() {
+    await loadAccounts();
     debugLog('Initializing');
     this.cache.load();
     this.tabs.cleanupScannerTabs();

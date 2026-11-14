@@ -9,6 +9,9 @@ const {
 } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/calendar/LiveCalendarUtil.sys.mjs' + new URL(import.meta.url).search
 );
+const { hasToken, isEnabled, isExpired } = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/Accounts.sys.mjs' + new URL(import.meta.url).search
+);
 
 export class LiveCalendarTabs {
   constructor(app) {
@@ -90,7 +93,8 @@ export class LiveCalendarTabs {
   refreshAnchors() {
     if (!this.gBrowser?.tabs) return;
     for (const tab of this.gBrowser.tabs) {
-      if (!this.isCalendarAnchor(tab)) {
+      const show = this.isCalendarAnchor(tab) && isEnabled('google') && (hasToken('google') || isExpired('google'));
+      if (!show) {
         tab.removeAttribute('data-zi-calendar');
         this.clearPill(tab);
         this.clearSublabel(tab);
@@ -242,7 +246,11 @@ export class LiveCalendarTabs {
   }
 
   updatePill(tab) {
-    if (!this.isCalendarAnchor(tab)) return;
+    if (!this.isCalendarAnchor(tab) || !isEnabled('google') || isExpired('google') || !hasToken('google')) {
+      this.clearPill(tab);
+      this.clearSublabel(tab);
+      return;
+    }
     const events = this.app.cache.todayEvents(this.app.getContextKey(tab));
     const soon = pickPillEvent(events);
     const text = soon ? pillText(soon) : '';
