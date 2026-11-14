@@ -16,7 +16,7 @@ const HTML_NS = 'http://www.w3.org/1999/xhtml';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const HOUR_PX = 50;
 const MIN_BLOCK_PX = 28;
-const VIEW_PX = 360;
+const VIEW_PX = 300;
 
 export class LiveCalendarPanel {
   constructor(app) {
@@ -305,13 +305,12 @@ export class LiveCalendarPanel {
       timed.push({ event, startMin: this.minutesOf(start, dayStart), endMin: this.minutesOf(end, dayStart) });
     }
 
-    if (!events.length) {
-      if (notice?.text) this.appendNotice(scroll, notice, true);
-      else if (this.app.day === localDay()) {
-        scroll.appendChild(this.html('div', 'live-calendar-empty', 'Nothing on your calendar today'));
-      } else {
-        scroll.appendChild(this.html('div', 'live-calendar-empty', 'Loading today'));
-      }
+    if (!events.length && notice?.text) {
+      this.appendNotice(scroll, notice, true);
+      return;
+    }
+    if (!events.length && this.app.day !== localDay()) {
+      scroll.appendChild(this.html('div', 'live-calendar-empty', 'Loading today'));
       return;
     }
 
