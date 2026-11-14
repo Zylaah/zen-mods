@@ -95,6 +95,45 @@
     }, 1000);
   }
 
+  const hookedSettingsWindows = new Set();
+
+  function openAccountSettings() {
+    const { showAccountSettings } = ChromeUtils.importESModule(
+      `${MOD_ROOT}/Settings.sys.mjs${MODULE_VERSION}`
+    );
+    showAccountSettings(window);
+  }
+
+  function onSineSettingsClick(event) {
+    const button = event.target?.closest?.('.sineItemConfigureButton');
+    if (button?.closest('.sineItem')?.getAttribute('mod-id') !== 'zen-integrations') return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    openAccountSettings();
+  }
+
+  function hookSettingsButton(browser) {
+    let content;
+    try { content = browser.contentWindow; } catch (e) { return; }
+    if (!content || hookedSettingsWindows.has(content)) return;
+    if (!/^about:(preferences|settings)/.test(String(content.location?.href || ''))) return;
+    hookedSettingsWindows.add(content);
+    content.addEventListener('click', onSineSettingsClick, true);
+    content.addEventListener('unload', () => hookedSettingsWindows.delete(content), { once: true });
+  }
+
+  function setupSettingsButton() {
+    if (!window.gBrowser?.addTabsProgressListener) return;
+    const listener = {
+      onLocationChange(browser, webProgress) {
+        if (webProgress && !webProgress.isTopLevel) return;
+        hookSettingsButton(browser);
+      }
+    };
+    window.gBrowser.addTabsProgressListener(listener);
+    for (const browser of window.gBrowser.browsers || []) hookSettingsButton(browser);
+  }
+
   function start() {
     if (!window.gBrowser) {
       window.setTimeout(start, 200);
@@ -111,6 +150,7 @@
     window.zenIntegrations = app;
     app.init();
     setupAccountCommand();
+    setupSettingsButton();
 
     window.zenIntegrationsDebug = {
       showPanel: () => {

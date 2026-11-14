@@ -1,0 +1,26 @@
+[
+  {
+    "property": "live-calendar.google.clientId",
+    "label": "Google client id",
+    "type": "string",
+    "defaultValue": "",
+    "placeholder": "123-abc.apps.googleusercontent.com",
+    "description": "Your Google Desktop client id. Calendar sign-in uses this."
+  },
+  {
+    "property": "live-calendar.google.clientSecret",
+    "label": "Google client secret",
+    "type": "string",
+    "defaultValue": "",
+    "placeholder": "GOCSPX-...",
+    "description": "The secret for that Desktop client."
+  },
+  {
+    "property": "zen-integrations.outlook.clientId",
+    "label": "Microsoft app id",
+    "type": "string",
+    "defaultValue": "",
+    "placeholder": "00000000-0000-0000-0000-000000000000",
+    "description": "Your public Microsoft app id. Redirect is https://login.microsoftonline.com/common/oauth2/nativeclient, with delegated Mail.Read."
+  }
+]

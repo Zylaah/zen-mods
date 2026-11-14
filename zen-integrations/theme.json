@@ -10,6 +10,7 @@
       ]
     }
   },
+  "preferences": "preferences.json",
   "style": {
     "chrome": "chrome.css"
   },

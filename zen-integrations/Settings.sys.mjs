@@ -22,6 +22,16 @@ const { getTabUserContextId } = ChromeUtils.importESModule(
 
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
 
+const CREDENTIALS = [
+  ['live-calendar.google.clientId', 'Google client id', 'text', '123-abc.apps.googleusercontent.com'],
+  ['live-calendar.google.clientSecret', 'Google client secret', 'password', 'GOCSPX-...'],
+  ['zen-integrations.outlook.clientId', 'Microsoft app id', 'text', 'Application (client) ID']
+];
+
+function readPref(name) {
+  try { return Services.prefs.getStringPref(name, ''); } catch (e) { return ''; }
+}
+
 function browserWindows() {
   const wins = [];
   try {
@@ -123,9 +133,23 @@ export async function showAccountSettings(win) {
   close.setAttribute('aria-label', 'Close');
   const body = make('div', 'zi-accounts-body', card);
   const status = make('p', 'zi-accounts-status', body, '');
+  for (const [name, label, type, placeholder] of CREDENTIALS) {
+    const field = make('label', 'zi-accounts-field', body);
+    make('span', 'zi-accounts-name', field, label);
+    const input = make('input', 'zi-accounts-input', field);
+    input.type = type;
+    input.placeholder = placeholder;
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.value = readPref(name);
+    input.addEventListener('change', () => {
+      Services.prefs.setStringPref(name, input.value.trim());
+    });
+  }
+  const accounts = make('div', 'zi-accounts-list', body);
 
   const paint = () => {
-    body.replaceChildren(status);
+    accounts.replaceChildren();
     status.textContent = '';
     for (const item of [
       ['google', 'Google', 'Gmail and Calendar'],
@@ -133,7 +157,7 @@ export async function showAccountSettings(win) {
     ]) {
       const [id, title, detail] = item;
       const record = accountRecord(id);
-      const row = make('div', 'zi-accounts-row', body);
+      const row = make('div', 'zi-accounts-row', accounts);
       const copy = make('div', 'zi-accounts-copy', row);
       make('div', 'zi-accounts-name', copy, record.email || title);
       let line = detail;

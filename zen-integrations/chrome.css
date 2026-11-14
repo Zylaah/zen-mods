@@ -567,6 +567,23 @@ button.zi-signin {
   color: light-dark(#737373, #b1b1b1);
 }
 
+.zi-accounts-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.zi-accounts-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid light-dark(rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
 .zi-accounts-row {
   display: flex;
   align-items: center;
