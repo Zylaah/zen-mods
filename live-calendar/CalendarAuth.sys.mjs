@@ -30,6 +30,28 @@ export function readGoogleClientId() {
   }
 }
 
+export function readGoogleClientSecret() {
+  try {
+    return Services.prefs.getStringPref(CONFIG.GOOGLE_CLIENT_SECRET_PREF, '').trim();
+  } catch (e) {
+    return '';
+  }
+}
+
+function tokenFields(fields) {
+  const secret = readGoogleClientSecret();
+  if (!secret) return fields;
+  return { ...fields, client_secret: secret };
+}
+
+function tokenError(payload) {
+  const detail = payload?.error_description || payload?.error || 'Google token request failed';
+  if (/client secret is missing/i.test(detail)) {
+    return 'Add your Google client secret in live-calendar.google.clientSecret';
+  }
+  return detail;
+}
+
 export function googleClientState(clientId = readGoogleClientId()) {
   if (!clientId) return 'missing';
   if (clientId.toLowerCase() === ARC_GOOGLE_CLIENT) return 'foreign';
@@ -252,11 +274,11 @@ async function postToken(win, userContextId, fields) {
 async function refreshToken(win, userContextId, contextKey, entry, clientId) {
   const current = entry || await tokenFor(contextKey);
   if (!current?.refreshToken) return null;
-  const { status, payload } = await postToken(win, userContextId, {
+  const { status, payload } = await postToken(win, userContextId, tokenFields({
     client_id: clientId,
     grant_type: 'refresh_token',
     refresh_token: current.refreshToken
-  });
+  }));
   if (status < 200 || status >= 300 || !payload.access_token) {
     debugLog('Calendar refresh failed', status, payload.error || '');
     await dropToken(contextKey);
@@ -600,16 +622,15 @@ export async function beginGoogleSignIn(app, tab, contextKey) {
     const code = await loopback.result;
     try { win.gBrowser.removeTab(authTab); } catch (e) {}
     authTab = null;
-    const { status, payload } = await postToken(win, userContextId, {
+    const { status, payload } = await postToken(win, userContextId, tokenFields({
       client_id: clientId,
       grant_type: 'authorization_code',
       code,
       redirect_uri: redirectUri,
       code_verifier: verifier
-    });
+    }));
     if (status < 200 || status >= 300 || !payload.access_token) {
-      const detail = payload.error_description || payload.error || 'Google token request failed';
-      throw signInError(detail, true);
+      throw signInError(tokenError(payload), true);
     }
     await putToken(contextKey, payload, null);
     app.setNotice(contextKey, null);

@@ -10,6 +10,7 @@ export const CONFIG = {
   CACHE_MS: 60000,
   REQUEST_TIMEOUT_MS: 8000,
   GOOGLE_CLIENT_PREF: 'live-calendar.google.clientId',
+  GOOGLE_CLIENT_SECRET_PREF: 'live-calendar.google.clientSecret',
   GOOGLE_TOKEN_FILE: 'live-calendar-google-tokens.json'
 };
 

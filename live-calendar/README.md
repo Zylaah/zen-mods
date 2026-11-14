@@ -19,6 +19,6 @@ A Zen Browser mod for Sine. Hover a Google Calendar essential or pinned tab to s
 
 ## Usage
 
-1. Create a Desktop app OAuth client and set `live-calendar.google.clientId` to that client id.
+1. Create a Desktop app OAuth client. Set `live-calendar.google.clientId` to that client id and `live-calendar.google.clientSecret` to its secret.
 2. Pin Google Calendar as an essential or pinned tab.
 3. Hover it and click **Sign in to Google Calendar**. The day and the join pill update from the Calendar API after that.
