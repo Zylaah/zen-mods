@@ -33,10 +33,16 @@ export function formEncode(fields) {
     .join('&');
 }
 
-export function graphMessagesUrl() {
+export function graphMessagesUrl(view, top) {
+  const count = Number(top) > 0 ? Math.min(Math.floor(Number(top)), 50) : 20;
+  let filter = 'isRead eq false';
+  if (view === 'focused' || view === 'other') {
+    filter += " and inferenceClassification eq '" + view + "'";
+  }
   const query = [
-    ['$select', 'id,subject,bodyPreview,from,receivedDateTime,webLink,conversationId,isRead'],
-    ['$top', '50']
+    ['$filter', filter],
+    ['$select', 'id,subject,bodyPreview,from,receivedDateTime,webLink,conversationId,isRead,inferenceClassification'],
+    ['$top', String(count)]
   ];
   const body = query.map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value)).join('&');
   return 'https://graph.microsoft.com/v1.0/me/mailFolders/Inbox/messages?' + body;
@@ -70,11 +76,48 @@ export function graphMessageRow(message, sourceRank) {
   };
 }
 
-export function graphUnreadRows(payload, limit) {
+function messageTime(message) {
+  const ts = Date.parse(message?.receivedDateTime || '');
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function byNewest(a, b) {
+  return messageTime(b) - messageTime(a);
+}
+
+function dedupedUnread(payload) {
   const list = Array.isArray(payload?.value) ? payload.value : [];
+  const seen = new Set();
+  const messages = [];
+  for (const message of list) {
+    if (!message || message.isRead === true) continue;
+    const id = String(message.id || '');
+    if (id) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
+    messages.push(message);
+  }
+  return messages;
+}
+
+function pickUnread(messages, cap) {
+  const focused = messages.filter((message) => String(message.inferenceClassification || '').toLowerCase() !== 'other').sort(byNewest);
+  const other = messages.filter((message) => String(message.inferenceClassification || '').toLowerCase() === 'other').sort(byNewest);
+  if (!focused.length || !other.length) return messages.slice().sort(byNewest).slice(0, cap);
+  const share = Math.ceil(cap / 2);
+  const picked = focused.slice(0, share).concat(other.slice(0, share));
+  if (picked.length < cap) {
+    const used = new Set(picked);
+    const rest = focused.concat(other).filter((message) => !used.has(message)).sort(byNewest);
+    picked.push(...rest.slice(0, cap - picked.length));
+  }
+  return picked.sort(byNewest).slice(0, cap);
+}
+
+export function graphUnreadRows(payload, limit) {
   const cap = Number(limit) > 0 ? Number(limit) : 20;
-  return list
-    .filter((message) => message && message.isRead !== true)
+  return pickUnread(dedupedUnread(payload), cap)
     .map((message, index) => graphMessageRow(message, index))
     .sort((a, b) => (b.ts || 0) - (a.ts || 0) || a.rowIndex - b.rowIndex)
     .slice(0, cap);

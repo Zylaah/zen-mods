@@ -382,8 +382,8 @@ export async function fetchOutlookGraph(app, tab, contextKey) {
   let bearer = await accessToken(win, userContextId, contextKey, clientId);
   if (!bearer) throw isExpired('outlook') ? reconnectError() : signInError(outlookSignInMessage());
 
-  const load = (token) => httpRequest(win, {
-    url: graphMessagesUrl(),
+  const requestPage = (token, view) => httpRequest(win, {
+    url: graphMessagesUrl(view, CONFIG.MAX_EMAILS),
     userContextId,
     method: 'GET',
     anonymous: true,
@@ -394,26 +394,47 @@ export async function fetchOutlookGraph(app, tab, contextKey) {
     maxBytes: 2000000
   });
 
-  let fetched = await load(bearer);
-  if (fetched.status === 401) {
+  // Focused is Prioritaire. Other is Autres. One inbox page of the newest mail
+  // fills with Other, so each tab is queried on its own.
+  const loadPages = async (token) => {
+    const pages = [];
+    for (const view of ['focused', 'other']) {
+      const fetched = await requestPage(token, view);
+      if (fetched.status === 400) {
+        debugLog('Outlook Graph skipped view', view, fetched.status);
+        if (!pages.length) return [await requestPage(token, '')];
+        break;
+      }
+      pages.push(fetched);
+    }
+    return pages;
+  };
+
+  const readPage = (fetched) => {
+    if (fetched.status === 401) throw reconnectError();
+    if (fetched.status === 403) throw signInError(outlookSignInMessage());
+    if (fetched.status < 200 || fetched.status >= 300) {
+      let detail = '';
+      try { detail = JSON.parse(fetched.text || '{}').error?.message || ''; } catch (e) {}
+      throw new Error(detail ? 'Graph HTTP ' + fetched.status + ': ' + detail : 'Graph HTTP ' + fetched.status);
+    }
+    let payload = {};
+    try { payload = JSON.parse(fetched.text || '{}'); } catch (e) {
+      throw new Error('Graph response was not JSON');
+    }
+    if (payload.error) throw new Error(payload.error.message || payload.error.code || 'Graph error');
+    return Array.isArray(payload.value) ? payload.value : [];
+  };
+
+  let pages = await loadPages(bearer);
+  if (pages.some((page) => page.status === 401)) {
     const entry = await tokenFor(contextKey);
     const refreshed = await refreshToken(win, userContextId, contextKey, entry, clientId);
     bearer = refreshed?.accessToken || '';
     if (!bearer) throw reconnectError();
-    fetched = await load(bearer);
+    pages = await loadPages(bearer);
   }
-  if (fetched.status === 401) throw reconnectError();
-  if (fetched.status === 403) throw signInError(outlookSignInMessage());
-  if (fetched.status < 200 || fetched.status >= 300) {
-    let detail = '';
-    try { detail = JSON.parse(fetched.text || '{}').error?.message || ''; } catch (e) {}
-    throw new Error(detail ? 'Graph HTTP ' + fetched.status + ': ' + detail : 'Graph HTTP ' + fetched.status);
-  }
-  let payload = {};
-  try { payload = JSON.parse(fetched.text || '{}'); } catch (e) {
-    throw new Error('Graph response was not JSON');
-  }
-  if (payload.error) throw new Error(payload.error.message || payload.error.code || 'Graph error');
-  debugLog('Outlook Graph', fetched.status, (payload.value || []).length);
-  return graphUnreadRows(payload, CONFIG.MAX_EMAILS);
+  const messages = pages.flatMap(readPage);
+  debugLog('Outlook Graph', pages.map((page) => page.status).join(','), messages.length);
+  return graphUnreadRows({ value: messages }, CONFIG.MAX_EMAILS);
 }
