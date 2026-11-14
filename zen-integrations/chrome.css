@@ -2,7 +2,8 @@
 
 #zi-panel {
   --panel-padding: 0;
-  width: 270px;
+  /* Match Zen's folder tabs popup (#zen-folder-tabs-popup). */
+  width: 250px;
 }
 
 .zi-wrapper {
@@ -225,13 +226,14 @@ button.zi-signin {
 @media (max-width: 600px) {
   #zi-panel {
     max-width: calc(100vw - 20px);
-    min-width: 280px;
+    min-width: 250px;
   }
 }
 
 #live-calendar-panel {
   --panel-padding: 0;
-  width: 270px;
+  /* Match Zen's folder tabs popup (#zen-folder-tabs-popup). */
+  width: 250px;
 }
 
 .live-calendar-wrapper {
@@ -493,6 +495,13 @@ button.zi-signin {
 
 .tabbrowser-tab[zen-essential][data-live-calendar-pill] .tab-icon-stack {
   transform: translateY(1px);
+}
+
+@media (max-width: 600px) {
+  #live-calendar-panel {
+    max-width: calc(100vw - 20px);
+    min-width: 250px;
+  }
 }
 
 #zi-accounts {
