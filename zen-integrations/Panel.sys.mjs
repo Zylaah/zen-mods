@@ -65,13 +65,6 @@ export class ZenPanel {
     panel.setAttribute('noautohide', 'true');
     panel.setAttribute('level', 'top');
 
-    const header = document.createElement('div');
-    header.className = 'zi-header';
-    const title = document.createElement('span');
-    title.className = 'zi-title';
-    title.textContent = 'Unread';
-    header.appendChild(title);
-
     const content = document.createElement('div');
     content.className = 'zi-content';
     const loading = document.createElement('div');
@@ -105,7 +98,6 @@ export class ZenPanel {
       app.tabs.openCompose();
     });
 
-    wrapper.appendChild(header);
     wrapper.appendChild(error);
     wrapper.appendChild(content);
     wrapper.appendChild(composeButton);
@@ -267,8 +259,6 @@ export class ZenPanel {
     app.cache.activate(contextKey);
     app.hoveredTab = tab;
     if (!app.panelElement) this.create();
-    const title = app.panelElement.querySelector('.zi-title');
-    if (title) title.textContent = provider.label;
     this.updateTheme();
     if (app.hideTimer) {
       app.window.clearTimeout(app.hideTimer);
