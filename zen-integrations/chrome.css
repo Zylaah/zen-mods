@@ -655,8 +655,6 @@ button.zi-signin {
 
 .zi-accounts-more {
   position: relative;
-  font-size: 0;
-  line-height: 0;
 }
 
 .zi-accounts-more::before {

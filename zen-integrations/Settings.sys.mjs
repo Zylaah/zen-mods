@@ -214,7 +214,7 @@ export async function showAccountSettings(win) {
           paint();
         });
       }
-      const more = make('button', 'zi-accounts-more', actions, '\u2026');
+      const more = make('button', 'zi-accounts-more', actions);
       more.type = 'button';
       more.setAttribute('aria-label', `${title} credentials`);
       more.addEventListener('click', () => openSheet(id, title));
