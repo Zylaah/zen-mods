@@ -357,6 +357,7 @@ export class ZenPanel {
 
   updateDisplay() {
     const app = this.app;
+    const document = this.document;
     const panel = app.panelElement;
     if (!panel) return;
     this.hideError();
