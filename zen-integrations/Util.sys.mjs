@@ -62,10 +62,19 @@ export function getGmailUrlPattern() {
 
 export function getTabUserContextId(tab) {
   if (!tab) return 0;
+  // Zen stores the space container on this attribute. The numeric getter can stay 0.
+  const sources = [
+    tab.getAttribute?.('usercontextid'),
+    tab.linkedBrowser?.getAttribute?.('usercontextid')
+  ];
+  for (const source of sources) {
+    const id = parseInt(source || '', 10);
+    if (Number.isFinite(id) && id > 0) return id;
+  }
   if (typeof tab.userContextId === 'number' && !Number.isNaN(tab.userContextId)) {
     return tab.userContextId;
   }
-  return parseInt(tab.getAttribute('usercontextid') || '0', 10) || 0;
+  return 0;
 }
 
 export function getTabOriginAttributes(tab) {

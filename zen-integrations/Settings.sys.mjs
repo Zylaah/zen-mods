@@ -32,6 +32,7 @@ const { outlookClientState } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/providers/OutlookGraph.sys.mjs' + new URL(import.meta.url).search
 );
 const {
+  debugLog,
   getContextContainerId,
   getTabUserContextId,
   isEssentialOrPinnedTab
@@ -142,7 +143,36 @@ function keyForTab(app, tab) {
 }
 
 function appTabs(app) {
-  try { return Array.from(app?.window?.gBrowser?.tabs || []); } catch (e) { return []; }
+  const tabs = [];
+  const seen = new Set();
+  const add = (tab) => {
+    if (!tab || seen.has(tab)) return;
+    seen.add(tab);
+    tabs.push(tab);
+  };
+  try {
+    for (const tab of app?.window?.gBrowser?.tabs || []) add(tab);
+  } catch (e) {}
+  // gBrowser.tabs is only the active space. Other spaces keep their essentials
+  // in hidden .zen-essentials-container sections.
+  try {
+    const extra = app?.window?.document?.querySelectorAll(
+      '#zen-essentials .tabbrowser-tab, .zen-essentials-container .tabbrowser-tab'
+    );
+    for (const tab of extra || []) add(tab);
+  } catch (e) {}
+  return tabs;
+}
+
+function workspaceContainerIds(win) {
+  const ids = [];
+  try {
+    for (const space of win?.gZenWorkspaces?.getWorkspaces?.() || []) {
+      const id = Number(space?.containerTabId);
+      if (Number.isFinite(id) && id > 0) ids.push(id);
+    }
+  } catch (e) {}
+  return ids;
 }
 
 function findTabForAccount(accountId) {
@@ -191,22 +221,40 @@ function addProviderTab(win, providerId, container) {
 
 function containerChoices() {
   const choices = new Map();
-  choices.set(0, containerName(0));
+  const remember = (id) => {
+    const container = Number(id) || 0;
+    if (!choices.has(container)) choices.set(container, containerName(container));
+  };
+  remember(0);
+  let identityCount = 0;
   try {
     const service = containerService();
     const identities = service?.getPublicIdentities?.() || [];
+    identityCount = identities.length;
     for (const identity of identities) {
       const id = Number(identity?.userContextId ?? identity?.id);
       if (!Number.isFinite(id)) continue;
       choices.set(id, identity?.name || containerName(id));
     }
-  } catch (e) {}
-  for (const { app } of allApps()) {
-    for (const tab of appTabs(app)) {
-      const id = getTabUserContextId(tab) || 0;
-      if (!choices.has(id)) choices.set(id, containerName(id));
-    }
+  } catch (e) {
+    debugLog('Container list failed', e && e.message ? e.message : e);
   }
+  const spaceIds = [];
+  for (const { win, app } of allApps()) {
+    for (const id of workspaceContainerIds(win)) {
+      spaceIds.push(id);
+      remember(id);
+    }
+    for (const tab of appTabs(app)) remember(getTabUserContextId(tab));
+  }
+  debugLog(
+    'Containers',
+    [...choices.entries()].map(([id, name]) => id + ':' + name).join(', '),
+    'identities',
+    identityCount,
+    'space containers',
+    spaceIds.join(',') || 'none'
+  );
   return [...choices.entries()]
     .map(([id, name]) => ({ id, name }))
     .sort((left, right) => left.id - right.id);
