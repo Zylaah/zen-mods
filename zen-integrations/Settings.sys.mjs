@@ -20,6 +20,7 @@ const { getTabUserContextId } = ChromeUtils.importESModule(
 );
 
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
+const SVG_NS = 'http://www.w3.org/2000/svg';
 
 const CREDENTIALS = {
   google: [
@@ -128,6 +129,25 @@ export async function showAccountSettings(win) {
     return node;
   };
 
+  const moreIcon = (parent) => {
+    const svg = win.document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    for (const cx of [3.5, 8, 12.5]) {
+      const dot = win.document.createElementNS(SVG_NS, 'circle');
+      dot.setAttribute('cx', String(cx));
+      dot.setAttribute('cy', '8');
+      dot.setAttribute('r', '1.4');
+      dot.setAttribute('fill', 'currentColor');
+      svg.append(dot);
+    }
+    parent.append(svg);
+    return svg;
+  };
+
   const overlay = make('div');
   overlay.id = 'zi-accounts';
   overlay.setAttribute('popover', 'manual');
@@ -143,13 +163,25 @@ export async function showAccountSettings(win) {
   const sheet = make('div', 'zi-accounts-sheet', overlay);
   sheet.hidden = true;
 
+  let sheetTrigger = null;
+
   const closeSheet = () => {
     sheet.hidden = true;
     sheet.replaceChildren();
+    if (sheetTrigger?.isConnected) {
+      sheetTrigger.setAttribute('aria-expanded', 'false');
+      sheetTrigger.focus();
+    }
+    sheetTrigger = null;
   };
 
-  const openSheet = (id, title) => {
+  const openSheet = (id, title, trigger) => {
     sheet.replaceChildren();
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-modal', 'true');
+    sheet.setAttribute('aria-label', `${title} credentials`);
+    sheetTrigger = trigger;
+    sheetTrigger.setAttribute('aria-expanded', 'true');
     const sheetCard = make('div', 'zi-accounts-sheet-card', sheet);
     const sheetHead = make('div', 'zi-accounts-head', sheetCard);
     const sheetCopy = make('div', 'zi-accounts-copy', sheetHead);
@@ -216,8 +248,12 @@ export async function showAccountSettings(win) {
       }
       const more = make('button', 'zi-accounts-more', actions);
       more.type = 'button';
+      more.title = `${title} credentials`;
       more.setAttribute('aria-label', `${title} credentials`);
-      more.addEventListener('click', () => openSheet(id, title));
+      more.setAttribute('aria-haspopup', 'dialog');
+      more.setAttribute('aria-expanded', 'false');
+      moreIcon(more);
+      more.addEventListener('click', () => openSheet(id, title, more));
     }
   };
 

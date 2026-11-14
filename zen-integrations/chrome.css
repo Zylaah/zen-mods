@@ -584,6 +584,22 @@ button.zi-signin {
   color: var(--zi-fg);
 }
 
+.zi-accounts-close:focus-visible,
+.zi-accounts-more:focus-visible,
+.zi-accounts-action:focus-visible {
+  outline: 2px solid var(--zi-fg);
+  outline-offset: 2px;
+}
+
+.zi-accounts-more:active {
+  background: var(--zi-hover);
+}
+
+.zi-accounts-more svg {
+  display: block;
+  pointer-events: none;
+}
+
 .zi-accounts-body {
   display: flex;
   flex-direction: column;
@@ -651,24 +667,6 @@ button.zi-signin {
 
 .zi-accounts-action:disabled {
   opacity: 0.55;
-}
-
-.zi-accounts-more {
-  position: relative;
-}
-
-.zi-accounts-more::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 15px;
-  height: 3px;
-  transform: translate(-50%, -50%);
-  background-image: radial-gradient(circle, currentColor 1.15px, transparent 1.3px);
-  background-size: 5px 3px;
-  background-repeat: repeat-x;
-  background-position: center;
 }
 
 .zi-accounts-sheet {
