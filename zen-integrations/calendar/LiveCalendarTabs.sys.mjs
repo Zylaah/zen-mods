@@ -67,6 +67,10 @@ export class LiveCalendarTabs {
     return isEssentialOrPinnedTab(tab) && this.isCalendarTab(tab);
   }
 
+  accountKey(tab) {
+    return 'gmail:' + (getTabUserContextId(tab) || 0);
+  }
+
   setup() {
     this.refreshAnchors();
     const onChange = () => this.refreshAnchors();
@@ -93,7 +97,8 @@ export class LiveCalendarTabs {
   refreshAnchors() {
     if (!this.gBrowser?.tabs) return;
     for (const tab of this.gBrowser.tabs) {
-      const show = this.isCalendarAnchor(tab) && isEnabled('google') && (hasToken('google') || isExpired('google'));
+      const accountKey = this.accountKey(tab);
+      const show = this.isCalendarAnchor(tab) && isEnabled(accountKey) && (hasToken(accountKey) || isExpired(accountKey));
       if (!show) {
         tab.removeAttribute('data-zi-calendar');
         this.clearPill(tab);
@@ -246,7 +251,8 @@ export class LiveCalendarTabs {
   }
 
   updatePill(tab) {
-    if (!this.isCalendarAnchor(tab) || !isEnabled('google') || isExpired('google') || !hasToken('google')) {
+    const accountKey = this.accountKey(tab);
+    if (!this.isCalendarAnchor(tab) || !isEnabled(accountKey) || isExpired(accountKey) || !hasToken(accountKey)) {
       this.clearPill(tab);
       this.clearSublabel(tab);
       return;

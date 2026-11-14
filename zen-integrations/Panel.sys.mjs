@@ -383,7 +383,7 @@ export class ZenPanel {
 
     const provider = app.providerForKey(app.activePanelContextKey);
     const anchor = app.hoveredTab || app.tabs.findAnchor(app.activePanelContextKey);
-    if (provider?.id === 'outlook' && isExpired('outlook')) {
+    if (provider?.id === 'outlook' && isExpired(app.activePanelContextKey)) {
       this.accountButton(emailsContainer, 'Reconnect Outlook', () => provider.beginSignIn(app, anchor));
       setComposeVisible(false);
       return;

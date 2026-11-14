@@ -1,5 +1,12 @@
 const { NetUtil } = ChromeUtils.importESModule('resource://gre/modules/NetUtil.sys.mjs');
-const { isExpired, markConnected, markExpired, setAccountEmail, setAccountMessage } = ChromeUtils.importESModule(
+const {
+  googleAccountId,
+  isExpired,
+  markConnected,
+  markExpired,
+  setAccountEmail,
+  setAccountMessage
+} = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Accounts.sys.mjs' + new URL(import.meta.url).search
 );
 const {
@@ -138,13 +145,25 @@ function profileFile() {
   return PathUtils.join(profileDir, CONFIG.GOOGLE_TOKEN_FILE);
 }
 
+function tokenKey(contextKey) {
+  return googleAccountId(contextKey);
+}
+
 async function loadTokens() {
   if (tokenStore) return tokenStore;
+  let parsed = {};
   try {
-    const parsed = await IOUtils.readJSON(profileFile());
-    tokenStore = parsed && typeof parsed === 'object' ? parsed : {};
-  } catch (e) {
-    tokenStore = {};
+    parsed = await IOUtils.readJSON(profileFile());
+  } catch (e) {}
+  const source = parsed && typeof parsed === 'object' ? parsed : {};
+  const migrated = {};
+  for (const [key, entry] of Object.entries(source)) {
+    const next = tokenKey(key);
+    if (!migrated[next] || (!migrated[next]?.accessToken && entry?.accessToken)) migrated[next] = entry;
+  }
+  tokenStore = migrated;
+  if (Object.keys(source).some((key) => key !== tokenKey(key))) {
+    await saveTokens(tokenStore);
   }
   return tokenStore;
 }
@@ -159,27 +178,30 @@ function saveTokens(store) {
 }
 
 async function tokenFor(contextKey) {
+  const key = tokenKey(contextKey);
   const store = await loadTokens();
-  return store[contextKey]?.accessToken ? store[contextKey] : null;
+  return store[key]?.accessToken ? store[key] : null;
 }
 
 async function putToken(contextKey, payload, previous) {
+  const key = tokenKey(contextKey);
   const store = await loadTokens();
   const expiresIn = Number(payload.expires_in) || 3600;
-  store[contextKey] = {
+  store[key] = {
     accessToken: payload.access_token,
     refreshToken: payload.refresh_token || previous?.refreshToken || '',
     expiresAt: Date.now() + expiresIn * 1000,
     scope: payload.scope || CALENDAR_SCOPE
   };
   await saveTokens(store);
-  return store[contextKey];
+  return store[key];
 }
 
 async function dropToken(contextKey) {
+  const key = tokenKey(contextKey);
   const store = await loadTokens();
-  if (!store[contextKey]) return;
-  delete store[contextKey];
+  if (!store[key]) return;
+  delete store[key];
   await saveTokens(store);
 }
 
@@ -187,7 +209,11 @@ export async function clearGoogleTokens() {
   await saveTokens({});
 }
 
-async function rememberGoogle(win, userContextId, token) {
+export function dropGoogleToken(contextKey) {
+  return dropToken(contextKey);
+}
+
+async function rememberGoogle(win, userContextId, token, accountKey) {
   try {
     const fetched = await googleFetch(win, {
       url: 'https://www.googleapis.com/oauth2/v1/userinfo',
@@ -195,7 +221,7 @@ async function rememberGoogle(win, userContextId, token) {
       headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' }
     });
     const payload = JSON.parse(fetched.text || '{}');
-    if (payload.email) await setAccountEmail('google', payload.email);
+    if (payload.email) await setAccountEmail(accountKey, payload.email);
   } catch (e) {}
 }
 
@@ -301,7 +327,7 @@ async function refreshToken(win, userContextId, contextKey, entry, clientId) {
   if (status < 200 || status >= 300 || !payload.access_token) {
     debugLog('Calendar refresh failed', status, payload.error || '');
     await dropToken(contextKey);
-    await markExpired('google');
+    await markExpired(contextKey);
     return null;
   }
   return putToken(contextKey, payload, current);
@@ -465,7 +491,7 @@ export async function fetchGoogleDay(win, tab, contextKey) {
   const userContextId = getTabUserContextId(tab);
   let bearer = await accessToken(win, userContextId, contextKey, clientId);
   if (!bearer) {
-    if (isExpired('google')) {
+    if (isExpired(contextKey)) {
       const error = signInError('Reconnect Google Calendar', true);
       error.expired = true;
       throw error;
@@ -664,15 +690,15 @@ export async function beginGoogleSignIn(app, tab, contextKey) {
       throw signInError(tokenError(payload), true);
     }
     await putToken(contextKey, payload, null);
-    await markConnected('google', contextKey);
-    await rememberGoogle(win, userContextId, payload.access_token);
-    app.setNotice(contextKey, null);
+    await markConnected(contextKey, contextKey);
+    await rememberGoogle(win, userContextId, payload.access_token, contextKey);
+    app.setNotice(String(getTabUserContextId(tab) || 0), null);
     debugLog('Calendar signed in', contextKey);
     if (tab) app.refreshDay(tab, { force: true });
   } catch (e) {
     console.warn('[Live Calendar] Google sign-in failed:', e && e.message ? e.message : e);
-    await setAccountMessage('google', e?.message || 'Google sign-in failed');
-    app.setNotice?.(contextKey, null);
+    await setAccountMessage(contextKey, e?.message || 'Google sign-in failed');
+    app.setNotice?.(String(getTabUserContextId(tab) || 0), null);
   } finally {
     authInFlight.delete(contextKey);
     if (loopback) {

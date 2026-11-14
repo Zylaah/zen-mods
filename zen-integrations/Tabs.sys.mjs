@@ -616,8 +616,8 @@ export class ZenTabs {
     if (!this.gBrowser?.tabs) return;
     for (const tab of this.gBrowser.tabs) {
       const provider = this.providerFor(tab);
-      const account = provider?.id === 'gmail' ? 'google' : provider?.id;
-      const mail = this.isAnchor(tab) && !!account && isEnabled(account);
+      const accountKey = provider?.contextKey(tab, this.getUrlHints(tab));
+      const mail = this.isAnchor(tab) && !!accountKey && isEnabled(accountKey);
       if (mail) tab.setAttribute('data-zi-mail', 'true');
       else tab.removeAttribute('data-zi-mail');
       if (tab.hasAttribute('zen-essential') || (tab.pinned && mail)) {

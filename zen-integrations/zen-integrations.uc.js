@@ -2,7 +2,7 @@
 // @name           Zen Integrations
 // @description    Unread Gmail, Outlook, and today's Google Calendar on essential or pinned tabs
 // @author         Bxth
-// @version        1.3.0
+// @version        1.4.0
 // @namespace      https://github.com/zen-browser/desktop
 // ==/UserScript==
 

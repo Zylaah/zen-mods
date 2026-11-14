@@ -48,6 +48,10 @@ export class LiveCalendar {
     return '0';
   }
 
+  getAccountKey(tab = this.hoveredTab) {
+    return 'gmail:' + this.getContextKey(tab);
+  }
+
   init() {
     debugLog('Initializing Live Calendar');
     this.panel.create();
@@ -73,7 +77,7 @@ export class LiveCalendar {
   beginSignIn(tab) {
     const anchor = tab || this.hoveredTab || this.tabs.targetTab();
     if (!anchor) return;
-    beginGoogleSignIn(this, anchor, this.getContextKey(anchor));
+    beginGoogleSignIn(this, anchor, this.getAccountKey(anchor));
   }
 
   refreshOpenDays() {
@@ -86,10 +90,11 @@ export class LiveCalendar {
 
   refreshDay(tab, { force = false } = {}) {
     if (!tab || !this.tabs.isCalendarAnchor(tab)) return;
-    if (!isEnabled('google')) return;
     const key = this.getContextKey(tab);
-    if (isExpired('google') || !hasToken('google')) {
-      if (isExpired('google')) {
+    const accountKey = this.getAccountKey(tab);
+    if (!isEnabled(accountKey)) return;
+    if (isExpired(accountKey) || !hasToken(accountKey)) {
+      if (isExpired(accountKey)) {
         this.setNotice(key, { text: 'Reconnect Google Calendar', reconnect: true });
       }
       this.tabs.updatePills();
@@ -103,7 +108,7 @@ export class LiveCalendar {
       return;
     }
     this.dayInFlight.add(key);
-    fetchGoogleDay(this.window, tab, key).then((events) => {
+    fetchGoogleDay(this.window, tab, accountKey).then((events) => {
       this.cache.applyDay(key, localDay(), events, 'google', 'complete');
       console.log(
         '[Live Calendar] google',

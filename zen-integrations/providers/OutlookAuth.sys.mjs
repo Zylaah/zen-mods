@@ -1,4 +1,11 @@
-const { isExpired, markConnected, markExpired, setAccountEmail, setAccountMessage } = ChromeUtils.importESModule(
+const {
+  isExpired,
+  markConnected,
+  markExpired,
+  outlookAccountId,
+  setAccountEmail,
+  setAccountMessage
+} = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Accounts.sys.mjs' + new URL(import.meta.url).search
 );
 const { CONFIG, debugLog, getTabUserContextId, httpRequest, profilePath } = ChromeUtils.importESModule(
@@ -98,11 +105,19 @@ async function codeChallenge(win, verifier) {
 
 async function loadTokens() {
   if (tokenStore) return tokenStore;
+  let parsed = {};
   try {
-    const parsed = await IOUtils.readJSON(profilePath(CONFIG.OUTLOOK_TOKEN_FILE));
-    tokenStore = parsed && typeof parsed === 'object' ? parsed : {};
-  } catch (e) {
-    tokenStore = {};
+    parsed = await IOUtils.readJSON(profilePath(CONFIG.OUTLOOK_TOKEN_FILE));
+  } catch (e) {}
+  const source = parsed && typeof parsed === 'object' ? parsed : {};
+  const migrated = {};
+  for (const [key, entry] of Object.entries(source)) {
+    const next = outlookAccountId(key);
+    if (!migrated[next] || (!migrated[next]?.accessToken && entry?.accessToken)) migrated[next] = entry;
+  }
+  tokenStore = migrated;
+  if (Object.keys(source).some((key) => key !== outlookAccountId(key))) {
+    await saveTokens(tokenStore);
   }
   return tokenStore;
 }
@@ -116,8 +131,6 @@ function saveTokens(store) {
   return tokenWrite;
 }
 
-const CONSUMER_OUTLOOK_FAMILIES = new Set(['live', 'cloud']);
-
 function outlookKeyParts(contextKey) {
   const parts = String(contextKey || '').split(':');
   return {
@@ -127,13 +140,14 @@ function outlookKeyParts(contextKey) {
 }
 
 function tokenStorageKey(store, contextKey) {
-  if (store[contextKey]?.accessToken) return contextKey;
-  const wanted = outlookKeyParts(contextKey);
-  if (!CONSUMER_OUTLOOK_FAMILIES.has(wanted.family)) return '';
+  const wantedKey = outlookAccountId(contextKey);
+  if (store[wantedKey]?.accessToken) return wantedKey;
+  const wanted = outlookKeyParts(wantedKey);
+  // One Outlook account per Firefox container. The tab host can move between
+  // live and office, so reuse the token for that container regardless of family.
   for (const key of Object.keys(store)) {
     const other = outlookKeyParts(key);
     if (other.container !== wanted.container) continue;
-    if (!CONSUMER_OUTLOOK_FAMILIES.has(other.family)) continue;
     if (store[key]?.accessToken) return key;
   }
   return '';
@@ -153,27 +167,33 @@ async function tokenFor(contextKey) {
 }
 
 async function putToken(contextKey, payload, previous) {
+  const key = outlookAccountId(contextKey);
   const store = await loadTokens();
   const expiresIn = Number(payload.expires_in) || 3600;
-  store[contextKey] = {
+  store[key] = {
     accessToken: payload.access_token,
     refreshToken: payload.refresh_token || previous?.refreshToken || '',
     expiresAt: Date.now() + expiresIn * 1000,
     scope: payload.scope || OUTLOOK_SCOPE
   };
   await saveTokens(store);
-  return store[contextKey];
+  return store[key];
 }
 
 async function dropToken(contextKey) {
   const store = await loadTokens();
-  if (!store[contextKey]) return;
-  delete store[contextKey];
+  const key = tokenStorageKey(store, contextKey) || outlookAccountId(contextKey);
+  if (!store[key]) return;
+  delete store[key];
   await saveTokens(store);
 }
 
 export async function clearOutlookTokens() {
   await saveTokens({});
+}
+
+export function dropOutlookToken(contextKey) {
+  return dropToken(contextKey);
 }
 
 function reconnectError() {
@@ -182,7 +202,7 @@ function reconnectError() {
   return error;
 }
 
-async function rememberOutlook(win, userContextId, token) {
+async function rememberOutlook(win, userContextId, token, accountKey) {
   try {
     const fetched = await httpRequest(win, {
       url: 'https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName',
@@ -193,7 +213,7 @@ async function rememberOutlook(win, userContextId, token) {
     });
     const payload = JSON.parse(fetched.text || '{}');
     const email = payload.mail || payload.userPrincipalName || '';
-    if (email) await setAccountEmail('outlook', email);
+    if (email) await setAccountEmail(accountKey, email);
   } catch (e) {}
 }
 
@@ -226,7 +246,7 @@ async function refreshToken(win, userContextId, contextKey, entry, clientId) {
   if (status < 200 || status >= 300 || !payload.access_token) {
     debugLog('Outlook refresh failed', status, payload.error || '');
     await dropToken(key);
-    await markExpired('outlook');
+    await markExpired(key);
     return null;
   }
   return putToken(key, payload, current);
@@ -315,8 +335,9 @@ export async function beginOutlookSignIn(app, tab, contextKey) {
   const clientId = readOutlookClientId();
   const stateName = outlookClientState(clientId);
   if (stateName !== 'ok') return;
-  if (authInFlight.has(contextKey)) return;
-  authInFlight.add(contextKey);
+  const accountKey = outlookAccountId(contextKey);
+  if (authInFlight.has(accountKey)) return;
+  authInFlight.add(accountKey);
   const win = app.window;
   const userContextId = getTabUserContextId(tab);
   let authTab = null;
@@ -353,17 +374,17 @@ export async function beginOutlookSignIn(app, tab, contextKey) {
     if (status < 200 || status >= 300 || !payload.access_token) {
       throw signInError(payload.error_description || payload.error || 'Microsoft token request failed');
     }
-    const saved = await putToken(contextKey, payload, null);
-    await markConnected('outlook', contextKey);
-    await rememberOutlook(win, userContextId, saved.accessToken);
-    debugLog('Outlook signed in', contextKey);
+    const saved = await putToken(accountKey, payload, null);
+    await markConnected(accountKey, accountKey);
+    await rememberOutlook(win, userContextId, saved.accessToken, accountKey);
+    debugLog('Outlook signed in', accountKey);
     if (tab) app.scan.requestScan(tab, { force: true });
   } catch (e) {
     console.warn('[Zen Integrations] Outlook sign-in failed:', e && e.message ? e.message : e);
     debugLog('Outlook sign-in failed', e && e.message ? e.message : e);
-    await setAccountMessage('outlook', e?.message || 'Microsoft sign-in failed');
+    await setAccountMessage(accountKey, e?.message || 'Microsoft sign-in failed');
   } finally {
-    authInFlight.delete(contextKey);
+    authInFlight.delete(accountKey);
     if (authTab) {
       try { win.gBrowser.removeTab(authTab); } catch (e) {}
     }
@@ -380,7 +401,7 @@ export async function fetchOutlookGraph(app, tab, contextKey) {
   const win = app.window;
   const userContextId = getTabUserContextId(tab);
   let bearer = await accessToken(win, userContextId, contextKey, clientId);
-  if (!bearer) throw isExpired('outlook') ? reconnectError() : signInError(outlookSignInMessage());
+  if (!bearer) throw isExpired(contextKey) ? reconnectError() : signInError(outlookSignInMessage());
 
   const requestPage = (token, view) => httpRequest(win, {
     url: graphMessagesUrl(view, CONFIG.MAX_EMAILS),

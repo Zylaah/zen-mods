@@ -257,7 +257,7 @@ export const gmailProvider = {
   },
 
   async fetchUnread(app, tab, hints) {
-    if (!isEnabled('google')) return null;
+    if (!isEnabled(this.contextKey(tab))) return null;
     const sourceUrl = feedUrl(hints);
     const fetched = await httpRequest(app.window, {
       url: sourceUrl,

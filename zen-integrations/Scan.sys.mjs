@@ -68,11 +68,12 @@ export class ZenScan {
     const app = this.app;
     const provider = app.tabs.providerFor(tab);
     if (!provider) return;
-    const account = provider.id === 'gmail' ? 'google' : provider.id;
-    if (!isEnabled(account)) return;
-    if (provider.id === 'outlook' && isExpired('outlook')) return;
     const hints = app.tabs.getUrlHints(tab);
     const contextKey = provider.contextKey(tab, hints);
+    if (!isEnabled(contextKey)) return;
+    // A Google account can have a valid Gmail session while its Calendar token
+    // expired. Only Outlook's mail provider is blocked by its account state.
+    if (provider.id === 'outlook' && isExpired(contextKey)) return;
     const token = provider.cacheToken(tab, hints);
     const cached = app.scanMemCache[contextKey];
     if (!force && cached && cached.token === token && Date.now() - cached.ts < CONFIG.CACHE_MS) {

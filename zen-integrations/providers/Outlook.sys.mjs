@@ -168,14 +168,15 @@ export const outlookProvider = {
   // The panel keeps the cached rows in that case.
   // A Microsoft app id switches this container to Graph. No id keeps the tab scrape.
   async fetchUnread(app, tab, hints) {
-    if (!isEnabled('outlook')) return null;
-    if (isExpired('outlook')) {
+    const accountKey = this.contextKey(tab, hints);
+    if (!isEnabled(accountKey)) return null;
+    if (isExpired(accountKey)) {
       const error = new Error('Reconnect Outlook');
       error.signin = true;
       error.expired = true;
       throw error;
     }
     if (outlookClientState(readOutlookClientId()) === 'missing') return scrapeUnread(app, tab);
-    return fetchOutlookGraph(app, tab, this.contextKey(tab, hints));
+    return fetchOutlookGraph(app, tab, accountKey);
   }
 };

@@ -1,7 +1,7 @@
 # Zen Integrations — LLM Context
 
-> Version `1.3.0` (`theme.json` and `@version` in `zen-integrations.uc.js`).
-> One Sine mod. Gmail and Outlook unread panels, plus a Google Calendar day view. Gmail has no OAuth. Outlook Graph uses this mod's own Microsoft app id. Calendar uses this install's own Google desktop client.
+> Version `1.4.0` (`theme.json` and `@version` in `zen-integrations.uc.js`).
+> One Sine mod. Gmail and Outlook unread panels, plus a Google Calendar day view. Multiple accounts are supported through Firefox containers, one account per provider per container. Gmail has no OAuth. Outlook Graph uses this mod's own Microsoft app id. Calendar uses this install's own Google desktop client.
 
 ## What it does
 
@@ -9,7 +9,7 @@ Hover an essential or pinned Gmail or Outlook tab. A XUL panel lists unread mail
 
 Gmail source: `https://mail.google.com/mail/u/N/feed/atom` with that container's cookies. XML is parsed in chrome. Do not navigate a tab to `/feed/atom` (HTTP Basic auth).
 
-Outlook source: Microsoft Graph when `zen-integrations.outlook.clientId` is this install's own app id. The scope is `Mail.Read` plus `offline_access`. Sign-in is an auth-code tab with PKCE. The redirect is `https://login.microsoftonline.com/common/oauth2/nativeclient`. Tokens sit in `<profile>/zen-integrations-outlook-tokens.json`, one entry per context key. Unread mail is `GET /v1.0/me/mailFolders/Inbox/messages` twice: `receivedDateTime ge 2000-01-01T00:00:00Z and isRead eq false and inferenceClassification eq 'focused'`, and the same filter with `'other'`. Both use `$orderby=receivedDateTime desc`. One `isRead eq false` page omits the Focused tab, and `$top` without that sort returns the oldest unread. A click loads the message `webLink`. Arc's client id `74d1363b-cbb0-4149-9619-f1594fefa6f4` is refused. With no client id, the `ZenOutlook` actor still reads the loaded tab's message list, and a click still selects that conversation. An unloaded tab keeps the saved rows.
+Outlook source: Microsoft Graph when `zen-integrations.outlook.clientId` is this install's own app id. The scope is `Mail.Read` plus `offline_access`. Sign-in is an auth-code tab with PKCE. The redirect is `https://login.microsoftonline.com/common/oauth2/nativeclient`. Tokens sit in `<profile>/zen-integrations-outlook-tokens.json`, one entry per account id; a token in the same container is reused across Outlook host families. Unread mail is `GET /v1.0/me/mailFolders/Inbox/messages` twice: `receivedDateTime ge 2000-01-01T00:00:00Z and isRead eq false and inferenceClassification eq 'focused'`, and the same filter with `'other'`. Both use `$orderby=receivedDateTime desc`. One `isRead eq false` page omits the Focused tab, and `$top` without that sort returns the oldest unread. A click loads the message `webLink`. Arc's client id `74d1363b-cbb0-4149-9619-f1594fefa6f4` is refused. With no client id, the `ZenOutlook` actor still reads the loaded tab's message list, and a click still selects that conversation. An unloaded tab keeps the saved rows.
 
 ## Layout
 
@@ -17,6 +17,8 @@ Outlook source: Microsoft Graph when `zen-integrations.outlook.clientId` is this
 zen-integrations/
 ├── zen-integrations.uc.js     # bootstrap, registers the Gmail actor
 ├── App.sys.mjs                # per-window state, provider list
+├── Accounts.sys.mjs           # per-account records, migration, lookups
+├── Settings.sys.mjs           # provider sections, account rows, sign-in
 ├── Util.sys.mjs               # prefs, cookies, HTTP
 ├── Scan.sys.mjs               # poll, cache, apply
 ├── Cache.sys.mjs              # profile JSON
@@ -44,7 +46,9 @@ Add a provider object with `id`, `label`, `signInMessage`, `matches`, `contextKe
 
 `fetchUnread(app, tab, hints)` returns the same row shape Gmail uses: `id`, `threadId`, `from`, `subject`, `snippet`, `date`, `ts`, `isUnread`, `url`. Throw an error with `signin: true` when the container has no session.
 
-Context keys are `gmail:<container>` and `outlook:<family>:<container>`. Family is `office`, `office365`, `live`, or `cloud`, because those hosts are different accounts. Cache file: `<profile>/zen-integrations-cache.json`. On first run, `live-gmail-cache.json` is read and its keys become `gmail:<container>`.
+Context keys are `gmail:<container>` and `outlook:<family>:<container>`. Family is `office`, `office365`, `live`, or `cloud`. Cache file: `<profile>/zen-integrations-cache.json`. On first run, `live-gmail-cache.json` is read and its keys become `gmail:<container>`.
+
+Account ids reuse those keys: Google is `gmail:<container>` with provider `google`; Outlook is `outlook:<family>:<container>` with provider `outlook`. There is one account per provider per container. `resolveAccountId` falls back to any account of the same provider in the same container, so an Outlook host change from `live` to `office` keeps the same account and token. Disconnecting a Google account hides both its Gmail panel and its Calendar view because both read `isEnabled('gmail:<container>')`.
 
 ## Gmail open path
 
@@ -62,6 +66,12 @@ Poll interval is `CONFIG.POLL_MS` (60 seconds), not a pref.
 
 The day view is not a mailbox provider. `App.sys.mjs` owns a `LiveCalendar` next to the mail panel. Hovering a Calendar pin opens `#live-calendar-panel`. Hovering a mail pin still opens `#zi-panel`. Modules live in `calendar/`. The join pill is `data-zi-calendar` plus `.live-calendar-pill`.
 
-Google prefs stay `live-calendar.google.clientId` and `live-calendar.google.clientSecret`. Tokens stay in `<profile>/live-calendar-google-tokens.json`. The day cache stays `<profile>/live-calendar-cache.json`. Arc's Google client id is refused. Disable the separate Live Calendar mod so the tab strip does not get a second hover listener.
+Google prefs stay `live-calendar.google.clientId` and `live-calendar.google.clientSecret`. Google tokens stay in `<profile>/live-calendar-google-tokens.json`, keyed by `gmail:<container>`; old container-only keys are migrated on load. The day cache stays `<profile>/live-calendar-cache.json`, keyed by container, while account state and tokens use `gmail:<container>`. Arc's Google client id is refused. Disable the separate Live Calendar mod so the tab strip does not get a second hover listener.
 
-Account state is `<profile>/zen-integrations-accounts.json`. `preferences.json` is what puts the settings button on the mod card. That button, and the command palette entry **Zen Integrations accounts**, open the same page. Connect and disconnect happen there. A disabled account does not open a panel, does not fetch, and does not read cookies. An expired Outlook or calendar token keeps the account enabled and the panel shows Reconnect. Gmail stays on Atom. A signed-out Gmail container shows Open Gmail, which focuses that tab.
+## Accounts
+
+Account records live in `<profile>/zen-integrations-accounts.json` as `{ version: 2, accounts: { [id]: record } }`. A record holds `provider`, `enabled`, `expired`, `hasToken`, `email`, `label`, `contextKey`, and `message`. `Accounts.sys.mjs` owns load, save, migration, `resolveAccountId`, and the per-account setters. On first load it merges the old flat `google` / `outlook` records with any Google and Outlook token entries. A token entry counts as connected evidence, so it sets `enabled` and `hasToken`.
+
+Settings (`Settings.sys.mjs`) groups rows by provider. The section header shows `<Provider> (N connected)` with **Add account** and a **…** menu for the provider's app credentials. Each account row has Connect/Reconnect/Connect calendar, Disconnect, and a **…** menu for rename and remove. **Add account** lists Firefox containers plus any container visible in an open tab, and warns that a container already holds one account. A pinned Gmail, Outlook, or Calendar tab without a record is listed as a dashed **Detected** row; nothing is enabled until Connect is pressed.
+
+Provider credentials are global: `live-calendar.google.clientId` / `live-calendar.google.clientSecret` and `zen-integrations.outlook.clientId`. Per-account sign-in opens or reuses a tab in that account's container. Google sign-in enables the Google account, which turns on Gmail for the same container; Outlook sign-in marks the Outlook account for that container. Removing an account disconnects it and deletes its record and token. Disconnecting keeps the record and profile text. `preferences.json` is what puts the settings button on the mod card. That button, and the command palette entry **Zen Integrations accounts**, open the same dialog. A disabled account does not open a panel, does not fetch, and does not read cookies. An expired Outlook or calendar token keeps the account enabled and the panel shows Reconnect. Gmail stays on Atom, so an expired Calendar token does not stop Gmail. A signed-out Gmail container shows Open Gmail, which focuses that tab.

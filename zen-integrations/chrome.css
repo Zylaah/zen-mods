@@ -553,6 +553,16 @@ button.zi-signin {
   background: transparent;
 }
 
+#zi-accounts.zi-accounts-auth {
+  background: transparent;
+  pointer-events: none;
+}
+
+#zi-accounts.zi-accounts-auth .zi-accounts-card,
+#zi-accounts.zi-accounts-auth .zi-accounts-sheet {
+  display: none;
+}
+
 .zi-accounts-card,
 .zi-accounts-sheet-card {
   width: min(400px, calc(100vw - 32px));
@@ -561,6 +571,11 @@ button.zi-signin {
   border: 1px solid var(--zi-line);
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
   color: var(--zi-fg);
+}
+
+.zi-accounts-card {
+  max-height: calc(100vh - 48px);
+  overflow: auto;
 }
 
 .zi-accounts-head {
@@ -639,7 +654,38 @@ button.zi-signin {
 .zi-accounts-list {
   display: flex;
   flex-direction: column;
+  gap: 14px;
+}
+
+.zi-accounts-section {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
+}
+
+.zi-accounts-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 4px;
+}
+
+.zi-accounts-section-title {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.zi-accounts-empty {
+  padding: 6px 4px 2px;
+  color: var(--zi-muted);
+  font-size: 12px;
+}
+
+.zi-accounts-detected {
+  border: 1px dashed var(--zi-line);
+  background: transparent;
 }
 
 .zi-accounts-status:empty {
@@ -682,6 +728,8 @@ button.zi-signin {
 .zi-accounts-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 6px;
   flex: 0 0 auto;
 }
@@ -694,8 +742,26 @@ button.zi-signin {
   color: light-dark(#f4f4f5, #151518);
 }
 
+.zi-accounts-action.zi-accounts-secondary {
+  background: var(--zi-fill);
+  color: var(--zi-fg);
+}
+
+.zi-accounts-action.zi-accounts-danger {
+  margin-top: 4px;
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid light-dark(rgba(180, 30, 30, 0.35), rgba(255, 120, 120, 0.4));
+  color: light-dark(#a11b1b, #ff9d9d);
+}
+
 .zi-accounts-action:disabled {
   opacity: 0.55;
+}
+
+.zi-accounts-add {
+  background: var(--zi-fill);
+  color: var(--zi-fg);
 }
 
 .zi-accounts-sheet {
@@ -714,6 +780,8 @@ button.zi-signin {
 
 .zi-accounts-sheet-card {
   width: min(360px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
 }
 
 .zi-accounts-field {
