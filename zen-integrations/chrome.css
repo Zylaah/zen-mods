@@ -654,8 +654,23 @@ button.zi-signin {
 }
 
 .zi-accounts-more {
-  font-size: 18px;
-  letter-spacing: 1px;
+  position: relative;
+  font-size: 0;
+  line-height: 0;
+}
+
+.zi-accounts-more::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 15px;
+  height: 3px;
+  transform: translate(-50%, -50%);
+  background-image: radial-gradient(circle, currentColor 1.15px, transparent 1.3px);
+  background-size: 5px 3px;
+  background-repeat: repeat-x;
+  background-position: center;
 }
 
 .zi-accounts-sheet {
