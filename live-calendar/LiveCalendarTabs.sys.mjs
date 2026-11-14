@@ -1,11 +1,9 @@
 const {
   CONFIG,
   debugLog,
-  eventBelongsToToday,
   getTabUserContextId,
   isEssentialOrPinnedTab,
   isPinnedCalendarTab,
-  localDay,
   pickPillEvent,
   pillText
 } = ChromeUtils.importESModule(
@@ -15,7 +13,6 @@ const {
 export class LiveCalendarTabs {
   constructor(app) {
     this.app = app;
-    this.watchListener = null;
   }
 
   get window() {
@@ -67,21 +64,7 @@ export class LiveCalendarTabs {
     return isEssentialOrPinnedTab(tab) && this.isCalendarTab(tab);
   }
 
-  isLoaded(tab) {
-    const browser = tab?.linkedBrowser;
-    if (!browser) return false;
-    try {
-      if (tab.hasAttribute('discarded')) return false;
-      if (browser.browsingContext?.discarded) return false;
-      const spec = `${browser.currentURI?.spec || ''} ${browser.documentURI?.spec || ''}`;
-      return spec.includes(CONFIG.CALENDAR_URL);
-    } catch (e) {
-      return false;
-    }
-  }
-
   setup() {
-    this.startWatch();
     this.refreshAnchors();
     const onChange = () => this.refreshAnchors();
     const container = this.gBrowser?.tabContainer;
@@ -102,46 +85,6 @@ export class LiveCalendarTabs {
       this.window.clearInterval(this.app.pillTimer);
       this.app.pillTimer = null;
     }
-    if (!this.watchListener) return;
-    try { Services.mm.removeMessageListener('LiveCalendar:Day', this.watchListener); } catch (e) {}
-    this.watchListener = null;
-  }
-
-  onDay(tab, data) {
-    if (data?.debug) console.log('[Live Calendar] page', data.debug);
-    if (!tab || !this.isCalendarAnchor(tab)) return;
-    if (!data?.ok || data.day !== localDay()) return;
-    const events = (Array.isArray(data.events) ? data.events : []).filter((event) => eventBelongsToToday(event));
-    const key = this.app.getContextKey(tab);
-    console.log(
-      '[Live Calendar]',
-      data.source || '',
-      data.read || '',
-      data.day,
-      events.map((event) => `${event.title || '?'} ${event.allDay ? 'all-day' : event.start || ''}`)
-    );
-    this.app.cache.applyDay(key, data.day, events, data.source || '', data.read || '');
-    this.updatePills();
-    if (this.app.panel.isOpen() && String(this.app.activeContextKey) === String(key)) {
-      this.app.panel.updateDisplay();
-    }
-  }
-
-  startWatch() {
-    if (this.watchListener) return;
-    this.watchListener = (message) => {
-      try {
-        const tab = this.tabForTarget(message?.target);
-        this.onDay(tab, message?.data || {});
-      } catch (e) {
-        debugLog('Calendar watch', e);
-      }
-    };
-    try {
-      Services.mm.addMessageListener('LiveCalendar:Day', this.watchListener);
-    } catch (e) {
-      debugLog('Could not listen for calendar', e);
-    }
   }
 
   refreshAnchors() {
@@ -152,7 +95,6 @@ export class LiveCalendarTabs {
         this.clearSublabel(tab);
         continue;
       }
-      this.loadWatcher(tab);
       this.updatePill(tab);
     }
     this.delegateHover();
@@ -182,44 +124,6 @@ export class LiveCalendarTabs {
         this.app.panel.scheduleHide();
       }, true);
     }
-  }
-
-  loadWatcher(tab) {
-    const browser = tab?.linkedBrowser;
-    if (!this.isLoaded(tab) || !browser?.messageManager) return;
-    const mm = browser.messageManager;
-    if (!tab.__liveCalendarListener) {
-      tab.__liveCalendarListener = (message) => {
-        try { this.onDay(tab, message?.data || {}); } catch (e) { debugLog('Calendar watch', e); }
-      };
-      try { mm.addMessageListener('LiveCalendar:Day', tab.__liveCalendarListener); } catch (e) {}
-    }
-    try {
-      mm.loadFrameScript('chrome://sine/content/live-calendar/LiveCalendarFrame.js', true);
-    } catch (e) {
-      debugLog('Could not load calendar watcher', e);
-    }
-  }
-
-  refreshLoaded(tab) {
-    if (!this.isLoaded(tab)) return;
-    this.loadWatcher(tab);
-    try {
-      tab.linkedBrowser.messageManager.sendAsyncMessage('LiveCalendar:Refresh', {});
-    } catch (e) {}
-  }
-
-  tabForTarget(target) {
-    if (!target || !this.gBrowser?.tabs) return null;
-    for (const tab of this.gBrowser.tabs) {
-      const browser = tab.linkedBrowser;
-      if (!browser) continue;
-      if (target === browser) return tab;
-      try {
-        if (browser.messageManager === target) return tab;
-      } catch (e) {}
-    }
-    return null;
   }
 
   calendarSlot(tab) {

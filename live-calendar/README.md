@@ -9,7 +9,7 @@ A Zen Browser mod for Sine. Hover a Google Calendar essential or pinned tab to s
 - A pill on the essential or pinned tab reads `in 2m`, `now`, or `2m ago`
 - **+** at the bottom of the panel creates a new event on that Calendar tab
 - Click an event to open it in Calendar
-- The day is remembered after the tab unloads, and refreshes the next time Calendar is open
+- The day is loaded with your own Google Calendar client, and stays available after the tab unloads
 
 ## Installation
 
@@ -19,6 +19,6 @@ A Zen Browser mod for Sine. Hover a Google Calendar essential or pinned tab to s
 
 ## Usage
 
-1. Pin Google Calendar as an essential or pinned tab and sign in.
-2. Open that tab once so today can be read.
-3. Hover it for the day. The pill appears on its own when a meeting is close.
+1. Create a Desktop app OAuth client and set `live-calendar.google.clientId` to that client id.
+2. Pin Google Calendar as an essential or pinned tab.
+3. Hover it and click **Sign in to Google Calendar**. The day and the join pill update from the Calendar API after that.

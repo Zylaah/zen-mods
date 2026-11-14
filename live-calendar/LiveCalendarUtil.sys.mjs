@@ -6,7 +6,11 @@ export const CONFIG = {
   SOON_MS: 10 * 60 * 1000,
   PILL_WINDOW_MS: 5 * 60 * 1000,
   PILL_TICK_MS: 15000,
-  FRAME_POLL_MS: 60000
+  POLL_MS: 60000,
+  CACHE_MS: 60000,
+  REQUEST_TIMEOUT_MS: 8000,
+  GOOGLE_CLIENT_PREF: 'live-calendar.google.clientId',
+  GOOGLE_TOKEN_FILE: 'live-calendar-google-tokens.json'
 };
 
 export const XUL_NS = 'http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul';

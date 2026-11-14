@@ -30,6 +30,44 @@
   color: light-dark(#737373, #b1b1b1);
 }
 
+.live-calendar-gate,
+.live-calendar-note {
+  display: flex;
+  justify-content: center;
+}
+
+.live-calendar-gate {
+  align-items: center;
+  height: 100%;
+  padding: 24px 16px;
+  box-sizing: border-box;
+}
+
+.live-calendar-note {
+  padding: 8px 12px 0;
+}
+
+.live-calendar-note-text {
+  margin: 0;
+  text-align: center;
+  color: light-dark(#737373, #b1b1b1);
+}
+
+.live-calendar-signin {
+  appearance: none;
+  -moz-appearance: none;
+  margin: 0;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 999px;
+  --zen-squircle-value: 1;
+  corner-shape: round !important;
+  cursor: pointer;
+  background-color: light-dark(rgba(210, 210, 210), rgba(69, 69, 69));
+  color: light-dark(#0c0c0d, #f9f9fa);
+  font: inherit;
+}
+
 .live-calendar-loose {
   display: flex;
   flex-wrap: wrap;

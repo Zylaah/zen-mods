@@ -136,7 +136,6 @@ export class LiveCalendarPanel {
     }
     if (this.isOpen() && this.app.hoveredTab === tab) {
       this.cancelShowTimer();
-      this.show(tab);
       return;
     }
     if (this.isOpen()) this.hide();
@@ -164,7 +163,7 @@ export class LiveCalendarPanel {
     this.pinCompactChrome(tab);
     this.updateDisplay(!wasOpen);
     this.openAt(tab);
-    this.app.tabs.refreshLoaded(tab);
+    this.app.refreshDay(tab);
   }
 
   scheduleHide() {
@@ -261,6 +260,24 @@ export class LiveCalendarPanel {
     if (cluster.length) finish();
   }
 
+  appendNotice(parent, notice, block) {
+    const host = this.html('div', block ? 'live-calendar-gate' : 'live-calendar-note');
+    if (!notice.canSignIn) {
+      host.appendChild(this.html('p', 'live-calendar-note-text', notice.text));
+      parent.appendChild(host);
+      return;
+    }
+    const button = this.html('button', 'live-calendar-signin', notice.text);
+    button.type = 'button';
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.app.beginSignIn(this.app.hoveredTab || this.app.tabs.targetTab());
+    });
+    host.appendChild(button);
+    parent.appendChild(host);
+  }
+
   updateDisplay(scrollToNow = false) {
     const panel = this.app.panelElement;
     if (!panel) return;
@@ -270,6 +287,7 @@ export class LiveCalendarPanel {
     scroll.replaceChildren();
 
     const events = this.visibleEvents();
+    const notice = this.app.noticeFor();
     const now = Date.now();
     const dayStart = this.dayStartMs();
     const nowMin = (now - dayStart) / 60000;
@@ -287,10 +305,17 @@ export class LiveCalendarPanel {
       timed.push({ event, startMin: this.minutesOf(start, dayStart), endMin: this.minutesOf(end, dayStart) });
     }
 
-    if (this.app.day !== localDay()) {
-      scroll.appendChild(this.html('div', 'live-calendar-empty', 'Open Calendar to load today'));
+    if (!events.length) {
+      if (notice?.text) this.appendNotice(scroll, notice, true);
+      else if (this.app.day === localDay()) {
+        scroll.appendChild(this.html('div', 'live-calendar-empty', 'Nothing on your calendar today'));
+      } else {
+        scroll.appendChild(this.html('div', 'live-calendar-empty', 'Loading today'));
+      }
       return;
     }
+
+    if (notice?.text) this.appendNotice(scroll, notice, false);
 
     if (loose.length) {
       const strip = this.html('div', 'live-calendar-loose');
