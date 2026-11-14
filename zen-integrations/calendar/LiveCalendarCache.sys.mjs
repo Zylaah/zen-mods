@@ -1,5 +1,5 @@
 const { debugLog, localDay } = ChromeUtils.importESModule(
-  'chrome://sine/content/live-calendar/LiveCalendarUtil.sys.mjs' + new URL(import.meta.url).search
+  'chrome://sine/content/zen-integrations/calendar/LiveCalendarUtil.sys.mjs' + new URL(import.meta.url).search
 );
 
 export class LiveCalendarCache {

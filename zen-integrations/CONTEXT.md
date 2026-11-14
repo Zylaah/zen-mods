@@ -1,11 +1,11 @@
 # Zen Integrations — LLM Context
 
-> Version `1.1.0` (`theme.json` and `@version` in `zen-integrations.uc.js`).
-> One Sine mod. Gmail and Outlook unread panels. Gmail has no OAuth. Outlook Graph uses this mod's own Microsoft app id.
+> Version `1.2.0` (`theme.json` and `@version` in `zen-integrations.uc.js`).
+> One Sine mod. Gmail and Outlook unread panels, plus a Google Calendar day view. Gmail has no OAuth. Outlook Graph uses this mod's own Microsoft app id. Calendar uses this install's own Google desktop client.
 
 ## What it does
 
-Hover an essential or pinned Gmail or Outlook tab. A XUL panel lists unread mail for that tab's Firefox container. Click opens the message in that tab. **+** opens compose.
+Hover an essential or pinned Gmail or Outlook tab. A XUL panel lists unread mail for that tab's Firefox container. Click opens the message in that tab. **+** opens compose. Hover a Google Calendar pin for today's events and the join pill.
 
 Gmail source: `https://mail.google.com/mail/u/N/feed/atom` with that container's cookies. XML is parsed in chrome. Do not navigate a tab to `/feed/atom` (HTTP Basic auth).
 
@@ -26,6 +26,7 @@ zen-integrations/
 ├── providers/Outlook.sys.mjs
 ├── providers/OutlookGraph.sys.mjs
 ├── providers/OutlookAuth.sys.mjs
+├── calendar/                  # day view, pill, Google sign-in
 ├── GmailFrame.js              # inbox read-state in the Gmail tab
 ├── actors/LiveGmailParent.sys.mjs
 ├── actors/LiveGmailChild.sys.mjs
@@ -56,3 +57,9 @@ Clicking Gmail does not only load the permalink. `Tabs.sys.mjs` waits for the in
 - `zen-integrations.outlook.clientId` (empty keeps the tab scrape)
 
 Poll interval is `CONFIG.POLL_MS` (60 seconds), not a pref.
+
+## Calendar
+
+The day view is not a mailbox provider. `App.sys.mjs` owns a `LiveCalendar` next to the mail panel. Hovering a Calendar pin opens `#live-calendar-panel`. Hovering a mail pin still opens `#zi-panel`. Modules live in `calendar/`. The join pill is `data-zi-calendar` plus `.live-calendar-pill`.
+
+Google prefs stay `live-calendar.google.clientId` and `live-calendar.google.clientSecret`. Tokens stay in `<profile>/live-calendar-google-tokens.json`. The day cache stays `<profile>/live-calendar-cache.json`. Arc's Google client id is refused. Disable the separate Live Calendar mod so the tab strip does not get a second hover listener.

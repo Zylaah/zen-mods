@@ -19,6 +19,9 @@ const { gmailProvider } = ChromeUtils.importESModule(
 const { outlookProvider } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/providers/Outlook.sys.mjs' + new URL(import.meta.url).search
 );
+const { createLiveCalendar } = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/calendar/LiveCalendar.sys.mjs' + new URL(import.meta.url).search
+);
 
 export class ZenIntegrations {
   constructor(window) {
@@ -50,6 +53,7 @@ export class ZenIntegrations {
     this.scan = new ZenScan(this);
     this.panel = new ZenPanel(this);
     this.tabs = new ZenTabs(this);
+    this.calendar = createLiveCalendar(window);
   }
 
   providerForKey(key) {
@@ -78,10 +82,12 @@ export class ZenIntegrations {
       }
     }
     this.scan.startPoll();
+    this.calendar.init();
     debugLog('Initialized');
   }
 
   destroy() {
+    try { this.calendar.destroy(); } catch (e) {}
     this.tabs.stopInboxWatch();
     this.scan.stopPoll();
     this.panel.hide();

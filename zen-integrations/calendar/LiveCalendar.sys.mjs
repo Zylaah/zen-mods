@@ -1,17 +1,17 @@
 const { CONFIG, debugLog, getTabUserContextId, localDay } = ChromeUtils.importESModule(
-  'chrome://sine/content/live-calendar/LiveCalendarUtil.sys.mjs' + new URL(import.meta.url).search
+  'chrome://sine/content/zen-integrations/calendar/LiveCalendarUtil.sys.mjs' + new URL(import.meta.url).search
 );
 const { beginGoogleSignIn, fetchGoogleDay } = ChromeUtils.importESModule(
-  'chrome://sine/content/live-calendar/CalendarAuth.sys.mjs' + new URL(import.meta.url).search
+  'chrome://sine/content/zen-integrations/calendar/CalendarAuth.sys.mjs' + new URL(import.meta.url).search
 );
 const { LiveCalendarCache } = ChromeUtils.importESModule(
-  'chrome://sine/content/live-calendar/LiveCalendarCache.sys.mjs' + new URL(import.meta.url).search
+  'chrome://sine/content/zen-integrations/calendar/LiveCalendarCache.sys.mjs' + new URL(import.meta.url).search
 );
 const { LiveCalendarPanel } = ChromeUtils.importESModule(
-  'chrome://sine/content/live-calendar/LiveCalendarPanel.sys.mjs' + new URL(import.meta.url).search
+  'chrome://sine/content/zen-integrations/calendar/LiveCalendarPanel.sys.mjs' + new URL(import.meta.url).search
 );
 const { LiveCalendarTabs } = ChromeUtils.importESModule(
-  'chrome://sine/content/live-calendar/LiveCalendarTabs.sys.mjs' + new URL(import.meta.url).search
+  'chrome://sine/content/zen-integrations/calendar/LiveCalendarTabs.sys.mjs' + new URL(import.meta.url).search
 );
 
 export class LiveCalendar {

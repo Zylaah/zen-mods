@@ -7,7 +7,7 @@ const {
   pickPillEvent,
   pillText
 } = ChromeUtils.importESModule(
-  'chrome://sine/content/live-calendar/LiveCalendarUtil.sys.mjs' + new URL(import.meta.url).search
+  'chrome://sine/content/zen-integrations/calendar/LiveCalendarUtil.sys.mjs' + new URL(import.meta.url).search
 );
 
 export class LiveCalendarTabs {
@@ -91,10 +91,12 @@ export class LiveCalendarTabs {
     if (!this.gBrowser?.tabs) return;
     for (const tab of this.gBrowser.tabs) {
       if (!this.isCalendarAnchor(tab)) {
+        tab.removeAttribute('data-zi-calendar');
         this.clearPill(tab);
         this.clearSublabel(tab);
         continue;
       }
+      tab.setAttribute('data-zi-calendar', 'true');
       this.updatePill(tab);
     }
     this.delegateHover();
@@ -109,16 +111,16 @@ export class LiveCalendarTabs {
     ];
     const onHover = (event) => {
       const tab = event.target.closest?.('.tabbrowser-tab');
-      if (!tab || !this.isCalendarAnchor(tab)) return;
+      if (!tab?.hasAttribute('data-zi-calendar')) return;
       this.app.panel.scheduleShow(tab);
     };
     for (const root of roots) {
-      if (!root || root.hasAttribute('data-live-calendar-hover')) continue;
-      root.setAttribute('data-live-calendar-hover', 'true');
+      if (!root || root.hasAttribute('data-zi-calendar-hover')) continue;
+      root.setAttribute('data-zi-calendar-hover', 'true');
       root.addEventListener('mouseover', onHover, true);
       root.addEventListener('mouseout', (event) => {
         const tab = event.target.closest?.('.tabbrowser-tab');
-        if (!tab || !this.isCalendarAnchor(tab)) return;
+        if (!tab?.hasAttribute('data-zi-calendar')) return;
         const next = event.relatedTarget?.closest?.('.tabbrowser-tab');
         if (next === tab) return;
         this.app.panel.scheduleHide();

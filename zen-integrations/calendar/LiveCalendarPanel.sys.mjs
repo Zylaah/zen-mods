@@ -9,7 +9,7 @@ const {
   isPinnedCalendarTab,
   localDay
 } = ChromeUtils.importESModule(
-  'chrome://sine/content/live-calendar/LiveCalendarUtil.sys.mjs' + new URL(import.meta.url).search
+  'chrome://sine/content/zen-integrations/calendar/LiveCalendarUtil.sys.mjs' + new URL(import.meta.url).search
 );
 
 const HTML_NS = 'http://www.w3.org/1999/xhtml';

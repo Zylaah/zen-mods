@@ -1,6 +1,6 @@
 # Zen Integrations
 
-A Zen Browser mod for Sine. Hover an essential or pinned Gmail or Outlook tab to see unread mail.
+A Zen Browser mod for Sine. Hover an essential or pinned Gmail or Outlook tab to see unread mail. Hover a Google Calendar pin to see today.
 
 ## Features
 
@@ -9,12 +9,13 @@ A Zen Browser mod for Sine. Hover an essential or pinned Gmail or Outlook tab to
 - Click an item to open it in that tab
 - Floating **+** button to start a new message
 - Each Firefox container keeps its own mailbox
+- Today's Google Calendar, with a join pill when a meeting is close
 
 Gmail reads the Atom feed with that tab's cookies. Outlook reads Microsoft Graph when `zen-integrations.outlook.clientId` is set to your own app id. Until then, Outlook reads the message list in the loaded tab, and an unloaded pin shows the last saved list.
 
 ## Installation (Sine)
 
-1. Remove the old **Live Gmail** mod if it is installed. Both mods register the same Gmail actor. Leave the old one enabled and this panel will not see read-state updates.
+1. Remove the old **Live Gmail** mod if it is installed. Both mods register the same Gmail actor. Leave the old one enabled and this panel will not see read-state updates. Also disable the separate **Live Calendar** mod. Calendar now lives in this mod, and leaving both enabled puts two hover listeners on the tab strip.
 2. Install [Sine](https://github.com/CosmoCreeper/Sine) on Zen Browser.
 3. In Sine, enable unsafe JS and paste `Zylaah/zen-mods/tree/main/zen-integrations`.
 4. Restart Zen when prompted.
@@ -25,6 +26,7 @@ Gmail reads the Atom feed with that tab's cookies. Outlook reads Microsoft Graph
 2. Sign in once in that tab. For Graph, register a public Microsoft app with redirect `https://login.microsoftonline.com/common/oauth2/nativeclient` and delegated `Mail.Read`, then set `zen-integrations.outlook.clientId` to that app id. Hover the pin and click the sign-in line. Without that pref, Outlook has to be loaded for a new unread list.
 3. Hover the tab.
 4. Click a row to open it. **+** opens compose.
+5. For Calendar, set `live-calendar.google.clientId` and `live-calendar.google.clientSecret` to your Desktop app client. Hover the Calendar pin and click the sign-in line. The same prefs and token file keep an existing sign-in.
 
 Work and personal Outlook are different hosts, so both can be pinned in the same container. They do not share a list.
 
@@ -35,6 +37,8 @@ Work and personal Outlook are different hosts, so both can be pinned in the same
 | `zen-integrations.gmail.url` | `mail.google.com` | Gmail domain to detect. `live-gmail.url` is still read if the new pref is unset. |
 | `zen-integrations.debug` | `false` | Log to the Browser Console. `live-gmail.debug` is still read if the new pref is unset. |
 | `zen-integrations.outlook.clientId` | empty | Your Microsoft app id. Empty keeps the Outlook tab scrape. |
+| `live-calendar.google.clientId` | empty | Your Google Desktop client id for the day view. |
+| `live-calendar.google.clientSecret` | empty | The secret for that Desktop client. |
 
 ## Notes
 

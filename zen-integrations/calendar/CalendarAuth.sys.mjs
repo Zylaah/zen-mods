@@ -6,7 +6,7 @@ const {
   getTabUserContextId,
   localDay
 } = ChromeUtils.importESModule(
-  'chrome://sine/content/live-calendar/LiveCalendarUtil.sys.mjs' + new URL(import.meta.url).search
+  'chrome://sine/content/zen-integrations/calendar/LiveCalendarUtil.sys.mjs' + new URL(import.meta.url).search
 );
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
