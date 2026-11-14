@@ -136,7 +136,7 @@ button.zi-signin {
   content: '';
   position: absolute;
   inset: 4px;
-  border-radius: 8px;
+  border-radius: 6px;
   background-color: transparent;
   pointer-events: none;
   transition: background-color 0.15s ease;
