@@ -135,7 +135,7 @@ button.zi-signin {
 .zi-item::before {
   content: '';
   position: absolute;
-  inset: 2px 4px;
+  inset: 4px;
   border-radius: 8px;
   background-color: transparent;
   pointer-events: none;
