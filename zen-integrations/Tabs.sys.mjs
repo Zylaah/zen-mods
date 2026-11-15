@@ -3,8 +3,7 @@ const {
   debugLog,
   getContextContainerId,
   getGmailUrlPattern,
-  isEssentialOrPinnedTab,
-  XUL_NS
+  isEssentialOrPinnedTab
 } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
 );
@@ -27,6 +26,7 @@ const {
   'chrome://sine/content/zen-integrations/providers/Gmail.sys.mjs' + new URL(import.meta.url).search
 );
 
+const HTML_NS = 'http://www.w3.org/1999/xhtml';
 const FRAME_SCRIPT = 'chrome://sine/content/zen-integrations/GmailFrame.js';
 const CONNECT_SEEN_PREF = 'zen-integrations.callout.seen';
 
@@ -690,20 +690,15 @@ export class ZenTabs {
   calloutAnchorVisible(tab) {
     const win = tab?.ownerGlobal;
     if (!tab?.isConnected || !win || tab.hidden) return false;
-    // A hidden essentials strip stays in layout. The attribute is what keeps it out.
     const essentials = tab.closest('.zen-essentials-container');
-    if (essentials?.hidden) return false;
+    if (essentials?.hasAttribute('hidden')) return false;
     const space = tab.closest('zen-workspace');
     if (space) {
       const activeId = win.gZenWorkspaces?.activeWorkspace;
-      if (activeId ? space.id !== activeId : !space.hasAttribute('active')) return false;
+      if (activeId && space.id && space.id !== activeId) return false;
     }
-    let style;
-    try { style = win.getComputedStyle(tab); } catch (e) { return false; }
-    if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') {
-      return false;
-    }
-    const rect = tab.getBoundingClientRect();
+    const anchor = tab.querySelector('.tab-content, .tab-icon-stack') || tab;
+    const rect = anchor.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
   }
 
@@ -760,127 +755,151 @@ export class ZenTabs {
       this.openConnectCallout(item);
       return;
     }
-    if (this.connectLayoutRetry || (this.layoutRetries || 0) > 20) return;
+    if (this.connectLayoutRetry || (this.layoutRetries || 0) > 25) return;
     const seen = connectSeenSet();
     const waiting = this.calloutTabs().some((tab) => {
       const identity = this.connectIdentity(tab);
       if (!identity || seen.has(identity.key) || resolveAccountId(identity.key)) return false;
-      if (this.calloutAnchorVisible(tab)) return false;
-      const space = tab.closest('zen-workspace');
-      const activeId = this.window.gZenWorkspaces?.activeWorkspace;
-      if (space && (activeId ? space.id !== activeId : !space.hasAttribute('active'))) return false;
-      const essentials = tab.closest('.zen-essentials-container');
-      if (essentials?.hidden) return false;
-      return true;
+      return !this.calloutAnchorVisible(tab);
     });
     if (!waiting) return;
     this.layoutRetries = (this.layoutRetries || 0) + 1;
     this.connectLayoutRetry = this.window.setTimeout(() => {
       this.connectLayoutRetry = 0;
       this.maybeShowConnectCallout();
-    }, 150);
+    }, 200);
   }
 
-  ensureConnectPanel() {
-    const document = this.window.document;
-    let panel = document.getElementById('zi-connect');
-    if (panel) return panel;
-    panel = document.createElementNS(XUL_NS, 'panel');
-    panel.id = 'zi-connect';
-    panel.setAttribute('type', 'arrow');
-    panel.setAttribute('nonnativepopover', 'true');
-    panel.setAttribute('orient', 'vertical');
-    panel.setAttribute('noautohide', 'true');
-    panel.setAttribute('level', 'top');
-    const box = document.createElement('div');
-    box.className = 'zi-connect';
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.className = 'zi-connect-close';
-    close.setAttribute('aria-label', 'Close');
-    close.textContent = '\u00d7';
-    const title = document.createElement('div');
-    title.className = 'zi-connect-title';
-    title.textContent = 'Connect to preview on hover';
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'zi-connect-button';
-    button.textContent = 'Connect';
-    box.append(close, title, button);
-    panel.appendChild(box);
-    document.documentElement.appendChild(panel);
-    return panel;
+  hideConnectCallout() {
+    if (typeof this.connectCleanup === 'function') {
+      const cleanup = this.connectCleanup;
+      this.connectCleanup = null;
+      cleanup();
+    }
+  }
+
+  positionConnectCallout(card, tab) {
+    const win = this.window;
+    const anchor = tab.querySelector('.tab-content, .tab-icon-stack') || tab;
+    const rect = anchor.getBoundingClientRect();
+    if (!(rect.width > 0 && rect.height > 0)) return false;
+    const isRightSide =
+      win.document.documentElement.getAttribute('zen-right-side') === 'true' ||
+      !!win.gZenVerticalTabsManager?._prefsRightSide;
+    card.dataset.side = isRightSide ? 'right' : 'left';
+    const cardRect = card.getBoundingClientRect();
+    const width = cardRect.width || 244;
+    const height = cardRect.height || 86;
+    const gap = 10;
+    const rawLeft = isRightSide ? rect.left - width - gap : rect.right + gap;
+    const left = Math.max(8, Math.min(rawLeft, win.innerWidth - width - 8));
+    const rawTop = rect.top + rect.height / 2 - height / 2;
+    const top = Math.max(8, Math.min(rawTop, win.innerHeight - height - 8));
+    card.style.left = `${Math.round(left)}px`;
+    card.style.top = `${Math.round(top)}px`;
+    return true;
   }
 
   openConnectCallout(item) {
     const win = this.window;
+    const doc = win.document;
     const { tab, key, container, accountProvider } = item;
-    const panel = this.ensureConnectPanel();
-    const isRightSide = !!win.gZenVerticalTabsManager?._prefsRightSide;
-    panel.setAttribute('side', isRightSide ? 'right' : 'left');
-    const button = panel.querySelector('.zi-connect-button');
-    const close = panel.querySelector('.zi-connect-close');
-    let opened = false;
-    const hide = () => {
-      try { panel.hidePopup(); } catch (e) {}
+    this.hideConnectCallout();
+    doc.getElementById('zi-connect')?.remove();
+
+    const make = (tag, className, parent, text) => {
+      const node = doc.createElementNS(HTML_NS, tag);
+      if (className) node.className = className;
+      if (text != null) node.textContent = text;
+      parent?.append(node);
+      return node;
     };
-    button.onclick = () => {
-      rememberConnectSeen(key);
-      hide();
-      connectDiscoveredAccount(win, accountProvider, container).catch((error) => {
-        debugLog('Connect from popup failed', error);
-      });
+
+    const card = make('div', 'zi-connect');
+    card.id = 'zi-connect';
+    card.setAttribute('popover', 'manual');
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-label', 'Connect to preview on hover');
+    const arrow = make('div', 'zi-connect-arrow', card);
+    arrow.setAttribute('aria-hidden', 'true');
+    const close = make('button', 'zi-connect-close', card, '\u00d7');
+    close.type = 'button';
+    close.setAttribute('aria-label', 'Close');
+    make('div', 'zi-connect-title', card, 'Connect to preview on hover');
+    const button = make('button', 'zi-connect-button', card, 'Connect');
+    button.type = 'button';
+
+    doc.documentElement.appendChild(card);
+    this.app.panel.pinCompactChrome(tab);
+    try {
+      card.showPopover?.();
+    } catch (e) {}
+
+    if (!this.positionConnectCallout(card, tab)) {
+      card.remove();
+      this.app.panel.unpinCompactChrome();
+      this.connectCalloutPending = false;
+      return;
+    }
+
+    this.connectCallout = card;
+    this.connectCalloutPending = false;
+    this.connectTab = tab;
+    debugLog('Connect callout shown', key);
+
+    const reposition = () => {
+      if (!card.isConnected || !this.calloutAnchorVisible(tab)) {
+        this.hideConnectCallout();
+        return;
+      }
+      this.positionConnectCallout(card, tab);
     };
-    close.onclick = () => {
-      rememberConnectSeen(key);
-      hide();
-    };
+
     const onKey = (event) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopPropagation();
       rememberConnectSeen(key);
-      hide();
+      this.hideConnectCallout();
+      win.setTimeout(() => this.maybeShowConnectCallout(), 0);
     };
+
     win.addEventListener('keydown', onKey, true);
-    panel.addEventListener('popupshown', () => {
-      opened = true;
-      debugLog('Connect popup shown', key);
-    }, { once: true });
-    panel.addEventListener('popuphidden', () => {
+    win.addEventListener('resize', reposition);
+    const positionTimer = win.setInterval(reposition, 250);
+
+    this.connectCleanup = () => {
+      win.clearInterval(positionTimer);
       win.removeEventListener('keydown', onKey, true);
+      win.removeEventListener('resize', reposition);
+      try { card.hidePopover?.(); } catch (e) {}
+      card.remove();
       this.app.panel.unpinCompactChrome();
-      if (this.connectCallout === panel) this.connectCallout = null;
+      if (this.connectCallout === card) this.connectCallout = null;
       this.connectTab = null;
-      if (opened) win.setTimeout(() => this.maybeShowConnectCallout(), 0);
-    }, { once: true });
-    this.connectCallout = panel;
-    this.connectCalloutPending = false;
-    this.connectTab = tab;
-    const anchor = tab.querySelector('.tab-content, .tab-icon-stack') || tab;
-    this.app.panel.pinCompactChrome(tab);
-    try {
-      panel.openPopup(anchor, {
-        position: isRightSide ? 'topleft topright' : 'topright topleft',
-        x: isRightSide ? -8 : 8,
-        y: 0
-      });
-    } catch (e) {
-      console.warn('[Zen Integrations] Connect popup failed', e);
-      win.removeEventListener('keydown', onKey, true);
-      this.app.panel.unpinCompactChrome();
-      this.connectCallout = null;
-      this.connectTab = null;
-      return;
-    }
-    win.setTimeout(() => {
-      if (opened || panel.state === 'open' || panel.state === 'showing') return;
-      console.warn('[Zen Integrations] Connect popup did not open');
-      win.removeEventListener('keydown', onKey, true);
-      this.app.panel.unpinCompactChrome();
-      if (this.connectCallout === panel) this.connectCallout = null;
-      this.connectTab = null;
-    }, 300);
+    };
+
+    close.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      rememberConnectSeen(key);
+      this.hideConnectCallout();
+      win.setTimeout(() => this.maybeShowConnectCallout(), 0);
+    });
+
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      rememberConnectSeen(key);
+      this.hideConnectCallout();
+      connectDiscoveredAccount(win, accountProvider, container)
+        .catch((error) => {
+          debugLog('Connect from callout failed', error);
+        })
+        .finally(() => {
+          win.setTimeout(() => this.maybeShowConnectCallout(), 0);
+        });
+    });
   }
 
   setupHoverDelegation() {
@@ -909,7 +928,7 @@ export class ZenTabs {
     this.app.scanContextKey = null;
     this.app.loadScansInFlight.clear();
     if (this.connectCallout && this.connectTab && !this.calloutAnchorVisible(this.connectTab)) {
-      try { this.connectCallout.hidePopup(); } catch (e) {}
+      this.hideConnectCallout();
     }
     this.maybeShowConnectCallout();
   }

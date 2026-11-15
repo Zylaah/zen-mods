@@ -93,6 +93,7 @@ export class ZenIntegrations {
 
   destroy() {
     try { this.calendar.destroy(); } catch (e) {}
+    try { this.tabs.hideConnectCallout(); } catch (e) {}
     this.tabs.stopInboxWatch();
     this.scan.stopPoll();
     this.panel.hide();
