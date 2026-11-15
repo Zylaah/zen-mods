@@ -694,7 +694,10 @@ export class ZenTabs {
     const essentials = tab.closest('.zen-essentials-container');
     if (essentials?.hidden) return false;
     const space = tab.closest('zen-workspace');
-    if (space && !space.hasAttribute('active')) return false;
+    if (space) {
+      const activeId = win.gZenWorkspaces?.activeWorkspace;
+      if (activeId ? space.id !== activeId : !space.hasAttribute('active')) return false;
+    }
     let style;
     try { style = win.getComputedStyle(tab); } catch (e) { return false; }
     if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') {
@@ -757,24 +760,25 @@ export class ZenTabs {
       this.openConnectCallout(item);
       return;
     }
-    if (this.connectLayoutRetry || (this.layoutRetries || 0) > 8) return;
+    if (this.connectLayoutRetry || (this.layoutRetries || 0) > 20) return;
     const seen = connectSeenSet();
     const waiting = this.calloutTabs().some((tab) => {
       const identity = this.connectIdentity(tab);
       if (!identity || seen.has(identity.key) || resolveAccountId(identity.key)) return false;
       if (this.calloutAnchorVisible(tab)) return false;
       const space = tab.closest('zen-workspace');
-      if (space && !space.hasAttribute('active')) return false;
+      const activeId = this.window.gZenWorkspaces?.activeWorkspace;
+      if (space && (activeId ? space.id !== activeId : !space.hasAttribute('active'))) return false;
       const essentials = tab.closest('.zen-essentials-container');
       if (essentials?.hidden) return false;
       return true;
     });
     if (!waiting) return;
     this.layoutRetries = (this.layoutRetries || 0) + 1;
-    this.connectLayoutRetry = this.window.requestAnimationFrame(() => {
+    this.connectLayoutRetry = this.window.setTimeout(() => {
       this.connectLayoutRetry = 0;
       this.maybeShowConnectCallout();
-    });
+    }, 150);
   }
 
   ensureConnectPanel() {
@@ -821,25 +825,31 @@ export class ZenTabs {
       try { panel.hidePopup(); } catch (e) {}
     };
     button.onclick = () => {
+      rememberConnectSeen(key);
       hide();
       connectDiscoveredAccount(win, accountProvider, container).catch((error) => {
         debugLog('Connect from popup failed', error);
       });
     };
-    close.onclick = hide;
+    close.onclick = () => {
+      rememberConnectSeen(key);
+      hide();
+    };
     const onKey = (event) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopPropagation();
+      rememberConnectSeen(key);
       hide();
     };
     win.addEventListener('keydown', onKey, true);
     panel.addEventListener('popupshown', () => {
       opened = true;
-      rememberConnectSeen(key);
+      debugLog('Connect popup shown', key);
     }, { once: true });
     panel.addEventListener('popuphidden', () => {
       win.removeEventListener('keydown', onKey, true);
+      this.app.panel.unpinCompactChrome();
       if (this.connectCallout === panel) this.connectCallout = null;
       this.connectTab = null;
       if (opened) win.setTimeout(() => this.maybeShowConnectCallout(), 0);
@@ -848,6 +858,7 @@ export class ZenTabs {
     this.connectCalloutPending = false;
     this.connectTab = tab;
     const anchor = tab.querySelector('.tab-content, .tab-icon-stack') || tab;
+    this.app.panel.pinCompactChrome(tab);
     try {
       panel.openPopup(anchor, {
         position: isRightSide ? 'topleft topright' : 'topright topleft',
@@ -857,6 +868,7 @@ export class ZenTabs {
     } catch (e) {
       console.warn('[Zen Integrations] Connect popup failed', e);
       win.removeEventListener('keydown', onKey, true);
+      this.app.panel.unpinCompactChrome();
       this.connectCallout = null;
       this.connectTab = null;
       return;
@@ -865,6 +877,7 @@ export class ZenTabs {
       if (opened || panel.state === 'open' || panel.state === 'showing') return;
       console.warn('[Zen Integrations] Connect popup did not open');
       win.removeEventListener('keydown', onKey, true);
+      this.app.panel.unpinCompactChrome();
       if (this.connectCallout === panel) this.connectCallout = null;
       this.connectTab = null;
     }, 300);
@@ -903,6 +916,7 @@ export class ZenTabs {
 
   setupWorkspaceMonitoring() {
     this.window.addEventListener('ZenWorkspacesUIUpdate', () => this.onWorkspaceOrContainerChanged());
+    this.window.addEventListener('AfterWorkspacesSessionRestore', () => this.refreshAnchors());
     try {
       Services.prefs.addObserver('zen.workspaces.separate-essentials', () => this.onWorkspaceOrContainerChanged(), false);
     } catch (e) {}
