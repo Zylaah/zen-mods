@@ -30,11 +30,21 @@ const FRAME_SCRIPT = 'chrome://sine/content/zen-integrations/GmailFrame.js';
 const CONNECT_SEEN_PREF = 'zen-integrations.callout.seen';
 
 let FeatureCallout = null;
-try {
-  ({ FeatureCallout } = ChromeUtils.importESModule(
-    'resource:///modules/asrouter/FeatureCallout.sys.mjs'
-  ));
-} catch (e) {}
+let featureCalloutError = '';
+
+function ensureFeatureCallout() {
+  if (FeatureCallout) return true;
+  if (featureCalloutError) return false;
+  try {
+    ({ FeatureCallout } = ChromeUtils.importESModule(
+      'resource:///modules/asrouter/FeatureCallout.sys.mjs'
+    ));
+  } catch (e) {
+    featureCalloutError = e?.message || String(e);
+    console.warn('[Zen Integrations] Connect callout unavailable', featureCalloutError);
+  }
+  return !!FeatureCallout;
+}
 
 let connectSeen = null;
 
@@ -669,6 +679,7 @@ export class ZenTabs {
     )) {
       if (tab.hasAttribute('data-zi-mail')) this.attachHoverListener(tab);
     }
+    this.layoutRetries = 0;
     this.maybeShowConnectCallout();
   }
 
@@ -694,37 +705,67 @@ export class ZenTabs {
 
   calloutAnchorVisible(tab) {
     const win = tab?.ownerGlobal;
-    if (!tab?.isConnected || !win) return false;
-    for (let node = tab; node && node !== win.document; node = node.parentElement) {
-      if (node.hidden) return false;
-      try {
-        const style = win.getComputedStyle(node);
-        if (style.display === 'none' || style.visibility === 'hidden') return false;
-      } catch (e) {
-        return false;
-      }
+    if (!tab?.isConnected || !win || tab.hidden) return false;
+    // A hidden essentials strip stays in layout. The attribute is what keeps it out.
+    const essentials = tab.closest('.zen-essentials-container');
+    if (essentials?.hidden) return false;
+    const space = tab.closest('zen-workspace');
+    if (space && !space.hasAttribute('active')) return false;
+    let style;
+    try { style = win.getComputedStyle(tab); } catch (e) { return false; }
+    if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') {
+      return false;
     }
     const rect = tab.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
   }
 
-  connectCandidate(tab, seen) {
+  connectIdentity(tab) {
     if (!isEssentialOrPinnedTab(tab)) return null;
     const provider = this.providerFor(tab);
-    if (!provider) return null;
-    const key = provider.contextKey(tab, this.getUrlHints(tab));
-    if (!key || seen.has(key) || resolveAccountId(key)) return null;
+    let key = '';
+    let accountProvider = '';
+    if (provider) {
+      key = provider.contextKey(tab, this.getUrlHints(tab));
+      accountProvider = provider.id === 'gmail' ? 'google' : provider.id;
+    } else if (this.app.calendar?.tabs.isCalendarAnchor(tab)) {
+      key = this.app.calendar.tabs.accountKey(tab);
+      accountProvider = 'google';
+    }
+    if (!key) return null;
     const container = getContextContainerId(key);
     // An essential with no container id stays on the default jar. Skip it.
     if (tab.hasAttribute('zen-essential') && !(container > 0)) return null;
-    if (!this.calloutAnchorVisible(tab)) return null;
     return {
       tab,
       key,
       container,
-      accountProvider: provider.id === 'gmail' ? 'google' : provider.id,
+      accountProvider,
       essential: tab.hasAttribute('zen-essential')
     };
+  }
+
+  connectCandidate(tab, seen) {
+    const item = this.connectIdentity(tab);
+    if (!item || seen.has(item.key) || resolveAccountId(item.key)) return null;
+    if (!this.calloutAnchorVisible(tab)) return null;
+    return item;
+  }
+
+  anchorSelector(tab) {
+    const mark = '[data-zi-callout-anchor="true"]';
+    if (tab.ownerDocument.querySelector(mark) === tab) return mark;
+    const parts = [];
+    let node = tab;
+    while (node) {
+      const root = node.getRootNode();
+      if (!(root instanceof ShadowRoot)) break;
+      const host = root.host;
+      if (!host) break;
+      parts.unshift(host.id ? `#${CSS.escape(host.id)}` : host.localName);
+      node = host;
+    }
+    return parts.length ? `${parts.join('::%shadow%')}::%shadow%${mark}` : mark;
   }
 
   nextConnectCandidate() {
@@ -740,12 +781,33 @@ export class ZenTabs {
   }
 
   maybeShowConnectCallout() {
-    if (!FeatureCallout || this.connectCallout || this.connectCalloutPending) return;
+    if (!ensureFeatureCallout() || this.connectCallout || this.connectCalloutPending) return;
     if (this.window.document.getElementById('feature-callout')) return;
     const item = this.nextConnectCandidate();
-    if (!item) return;
-    this.connectCalloutPending = true;
-    this.openConnectCallout(item);
+    if (item) {
+      this.layoutRetries = 0;
+      this.connectCalloutPending = true;
+      this.openConnectCallout(item);
+      return;
+    }
+    if (this.connectLayoutRetry || (this.layoutRetries || 0) > 8) return;
+    const seen = connectSeenSet();
+    const waiting = this.calloutTabs().some((tab) => {
+      const identity = this.connectIdentity(tab);
+      if (!identity || seen.has(identity.key) || resolveAccountId(identity.key)) return false;
+      if (this.calloutAnchorVisible(tab)) return false;
+      const space = tab.closest('zen-workspace');
+      if (space && !space.hasAttribute('active')) return false;
+      const essentials = tab.closest('.zen-essentials-container');
+      if (essentials?.hidden) return false;
+      return true;
+    });
+    if (!waiting) return;
+    this.layoutRetries = (this.layoutRetries || 0) + 1;
+    this.connectLayoutRetry = this.window.requestAnimationFrame(() => {
+      this.connectLayoutRetry = 0;
+      this.maybeShowConnectCallout();
+    });
   }
 
   bindConnectButton(win, accountProvider, container) {
@@ -781,6 +843,7 @@ export class ZenTabs {
       node.removeAttribute('data-zi-callout-anchor');
     }
     tab.setAttribute('data-zi-callout-anchor', 'true');
+    const selector = this.anchorSelector(tab);
     const isRightSide = !!win.gZenVerticalTabsManager?._prefsRightSide;
     let callout;
     try {
@@ -814,7 +877,7 @@ export class ZenTabs {
             id: 'ZEN_INTEGRATIONS_CONNECT_CALLOUT',
             anchors: [
               {
-                selector: '[data-zi-callout-anchor="true"]',
+                selector,
                 panel_position: {
                   anchor_attachment: isRightSide ? 'leftcenter' : 'rightcenter',
                   callout_attachment: isRightSide ? 'topright' : 'topleft'
@@ -846,6 +909,7 @@ export class ZenTabs {
     };
     callout.showFeatureCallout(message).then((shown) => {
       if (!shown) {
+        console.warn('[Zen Integrations] Connect callout did not open', key);
         finish(false);
         try { callout.endTour(); } catch (e) {}
         return;
@@ -877,8 +941,8 @@ export class ZenTabs {
         try { callout.endTour(); } catch (e) {}
       }, 10000);
     }).catch((error) => {
-      finish(false);
-      debugLog('Connect callout failed', error);
+      console.warn('[Zen Integrations] Connect callout failed', error);
+      if (!win.document.getElementById('feature-callout')) finish(false);
     });
   }
 
