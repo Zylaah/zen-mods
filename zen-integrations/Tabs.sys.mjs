@@ -7,7 +7,7 @@ const {
 } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
 );
-const { isEnabled, resolveAccountId } = ChromeUtils.importESModule(
+const { isEnabled, providerOf, resolveAccountId } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Accounts.sys.mjs' + new URL(import.meta.url).search
 );
 const {
@@ -40,13 +40,31 @@ function connectSeenSet() {
   return connectSeen;
 }
 
+function persistConnectSeen() {
+  try {
+    Services.prefs.setStringPref(CONNECT_SEEN_PREF, [...connectSeenSet()].join(','));
+  } catch (e) {}
+}
+
 function rememberConnectSeen(key) {
   const seen = connectSeenSet();
   if (seen.has(key)) return;
   seen.add(key);
-  try {
-    Services.prefs.setStringPref(CONNECT_SEEN_PREF, [...seen].join(','));
-  } catch (e) {}
+  persistConnectSeen();
+}
+
+function forgetConnectSeen(accountId) {
+  const seen = connectSeenSet();
+  const provider = providerOf(accountId);
+  const container = getContextContainerId(accountId);
+  if (!provider) return;
+  let changed = false;
+  for (const key of [...seen]) {
+    if (providerOf(key) !== provider || getContextContainerId(key) !== container) continue;
+    seen.delete(key);
+    changed = true;
+  }
+  if (changed) persistConnectSeen();
 }
 
 export class ZenTabs {
@@ -769,6 +787,10 @@ export class ZenTabs {
     if (rows.length) {
       console.log('[Zen Integrations] Connect callout skipped', JSON.stringify(rows));
     }
+  }
+
+  forgetConnectSeen(accountId) {
+    forgetConnectSeen(accountId);
   }
 
   hideConnectCallout() {

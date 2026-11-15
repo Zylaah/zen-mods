@@ -348,6 +348,9 @@ async function disconnect(win, accountId) {
 async function forgetAccount(win, accountId) {
   await disconnect(win, accountId);
   await removeAccount(accountId);
+  for (const { app } of allApps()) {
+    try { app.tabs.forgetConnectSeen(accountId); } catch (e) {}
+  }
   refreshBrowsers(win);
 }
 
