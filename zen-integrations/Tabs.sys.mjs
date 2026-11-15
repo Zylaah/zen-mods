@@ -3,7 +3,8 @@ const {
   debugLog,
   getContextContainerId,
   getGmailUrlPattern,
-  isEssentialOrPinnedTab
+  isEssentialOrPinnedTab,
+  XUL_NS
 } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
 );
@@ -28,23 +29,6 @@ const {
 
 const FRAME_SCRIPT = 'chrome://sine/content/zen-integrations/GmailFrame.js';
 const CONNECT_SEEN_PREF = 'zen-integrations.callout.seen';
-
-let FeatureCallout = null;
-let featureCalloutError = '';
-
-function ensureFeatureCallout() {
-  if (FeatureCallout) return true;
-  if (featureCalloutError) return false;
-  try {
-    ({ FeatureCallout } = ChromeUtils.importESModule(
-      'resource:///modules/asrouter/FeatureCallout.sys.mjs'
-    ));
-  } catch (e) {
-    featureCalloutError = e?.message || String(e);
-    console.warn('[Zen Integrations] Connect callout unavailable', featureCalloutError);
-  }
-  return !!FeatureCallout;
-}
 
 let connectSeen = null;
 
@@ -752,22 +736,6 @@ export class ZenTabs {
     return item;
   }
 
-  anchorSelector(tab) {
-    const mark = '[data-zi-callout-anchor="true"]';
-    if (tab.ownerDocument.querySelector(mark) === tab) return mark;
-    const parts = [];
-    let node = tab;
-    while (node) {
-      const root = node.getRootNode();
-      if (!(root instanceof ShadowRoot)) break;
-      const host = root.host;
-      if (!host) break;
-      parts.unshift(host.id ? `#${CSS.escape(host.id)}` : host.localName);
-      node = host;
-    }
-    return parts.length ? `${parts.join('::%shadow%')}::%shadow%${mark}` : mark;
-  }
-
   nextConnectCandidate() {
     const seen = connectSeenSet();
     const byKey = new Map();
@@ -781,8 +749,7 @@ export class ZenTabs {
   }
 
   maybeShowConnectCallout() {
-    if (!ensureFeatureCallout() || this.connectCallout || this.connectCalloutPending) return;
-    if (this.window.document.getElementById('feature-callout')) return;
+    if (this.connectCallout || this.connectCalloutPending) return;
     const item = this.nextConnectCandidate();
     if (item) {
       this.layoutRetries = 0;
@@ -810,140 +777,97 @@ export class ZenTabs {
     });
   }
 
-  bindConnectButton(win, accountProvider, container) {
-    const root = win.document.getElementById('feature-callout');
-    if (!root) return;
-    const bind = () => {
-      const button = [...root.querySelectorAll('button')].find((node) => node.textContent.trim() === 'Connect');
-      if (!button || button.dataset.ziConnect) return !!button;
-      button.dataset.ziConnect = 'true';
-      button.addEventListener('click', () => {
-        connectDiscoveredAccount(win, accountProvider, container).catch((error) => {
-          debugLog('Connect from callout failed', error);
-        });
-      });
-      return true;
-    };
-    if (bind()) return;
-    const observer = new win.MutationObserver(() => {
-      if (bind()) observer.disconnect();
-    });
-    observer.observe(root, { childList: true, subtree: true });
-    root.addEventListener('popuphidden', () => observer.disconnect(), { once: true });
+  ensureConnectPanel() {
+    const document = this.window.document;
+    let panel = document.getElementById('zi-connect');
+    if (panel) return panel;
+    panel = document.createElementNS(XUL_NS, 'panel');
+    panel.id = 'zi-connect';
+    panel.setAttribute('type', 'arrow');
+    panel.setAttribute('nonnativepopover', 'true');
+    panel.setAttribute('orient', 'vertical');
+    panel.setAttribute('noautohide', 'true');
+    panel.setAttribute('level', 'top');
+    const box = document.createElement('div');
+    box.className = 'zi-connect';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'zi-connect-close';
+    close.setAttribute('aria-label', 'Close');
+    close.textContent = '\u00d7';
+    const title = document.createElement('div');
+    title.className = 'zi-connect-title';
+    title.textContent = 'Connect to preview on hover';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'zi-connect-button';
+    button.textContent = 'Connect';
+    box.append(close, title, button);
+    panel.appendChild(box);
+    document.documentElement.appendChild(panel);
+    return panel;
   }
 
   openConnectCallout(item) {
     const win = this.window;
     const { tab, key, container, accountProvider } = item;
-    if (!win.gBrowser?.selectedBrowser) {
-      this.connectCalloutPending = false;
-      return;
-    }
-    for (const node of win.document.querySelectorAll('[data-zi-callout-anchor]')) {
-      node.removeAttribute('data-zi-callout-anchor');
-    }
-    tab.setAttribute('data-zi-callout-anchor', 'true');
-    const selector = this.anchorSelector(tab);
+    const panel = this.ensureConnectPanel();
     const isRightSide = !!win.gZenVerticalTabsManager?._prefsRightSide;
-    let callout;
+    panel.setAttribute('side', isRightSide ? 'right' : 'left');
+    const button = panel.querySelector('.zi-connect-button');
+    const close = panel.querySelector('.zi-connect-close');
+    let opened = false;
+    const hide = () => {
+      try { panel.hidePopup(); } catch (e) {}
+    };
+    button.onclick = () => {
+      hide();
+      connectDiscoveredAccount(win, accountProvider, container).catch((error) => {
+        debugLog('Connect from popup failed', error);
+      });
+    };
+    close.onclick = hide;
+    const onKey = (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      hide();
+    };
+    win.addEventListener('keydown', onKey, true);
+    panel.addEventListener('popupshown', () => {
+      opened = true;
+      rememberConnectSeen(key);
+    }, { once: true });
+    panel.addEventListener('popuphidden', () => {
+      win.removeEventListener('keydown', onKey, true);
+      if (this.connectCallout === panel) this.connectCallout = null;
+      this.connectTab = null;
+      if (opened) win.setTimeout(() => this.maybeShowConnectCallout(), 0);
+    }, { once: true });
+    this.connectCallout = panel;
+    this.connectCalloutPending = false;
+    this.connectTab = tab;
+    const anchor = tab.querySelector('.tab-content, .tab-icon-stack') || tab;
     try {
-      callout = new FeatureCallout({
-        win,
-        location: 'chrome',
-        context: 'chrome',
-        browser: win.gBrowser.selectedBrowser,
-        theme: { preset: 'chrome' }
+      panel.openPopup(anchor, {
+        position: isRightSide ? 'topleft topright' : 'topright topleft',
+        x: isRightSide ? -8 : 8,
+        y: 0
       });
     } catch (e) {
-      tab.removeAttribute('data-zi-callout-anchor');
-      this.connectCalloutPending = false;
-      debugLog('Connect callout unavailable', e);
+      console.warn('[Zen Integrations] Connect popup failed', e);
+      win.removeEventListener('keydown', onKey, true);
+      this.connectCallout = null;
+      this.connectTab = null;
       return;
     }
-    this.connectCallout = callout;
-    this.connectCalloutPending = false;
-    const message = {
-      id: 'ZEN_INTEGRATIONS_CONNECT_CALLOUT',
-      template: 'feature_callout',
-      groups: ['cfr'],
-      content: {
-        id: 'ZEN_INTEGRATIONS_CONNECT_CALLOUT',
-        template: 'spotlight',
-        backdrop: 'transparent',
-        transitions: true,
-        autohide: false,
-        screens: [
-          {
-            id: 'ZEN_INTEGRATIONS_CONNECT_CALLOUT',
-            anchors: [
-              {
-                selector,
-                panel_position: {
-                  anchor_attachment: isRightSide ? 'leftcenter' : 'rightcenter',
-                  callout_attachment: isRightSide ? 'topright' : 'topleft'
-                }
-              }
-            ],
-            content: {
-              width: '312px',
-              position: 'callout',
-              title: { raw: 'Connect to preview on hover' },
-              primary_button: {
-                label: { raw: 'Connect' },
-                action: { dismiss: true }
-              },
-              dismiss_button: {
-                action: { dismiss: true },
-                size: 'small'
-              }
-            }
-          }
-        ]
-      }
-    };
-    let opened = false;
-    const clearAnchor = () => tab.removeAttribute('data-zi-callout-anchor');
-    const finish = (shown) => {
-      if (this.connectCallout === callout && !shown) this.connectCallout = null;
-      if (!shown) clearAnchor();
-    };
-    callout.showFeatureCallout(message).then((shown) => {
-      if (!shown) {
-        console.warn('[Zen Integrations] Connect callout did not open', key);
-        finish(false);
-        try { callout.endTour(); } catch (e) {}
-        return;
-      }
-      const panel = win.document.getElementById('feature-callout');
-      if (!panel) {
-        finish(false);
-        return;
-      }
-      const arm = () => {
-        if (opened) return;
-        opened = true;
-        rememberConnectSeen(key);
-        this.bindConnectButton(win, accountProvider, container);
-      };
-      panel.addEventListener('popupshown', arm, { once: true });
-      panel.addEventListener('popuphidden', () => {
-        clearAnchor();
-        if (this.connectCallout === callout) this.connectCallout = null;
-        if (opened) win.setTimeout(() => this.maybeShowConnectCallout(), 0);
-      }, { once: true });
-      win.setTimeout(() => {
-        if (callout.ready) arm();
-      }, 0);
-      win.setTimeout(() => {
-        if (opened || this.connectCallout !== callout) return;
-        this.connectCallout = null;
-        clearAnchor();
-        try { callout.endTour(); } catch (e) {}
-      }, 10000);
-    }).catch((error) => {
-      console.warn('[Zen Integrations] Connect callout failed', error);
-      if (!win.document.getElementById('feature-callout')) finish(false);
-    });
+    win.setTimeout(() => {
+      if (opened || panel.state === 'open' || panel.state === 'showing') return;
+      console.warn('[Zen Integrations] Connect popup did not open');
+      win.removeEventListener('keydown', onKey, true);
+      if (this.connectCallout === panel) this.connectCallout = null;
+      this.connectTab = null;
+    }, 300);
   }
 
   setupHoverDelegation() {
@@ -971,9 +895,8 @@ export class ZenTabs {
     this.app.scanInProgress = false;
     this.app.scanContextKey = null;
     this.app.loadScansInFlight.clear();
-    const anchor = this.window.document.querySelector('[data-zi-callout-anchor="true"]');
-    if (this.connectCallout && (!anchor || !this.calloutAnchorVisible(anchor))) {
-      try { this.connectCallout.endTour(); } catch (e) {}
+    if (this.connectCallout && this.connectTab && !this.calloutAnchorVisible(this.connectTab)) {
+      try { this.connectCallout.hidePopup(); } catch (e) {}
     }
     this.maybeShowConnectCallout();
   }

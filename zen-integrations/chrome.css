@@ -6,6 +6,55 @@
   width: 250px;
 }
 
+#zi-connect {
+  --panel-padding: 0;
+}
+
+.zi-connect {
+  position: relative;
+  width: 240px;
+  padding: 14px 16px 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: light-dark(#0c0c0d, #f9f9fa);
+}
+
+.zi-connect-title {
+  margin: 0 18px 12px 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.zi-connect-button {
+  appearance: none;
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: light-dark(#0c0c0d, #f9f9fa);
+  color: light-dark(#f9f9fa, #0c0c0d);
+}
+
+.zi-connect-close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 16px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
 .zi-wrapper {
   position: relative;
   display: flex;
