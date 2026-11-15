@@ -351,7 +351,16 @@ async function forgetAccount(win, accountId) {
   refreshBrowsers(win);
 }
 
-export async function showAccountSettings(win) {
+export async function connectDiscoveredAccount(win, providerId, container) {
+  const blocked = providerId === 'google' ? googleReady() : outlookReady();
+  if (blocked) {
+    await showAccountSettings(win, blocked);
+    return;
+  }
+  await addAccount(win, providerId, container);
+}
+
+export async function showAccountSettings(win, notice = '') {
   if (activeSettingsCleanup) {
     try { activeSettingsCleanup(); } catch (e) {}
     activeSettingsCleanup = null;
@@ -678,7 +687,7 @@ export async function showAccountSettings(win) {
   });
   win.addEventListener('keydown', onKey, true);
   activeSettingsCleanup = cleanup;
-  paint();
+  paint(notice);
   win.document.documentElement.appendChild(overlay);
   overlay.showPopover();
 }
