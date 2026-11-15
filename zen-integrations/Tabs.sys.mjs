@@ -10,9 +10,6 @@ const {
 const { isEnabled, resolveAccountId } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Accounts.sys.mjs' + new URL(import.meta.url).search
 );
-const { connectDiscoveredAccount } = ChromeUtils.importESModule(
-  'chrome://sine/content/zen-integrations/Settings.sys.mjs' + new URL(import.meta.url).search
-);
 const {
   emailMatchesThread,
   gmailAccountSlotFromHints,
@@ -28,7 +25,7 @@ const {
 
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
 const FRAME_SCRIPT = 'chrome://sine/content/zen-integrations/GmailFrame.js';
-const CONNECT_SEEN_PREF = 'zen-integrations.callout.seen';
+const CONNECT_SEEN_PREF = 'zen-integrations.connect-callout.dismissed';
 
 let connectSeen = null;
 
@@ -689,7 +686,7 @@ export class ZenTabs {
 
   calloutAnchorVisible(tab) {
     const win = tab?.ownerGlobal;
-    if (!tab?.isConnected || !win || tab.hidden) return false;
+    if (!tab?.isConnected || !win) return false;
     const essentials = tab.closest('.zen-essentials-container');
     if (essentials?.hasAttribute('hidden')) return false;
     const space = tab.closest('zen-workspace');
@@ -697,9 +694,7 @@ export class ZenTabs {
       const activeId = win.gZenWorkspaces?.activeWorkspace;
       if (activeId && space.id && space.id !== activeId) return false;
     }
-    const anchor = tab.querySelector('.tab-content, .tab-icon-stack') || tab;
-    const rect = anchor.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
+    return true;
   }
 
   connectIdentity(tab) {
@@ -730,7 +725,6 @@ export class ZenTabs {
   connectCandidate(tab, seen) {
     const item = this.connectIdentity(tab);
     if (!item || seen.has(item.key) || resolveAccountId(item.key)) return null;
-    if (!this.calloutAnchorVisible(tab)) return null;
     return item;
   }
 
@@ -746,6 +740,22 @@ export class ZenTabs {
     return byKey.values().next().value || null;
   }
 
+  connectSnapshot() {
+    const seen = connectSeenSet();
+    return this.calloutTabs().map((tab) => {
+      const identity = this.connectIdentity(tab);
+      return {
+        label: tab.getAttribute('label') || tab.label || '',
+        pinned: !!tab.pinned,
+        essential: tab.hasAttribute('zen-essential'),
+        key: identity?.key || '',
+        seen: identity ? seen.has(identity.key) : false,
+        account: identity ? resolveAccountId(identity.key) : '',
+        visible: this.calloutAnchorVisible(tab)
+      };
+    });
+  }
+
   maybeShowConnectCallout() {
     if (this.connectCallout || this.connectCalloutPending) return;
     const item = this.nextConnectCandidate();
@@ -755,19 +765,10 @@ export class ZenTabs {
       this.openConnectCallout(item);
       return;
     }
-    if (this.connectLayoutRetry || (this.layoutRetries || 0) > 25) return;
-    const seen = connectSeenSet();
-    const waiting = this.calloutTabs().some((tab) => {
-      const identity = this.connectIdentity(tab);
-      if (!identity || seen.has(identity.key) || resolveAccountId(identity.key)) return false;
-      return !this.calloutAnchorVisible(tab);
-    });
-    if (!waiting) return;
-    this.layoutRetries = (this.layoutRetries || 0) + 1;
-    this.connectLayoutRetry = this.window.setTimeout(() => {
-      this.connectLayoutRetry = 0;
-      this.maybeShowConnectCallout();
-    }, 200);
+    const rows = this.connectSnapshot().filter((row) => row.key && !row.account);
+    if (rows.length) {
+      console.log('[Zen Integrations] Connect callout skipped', JSON.stringify(rows));
+    }
   }
 
   hideConnectCallout() {
@@ -778,25 +779,42 @@ export class ZenTabs {
     }
   }
 
+  pinConnectSidebar() {
+    const box = this.window.document.getElementById('navigator-toolbox');
+    if (!box) return;
+    box.setAttribute('zen-user-show', 'true');
+    this.connectToolbox = box;
+    this.app.panel.pinCompactChrome(this.connectTab);
+  }
+
+  unpinConnectSidebar() {
+    if (this.connectToolbox?.getAttribute('zen-user-show') === 'true') {
+      this.connectToolbox.removeAttribute('zen-user-show');
+    }
+    this.connectToolbox = null;
+    this.app.panel.unpinCompactChrome();
+  }
+
   positionConnectCallout(card, tab) {
     const win = this.window;
-    const anchor = tab.querySelector('.tab-content, .tab-icon-stack') || tab;
-    const rect = anchor.getBoundingClientRect();
-    if (!(rect.width > 0 && rect.height > 0)) return false;
+    const width = 244;
+    const height = card.getBoundingClientRect().height || 90;
+    const gap = 12;
     const isRightSide =
       win.document.documentElement.getAttribute('zen-right-side') === 'true' ||
       !!win.gZenVerticalTabsManager?._prefsRightSide;
     card.dataset.side = isRightSide ? 'right' : 'left';
-    const cardRect = card.getBoundingClientRect();
-    const width = cardRect.width || 244;
-    const height = cardRect.height || 86;
-    const gap = 10;
-    const rawLeft = isRightSide ? rect.left - width - gap : rect.right + gap;
-    const left = Math.max(8, Math.min(rawLeft, win.innerWidth - width - 8));
-    const rawTop = rect.top + rect.height / 2 - height / 2;
-    const top = Math.max(8, Math.min(rawTop, win.innerHeight - height - 8));
+    const anchor = tab?.querySelector?.('.tab-content, .tab-icon-stack') || tab;
+    const rect = anchor?.getBoundingClientRect?.() || { left: 24, right: 24, top: 80, width: 0, height: 0 };
+    const rawLeft = isRightSide ? rect.left - width - gap : (rect.right || 0) + gap;
+    const left = Math.max(12, Math.min(rawLeft || 12, win.innerWidth - width - 12));
+    const rawTop = (rect.top || 80) + (rect.height || 0) / 2 - height / 2;
+    const top = Math.max(12, Math.min(rawTop || 80, win.innerHeight - height - 12));
+    const tailY = Math.max(18, Math.min((rect.top || 80) + (rect.height || 0) / 2 - top, height - 18));
     card.style.left = `${Math.round(left)}px`;
     card.style.top = `${Math.round(top)}px`;
+    card.style.setProperty('--zi-tail-y', `${Math.round(tailY)}px`);
+    card.style.transformOrigin = `${isRightSide ? '100%' : '0%'} ${Math.round(tailY)}px`;
     return true;
   }
 
@@ -806,6 +824,8 @@ export class ZenTabs {
     const { tab, key, container, accountProvider } = item;
     this.hideConnectCallout();
     doc.getElementById('zi-connect')?.remove();
+    this.connectTab = tab;
+    this.pinConnectSidebar();
 
     const make = (tag, className, parent, text) => {
       const node = doc.createElementNS(HTML_NS, tag);
@@ -817,9 +837,10 @@ export class ZenTabs {
 
     const card = make('div', 'zi-connect');
     card.id = 'zi-connect';
-    card.setAttribute('popover', 'manual');
     card.setAttribute('role', 'dialog');
     card.setAttribute('aria-label', 'Connect to preview on hover');
+    const scheme = win.getComputedStyle?.(doc.documentElement)?.colorScheme;
+    if (scheme) card.style.colorScheme = scheme;
     const arrow = make('div', 'zi-connect-arrow', card);
     arrow.setAttribute('aria-hidden', 'true');
     const close = make('button', 'zi-connect-close', card, '\u00d7');
@@ -829,32 +850,15 @@ export class ZenTabs {
     const button = make('button', 'zi-connect-button', card, 'Connect');
     button.type = 'button';
 
-    doc.documentElement.appendChild(card);
-    this.app.panel.pinCompactChrome(tab);
-    try {
-      card.showPopover?.();
-    } catch (e) {}
-
-    if (!this.positionConnectCallout(card, tab)) {
-      card.remove();
-      this.app.panel.unpinCompactChrome();
-      this.connectCalloutPending = false;
-      return;
-    }
-
+    (doc.getElementById('browser') || doc.documentElement).appendChild(card);
+    this.positionConnectCallout(card, tab);
+    card.offsetWidth;
+    card.setAttribute('data-open', '');
     this.connectCallout = card;
     this.connectCalloutPending = false;
-    this.connectTab = tab;
-    debugLog('Connect callout shown', key);
+    console.log('[Zen Integrations] Connect callout shown', key, tab.label);
 
-    const reposition = () => {
-      if (!card.isConnected || !this.calloutAnchorVisible(tab)) {
-        this.hideConnectCallout();
-        return;
-      }
-      this.positionConnectCallout(card, tab);
-    };
-
+    const reposition = () => this.positionConnectCallout(card, tab);
     const onKey = (event) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
@@ -863,18 +867,16 @@ export class ZenTabs {
       this.hideConnectCallout();
       win.setTimeout(() => this.maybeShowConnectCallout(), 0);
     };
-
     win.addEventListener('keydown', onKey, true);
     win.addEventListener('resize', reposition);
-    const positionTimer = win.setInterval(reposition, 250);
+    const positionTimer = win.setInterval(reposition, 400);
 
     this.connectCleanup = () => {
       win.clearInterval(positionTimer);
       win.removeEventListener('keydown', onKey, true);
       win.removeEventListener('resize', reposition);
-      try { card.hidePopover?.(); } catch (e) {}
       card.remove();
-      this.app.panel.unpinCompactChrome();
+      this.unpinConnectSidebar();
       if (this.connectCallout === card) this.connectCallout = null;
       this.connectTab = null;
     };
@@ -892,13 +894,17 @@ export class ZenTabs {
       event.stopPropagation();
       rememberConnectSeen(key);
       this.hideConnectCallout();
-      connectDiscoveredAccount(win, accountProvider, container)
-        .catch((error) => {
-          debugLog('Connect from callout failed', error);
-        })
-        .finally(() => {
-          win.setTimeout(() => this.maybeShowConnectCallout(), 0);
+      try {
+        const { connectDiscoveredAccount } = ChromeUtils.importESModule(
+          'chrome://sine/content/zen-integrations/Settings.sys.mjs' + new URL(import.meta.url).search
+        );
+        connectDiscoveredAccount(win, accountProvider, container).catch((error) => {
+          console.warn('[Zen Integrations] Connect from callout failed', error);
         });
+      } catch (error) {
+        console.warn('[Zen Integrations] Connect import failed', error);
+      }
+      win.setTimeout(() => this.maybeShowConnectCallout(), 0);
     });
   }
 
@@ -952,8 +958,11 @@ export class ZenTabs {
         this.refreshAnchors();
       }, 150);
     };
+    const onChange = () => this.refreshAnchors();
+    this.window.addEventListener('TabPinned', onChange, true);
+    this.window.addEventListener('TabUnpinned', onChange, true);
+    this.window.addEventListener('TabAttrModified', debounced, true);
     if (this.gBrowser?.tabContainer) {
-      const onChange = () => this.refreshAnchors();
       this.gBrowser.tabContainer.addEventListener('TabAttrModified', debounced);
       this.gBrowser.tabContainer.addEventListener('TabOpen', onChange);
       this.gBrowser.tabContainer.addEventListener('TabClose', onChange);

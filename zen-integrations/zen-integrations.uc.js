@@ -168,6 +168,8 @@
       emails: () => app.currentEmails,
       context: () => app.activePanelContextKey,
       contexts: () => [...app.panelContexts.keys()],
+      connect: () => app.tabs.connectSnapshot(),
+      showConnect: () => app.tabs.maybeShowConnectCallout(),
       reInit: () => app.init()
     };
 
