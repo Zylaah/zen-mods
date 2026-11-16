@@ -3,7 +3,10 @@ const {
   debugLog,
   getContextContainerId,
   getGmailUrlPattern,
-  isEssentialOrPinnedTab
+  glanceAnimating,
+  isEssentialOrPinnedTab,
+  isGlanceTab,
+  runAfterGlance
 } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
 );
@@ -653,10 +656,20 @@ export class ZenTabs {
     this.app.panel.scheduleHide();
   }
 
+  scheduleRefresh() {
+    if (!this._afterGlance) this._afterGlance = {};
+    runAfterGlance(this.window, this._afterGlance, () => this.refreshAnchors());
+  }
+
   refreshAnchors() {
+    if (glanceAnimating(this.window)) {
+      this.scheduleRefresh();
+      return;
+    }
     const document = this.window.document;
     if (!this.gBrowser?.tabs) return;
     for (const tab of this.gBrowser.tabs) {
+      if (isGlanceTab(tab)) continue;
       const provider = this.providerFor(tab);
       const accountKey = provider?.contextKey(tab, this.getUrlHints(tab));
       const mail = this.isAnchor(tab) && !!accountKey && isEnabled(accountKey);
@@ -880,7 +893,10 @@ export class ZenTabs {
     this.connectCalloutPending = false;
     console.log('[Zen Integrations] Connect callout shown', key, tab.label);
 
-    const reposition = () => this.positionConnectCallout(card, tab);
+    const reposition = () => {
+      if (glanceAnimating(win)) return;
+      this.positionConnectCallout(card, tab);
+    };
     const onKey = (event) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
@@ -972,20 +988,12 @@ export class ZenTabs {
   setupMonitoring() {
     this.startInboxWatch();
     this.refreshAnchors();
-    let timer = null;
-    const debounced = () => {
-      if (timer) this.window.clearTimeout(timer);
-      timer = this.window.setTimeout(() => {
-        timer = null;
-        this.refreshAnchors();
-      }, 150);
-    };
-    const onChange = () => this.refreshAnchors();
+    const onChange = () => this.scheduleRefresh();
     this.window.addEventListener('TabPinned', onChange, true);
     this.window.addEventListener('TabUnpinned', onChange, true);
-    this.window.addEventListener('TabAttrModified', debounced, true);
+    this.window.addEventListener('TabAttrModified', onChange, true);
     if (this.gBrowser?.tabContainer) {
-      this.gBrowser.tabContainer.addEventListener('TabAttrModified', debounced);
+      this.gBrowser.tabContainer.addEventListener('TabAttrModified', onChange);
       this.gBrowser.tabContainer.addEventListener('TabOpen', onChange);
       this.gBrowser.tabContainer.addEventListener('TabClose', onChange);
       this.gBrowser.tabContainer.addEventListener('TabPinned', onChange);
@@ -994,7 +1002,7 @@ export class ZenTabs {
     this.setupHoverDelegation();
     this.setupWorkspaceMonitoring();
 
-    const observer = new this.window.MutationObserver(debounced);
+    const observer = new this.window.MutationObserver(onChange);
     const document = this.window.document;
     const essentials = document.getElementById('zen-essentials');
     if (essentials) {

@@ -116,6 +116,41 @@ export function isEssentialOrPinnedTab(tab) {
   return !!(tab && (tab.hasAttribute('zen-essential') || tab.pinned));
 }
 
+export function isGlanceTab(tab) {
+  return !!tab?.hasAttribute?.('zen-glance-tab');
+}
+
+// True while Zen is tweening a glance open, closed, or fully expanded.
+export function glanceAnimating(win) {
+  try {
+    const glance = win?.gZenGlanceManager;
+    return !!(
+      glance &&
+      (glance._animating || glance.animatingOpen || glance.animatingFullOpen || glance.closingGlance)
+    );
+  } catch (e) {
+    return false;
+  }
+}
+
+// TabOpen for a link-as-glance fires before Zen marks the glance as animating.
+// Coalesce, then wait out the animation so anchor scans do not flush layout mid-tween.
+export function runAfterGlance(win, slot, fn) {
+  slot.wanted = true;
+  if (slot.timer) return;
+  const tick = () => {
+    if (glanceAnimating(win)) {
+      slot.timer = win.setTimeout(tick, 80);
+      return;
+    }
+    slot.timer = null;
+    if (!slot.wanted) return;
+    slot.wanted = false;
+    fn();
+  };
+  slot.timer = win.setTimeout(tick, glanceAnimating(win) ? 80 : 150);
+}
+
 export function isPinnedStripTab(tab) {
   return !!(tab?.pinned && !tab.hasAttribute('zen-essential'));
 }

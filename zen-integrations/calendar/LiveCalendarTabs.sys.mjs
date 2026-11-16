@@ -12,6 +12,9 @@ const {
 const { hasToken, isEnabled, isExpired } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Accounts.sys.mjs' + new URL(import.meta.url).search
 );
+const { glanceAnimating, isGlanceTab, runAfterGlance } = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
+);
 
 export class LiveCalendarTabs {
   constructor(app) {
@@ -73,7 +76,7 @@ export class LiveCalendarTabs {
 
   setup() {
     this.refreshAnchors();
-    const onChange = () => this.refreshAnchors();
+    const onChange = () => this.scheduleRefresh();
     const container = this.gBrowser?.tabContainer;
     if (container) {
       container.addEventListener('TabAttrModified', onChange);
@@ -94,9 +97,19 @@ export class LiveCalendarTabs {
     }
   }
 
+  scheduleRefresh() {
+    if (!this._afterGlance) this._afterGlance = {};
+    runAfterGlance(this.window, this._afterGlance, () => this.refreshAnchors());
+  }
+
   refreshAnchors() {
+    if (glanceAnimating(this.window)) {
+      this.scheduleRefresh();
+      return;
+    }
     if (!this.gBrowser?.tabs) return;
     for (const tab of this.gBrowser.tabs) {
+      if (isGlanceTab(tab)) continue;
       const accountKey = this.accountKey(tab);
       const show = this.isCalendarAnchor(tab) && isEnabled(accountKey) && (hasToken(accountKey) || isExpired(accountKey));
       if (!show) {
@@ -281,7 +294,12 @@ export class LiveCalendarTabs {
   }
 
   updatePills() {
+    if (glanceAnimating(this.window)) {
+      this.scheduleRefresh();
+      return;
+    }
     for (const tab of this.gBrowser?.tabs || []) {
+      if (isGlanceTab(tab)) continue;
       if (this.isCalendarAnchor(tab)) this.updatePill(tab);
     }
   }
