@@ -12,7 +12,7 @@ const {
 const { hasToken, isEnabled, isExpired } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Accounts.sys.mjs' + new URL(import.meta.url).search
 );
-const { glanceAnimating, isGlanceTab, runAfterGlance } = ChromeUtils.importESModule(
+const { chromeAnimating, isGlanceTab, runAfterGlance } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
 );
 
@@ -103,7 +103,7 @@ export class LiveCalendarTabs {
   }
 
   refreshAnchors() {
-    if (glanceAnimating(this.window)) {
+    if (chromeAnimating(this.window)) {
       this.scheduleRefresh();
       return;
     }
@@ -294,7 +294,7 @@ export class LiveCalendarTabs {
   }
 
   updatePills() {
-    if (glanceAnimating(this.window)) {
+    if (chromeAnimating(this.window)) {
       this.scheduleRefresh();
       return;
     }

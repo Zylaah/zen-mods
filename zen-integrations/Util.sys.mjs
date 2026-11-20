@@ -133,13 +133,25 @@ export function glanceAnimating(win) {
   }
 }
 
-// TabOpen for a link-as-glance fires before Zen marks the glance as animating.
-// Coalesce, then wait out the animation so anchor scans do not flush layout mid-tween.
+// True while a glance tween or a workspace switch/swipe is on screen.
+// Workspace switches set gZenWorkspaces._animatingChange for the slide (~250ms).
+export function chromeAnimating(win) {
+  if (glanceAnimating(win)) return true;
+  try {
+    const spaces = win?.gZenWorkspaces;
+    return !!(spaces && (spaces._animatingChange || spaces._swipeManager?.isGestureActive));
+  } catch (e) {
+    return false;
+  }
+}
+
+// Tab events often fire before Zen sets the animation flag.
+// Coalesce, then wait out the tween so anchor scans do not flush layout mid-slide.
 export function runAfterGlance(win, slot, fn) {
   slot.wanted = true;
   if (slot.timer) return;
   const tick = () => {
-    if (glanceAnimating(win)) {
+    if (chromeAnimating(win)) {
       slot.timer = win.setTimeout(tick, 80);
       return;
     }
@@ -148,7 +160,7 @@ export function runAfterGlance(win, slot, fn) {
     slot.wanted = false;
     fn();
   };
-  slot.timer = win.setTimeout(tick, glanceAnimating(win) ? 80 : 150);
+  slot.timer = win.setTimeout(tick, chromeAnimating(win) ? 80 : 150);
 }
 
 export function isPinnedStripTab(tab) {

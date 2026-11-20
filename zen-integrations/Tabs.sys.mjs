@@ -3,7 +3,7 @@ const {
   debugLog,
   getContextContainerId,
   getGmailUrlPattern,
-  glanceAnimating,
+  chromeAnimating,
   isEssentialOrPinnedTab,
   isGlanceTab,
   runAfterGlance
@@ -662,7 +662,7 @@ export class ZenTabs {
   }
 
   refreshAnchors() {
-    if (glanceAnimating(this.window)) {
+    if (chromeAnimating(this.window)) {
       this.scheduleRefresh();
       return;
     }
@@ -894,7 +894,7 @@ export class ZenTabs {
     console.log('[Zen Integrations] Connect callout shown', key, tab.label);
 
     const reposition = () => {
-      if (glanceAnimating(win)) return;
+      if (chromeAnimating(win)) return;
       this.positionConnectCallout(card, tab);
     };
     const onKey = (event) => {
