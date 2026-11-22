@@ -411,26 +411,34 @@
     z-index: 1;
   }
 
-  .zen-media-card[media-sharing] .media-device-buttons {
-    display: flex !important;
-  }
+  /* Meet draws mic, camera, and mute as three slots, so the mic lands on
+     the name. The camera already sits in the mute's column. Put the mute
+     there too, and stop the title before the mic. */
+  .zen-media-card[media-sharing] {
+    .media-device-buttons {
+      display: contents !important;
+    }
 
-  /* Mic and camera sit on the title row. Fade the name out before the
-     leftmost of them. --bmt-device-fade is how far that button enters the
-     title, measured on the card. */
-  .zen-media-card[media-sharing] .zen-media-info-vbox {
-    mask-image: linear-gradient(
-      to right,
-      #000 calc(100% - var(--bmt-device-fade, 3.5em) - 16px),
-      transparent calc(100% - var(--bmt-device-fade, 3.5em))
-    );
+    .media-device-buttons > :first-child {
+      grid-column: 6;
+      grid-row: 1;
+      justify-self: end;
+    }
 
-    &:dir(rtl) {
-      mask-image: linear-gradient(
-        to left,
-        #000 calc(100% - var(--bmt-device-fade, 3.5em) - 16px),
-        transparent calc(100% - var(--bmt-device-fade, 3.5em))
-      );
+    .media-device-buttons > :last-child:not(:first-child),
+    .zen-media-mute-button {
+      grid-column: 7;
+      grid-row: 1;
+      justify-self: end;
+    }
+
+    .zen-media-info-vbox {
+      grid-column: 2 / 6;
+      mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+
+      &:dir(rtl) {
+        mask-image: linear-gradient(to left, #000 calc(100% - 16px), transparent);
+      }
     }
   }
 

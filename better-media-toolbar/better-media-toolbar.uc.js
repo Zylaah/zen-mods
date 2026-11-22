@@ -705,39 +705,13 @@
     return true;
   }
 
-  function syncTitleFade(card) {
-    if (!card.hasAttribute("media-sharing")) {
-      card.style.removeProperty("--bmt-device-fade");
-      return;
-    }
-    const title = card.querySelector(".zen-media-info-vbox");
-    const devices = card.querySelector(".media-device-buttons");
-    if (!title || !devices) return;
-    const buttons = [...devices.children].filter((node) => node.nodeType === 1);
-    const boxes = (buttons.length ? buttons : [devices])
-      .map((el) => el.getBoundingClientRect())
-      .filter((rect) => rect.width > 0 && rect.height > 0);
-    if (!boxes.length) return;
-    const titleBox = title.getBoundingClientRect();
-    const rtl = getComputedStyle(title).direction === "rtl";
-    // The mute column used to be subtracted, which cleared the camera and
-    // left the mic, one button further in, on top of the name.
-    const overlap = rtl
-      ? Math.max(...boxes.map((rect) => rect.right)) - titleBox.left
-      : titleBox.right - Math.min(...boxes.map((rect) => rect.left));
-    card.style.setProperty("--bmt-device-fade", `${Math.max(0, Math.ceil(overlap))}px`);
-  }
-
   function watchMedia(bar) {
     let frame = null;
     let artworkReady = false;
     const refresh = () => {
       frame = null;
       if (!artworkReady) artworkReady = useMediaArtwork();
-      for (const card of bar.querySelectorAll(".zen-media-card")) {
-        syncTitleFade(card);
-        updateCardGlow(card);
-      }
+      for (const card of bar.querySelectorAll(".zen-media-card")) updateCardGlow(card);
     };
     new MutationObserver((records) => {
       const relevant = records.some((record) => {
