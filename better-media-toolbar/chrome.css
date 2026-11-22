@@ -407,10 +407,31 @@
     grid-column: 3 / -1;
     grid-row: 1;
     justify-self: end;
+    position: relative;
+    z-index: 1;
   }
 
   .zen-media-card[media-sharing] .media-device-buttons {
     display: flex !important;
+  }
+
+  /* Mic and headset sit on the title row. Fade the name out before them
+     instead of letting the glyphs run underneath. --bmt-device-fade is the
+     overlap past the mute column, measured on the card. */
+  .zen-media-card[media-sharing] .zen-media-info-vbox {
+    mask-image: linear-gradient(
+      to right,
+      #000 calc(100% - var(--bmt-device-fade, 3.5em) - 16px),
+      transparent calc(100% - var(--bmt-device-fade, 3.5em))
+    );
+
+    &:dir(rtl) {
+      mask-image: linear-gradient(
+        to left,
+        #000 calc(100% - var(--bmt-device-fade, 3.5em) - 16px),
+        transparent calc(100% - var(--bmt-device-fade, 3.5em))
+      );
+    }
   }
 
   /* Several cards open together without the spring, so the top card
@@ -427,7 +448,7 @@
   &:hover {
     .zen-media-card {
       height: var(--bmt-card-height-open) !important;
-      background-color: var(--bmt-solid, var(--bmt-card-base)) !important;
+      background-color: var(--bmt-solid, var(--bmt-media-bg)) !important;
       transition:
         transform 0.35s var(--bmt-ease),
         opacity 0.3s var(--bmt-ease),

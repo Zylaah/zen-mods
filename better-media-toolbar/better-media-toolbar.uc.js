@@ -96,9 +96,21 @@
   function paintColor(value) {
     if (!value) return null;
     if (!/gradient\(/.test(value)) return resolveColor(value);
-    const stops = (value.match(COLOR_TOKEN) || []).map(resolveColor).filter(Boolean);
+    const stops = (value.match(COLOR_TOKEN) || []).map(resolveColor).filter((color) => color && color[3] > 8);
     if (!stops.length) return null;
-    return [0, 1, 2, 3].map((i) => Math.round(stops.reduce((sum, color) => sum + color[i], 0) / stops.length));
+    let weight = 0;
+    const acc = [0, 0, 0];
+    let alpha = 0;
+    for (const color of stops) {
+      const share = color[3] / 255;
+      weight += share;
+      acc[0] += color[0] * share;
+      acc[1] += color[1] * share;
+      acc[2] += color[2] * share;
+      if (color[3] > alpha) alpha = color[3];
+    }
+    if (!weight) return null;
+    return [Math.round(acc[0] / weight), Math.round(acc[1] / weight), Math.round(acc[2] / weight), alpha];
   }
 
   function neutralBars() {
@@ -131,54 +143,61 @@
     const layer = document.getElementById(compact ? "zen-toolbar-background" : "zen-browser-background");
     const name = compact ? "--zen-main-browser-background-toolbar" : "--zen-main-browser-background";
     const paint = layer ? paintColor(getComputedStyle(layer).getPropertyValue(name)) : null;
-    const rootStyle = getComputedStyle(root);
-    const tint = resolveColor(rootStyle.getPropertyValue("--bmt-media-bg"));
-    // light-dark() follows the window's scheme, not the space's: a dark space
-    // in a light window got the pale base and the open card turned gray
-    const base = paint ? (brightnessOf(paint) > 160 ? [235, 235, 235, 255] : [27, 27, 27, 255]) : null;
-    if (!paint || !tint || !base) {
+    const tint = resolveColor(getComputedStyle(root).getPropertyValue("--bmt-media-bg"));
+    // A translucent space colour (acrylic, or the opacity slider) used to be
+    // flattened onto a grey slab, so the open card went grey until that
+    // slider moved. Keep the alpha and let the real sidebar show through.
+    if (!paint || !tint) {
       root.style.removeProperty("--bmt-rest");
       root.style.removeProperty("--bmt-solid");
       applyForeground(null);
-      return;
+      return false;
     }
     const rest = colorOver(tint, paint);
     root.style.setProperty("--bmt-rest", cssColor(rest));
-    root.style.setProperty("--bmt-solid", cssColor(colorOver(tint, colorOver(paint, base))));
-    applyForeground(rest);
+    root.style.setProperty("--bmt-solid", cssColor(rest));
+    applyForeground([rest[0], rest[1], rest[2], 255]);
+    return true;
   }
 
   function watchSidebarPaint() {
-    try {
-      syncSidebarPaint();
-    } catch (err) {
-      noteError("sidebar paint", err);
-    }
     // Zen restyles these layers every frame while blending spaces; reading
     // each colour stop then recalculates styles several times a frame.
+    // The first install often reads before the space colour is written.
     let settling = 0;
-    const watcher = new MutationObserver(() => {
+    let attempts = 0;
+    const watched = new Set();
+    const watcher = new MutationObserver(() => schedule(120, false));
+
+    function attachLayers() {
+      for (const id of ["zen-browser-background", "zen-toolbar-background"]) {
+        const layer = document.getElementById(id);
+        if (!layer || watched.has(layer)) continue;
+        watched.add(layer);
+        watcher.observe(layer, { attributes: true, attributeFilter: ["style"] });
+      }
+    }
+
+    function schedule(delay, countAttempt) {
       clearTimeout(settling);
       settling = setTimeout(() => {
+        let ready = false;
         try {
-          syncSidebarPaint();
+          ready = syncSidebarPaint();
         } catch (err) {
           noteError("sidebar paint", err);
         }
-      }, 120);
-    });
-    for (const id of ["zen-browser-background", "zen-toolbar-background"]) {
-      const layer = document.getElementById(id);
-      if (layer) watcher.observe(layer, { attributes: true, attributeFilter: ["style"] });
+        attachLayers();
+        if (!ready && countAttempt && attempts < 10) {
+          attempts += 1;
+          schedule(200, true);
+        }
+      }, delay);
     }
+
     watcher.observe(document.documentElement, { attributes: true, attributeFilter: ["zen-compact-mode"] });
-    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-      try {
-        syncSidebarPaint();
-      } catch (err) {
-        noteError("sidebar paint", err);
-      }
-    });
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => schedule(0, false));
+    schedule(0, true);
   }
 
   function artUrlOf(card) {
@@ -686,13 +705,30 @@
     return true;
   }
 
+  function syncTitleFade(card) {
+    if (!card.hasAttribute("media-sharing")) {
+      card.style.removeProperty("--bmt-device-fade");
+      return;
+    }
+    const devices = card.querySelector(".media-device-buttons");
+    if (!devices) return;
+    const width = devices.getBoundingClientRect().width;
+    if (!width) return;
+    const mute = card.querySelector(".zen-media-mute-button");
+    const overlap = width - (mute?.getBoundingClientRect().width || 0);
+    card.style.setProperty("--bmt-device-fade", `${Math.max(0, Math.ceil(overlap))}px`);
+  }
+
   function watchMedia(bar) {
     let frame = null;
     let artworkReady = false;
     const refresh = () => {
       frame = null;
       if (!artworkReady) artworkReady = useMediaArtwork();
-      for (const card of bar.querySelectorAll(".zen-media-card")) updateCardGlow(card);
+      for (const card of bar.querySelectorAll(".zen-media-card")) {
+        syncTitleFade(card);
+        updateCardGlow(card);
+      }
     };
     new MutationObserver((records) => {
       const relevant = records.some((record) => {
@@ -708,7 +744,7 @@
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ["src", "style", "hidden", "bmt-art", "bmt-favicon"],
+      attributeFilter: ["src", "style", "hidden", "media-sharing", "bmt-art", "bmt-favicon"],
     });
     refresh();
   }
