@@ -710,12 +710,21 @@
       card.style.removeProperty("--bmt-device-fade");
       return;
     }
+    const title = card.querySelector(".zen-media-info-vbox");
     const devices = card.querySelector(".media-device-buttons");
-    if (!devices) return;
-    const width = devices.getBoundingClientRect().width;
-    if (!width) return;
-    const mute = card.querySelector(".zen-media-mute-button");
-    const overlap = width - (mute?.getBoundingClientRect().width || 0);
+    if (!title || !devices) return;
+    const buttons = [...devices.children].filter((node) => node.nodeType === 1);
+    const boxes = (buttons.length ? buttons : [devices])
+      .map((el) => el.getBoundingClientRect())
+      .filter((rect) => rect.width > 0 && rect.height > 0);
+    if (!boxes.length) return;
+    const titleBox = title.getBoundingClientRect();
+    const rtl = getComputedStyle(title).direction === "rtl";
+    // The mute column used to be subtracted, which cleared the camera and
+    // left the mic, one button further in, on top of the name.
+    const overlap = rtl
+      ? Math.max(...boxes.map((rect) => rect.right)) - titleBox.left
+      : titleBox.right - Math.min(...boxes.map((rect) => rect.left));
     card.style.setProperty("--bmt-device-fade", `${Math.max(0, Math.ceil(overlap))}px`);
   }
 

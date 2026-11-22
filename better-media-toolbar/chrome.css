@@ -415,9 +415,9 @@
     display: flex !important;
   }
 
-  /* Mic and headset sit on the title row. Fade the name out before them
-     instead of letting the glyphs run underneath. --bmt-device-fade is the
-     overlap past the mute column, measured on the card. */
+  /* Mic and camera sit on the title row. Fade the name out before the
+     leftmost of them. --bmt-device-fade is how far that button enters the
+     title, measured on the card. */
   .zen-media-card[media-sharing] .zen-media-info-vbox {
     mask-image: linear-gradient(
       to right,
