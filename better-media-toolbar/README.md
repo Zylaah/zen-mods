@@ -23,8 +23,8 @@ Rebuilds Zen’s sidebar media cards in the style of [Zia](https://github.com/z1
 
 1. Open `about:settings` → **Sine Mods**
 2. Enable JS from unofficial sources if prompted
-3. Install: `Zylaah/zen-mods/tree/main/media-volume-slider`  
-   Or clone this repo and point Sine at the `media-volume-slider` folder.
+3. Install: `Zylaah/zen-mods/tree/main/better-media-toolbar`  
+   Or clone this repo and point Sine at the `better-media-toolbar` folder.
 4. Restart Zen
 
 ## Usage
@@ -35,7 +35,7 @@ Rebuilds Zen’s sidebar media cards in the style of [Zia](https://github.com/z1
 
 ## How it works
 
-- **UI** runs in browser chrome via `media-volume-slider.uc.js` on `browser.xhtml`, with `chrome.css`. The bottom-edge beam is `media-glow.js`.
+- **UI** runs in browser chrome via `better-media-toolbar.uc.js` on `browser.xhtml`, with `chrome.css`. The bottom-edge beam is `media-glow.js`.
 - Hooks the media card’s `updateIcon` and `updatePosition` so each card gets artwork, a progress ring, and the remaining time
 - Samples artwork (and favicons) on a canvas for the glow, the ring, and the mute bars
 - Tints the card from the sidebar background so it sits in the same paint as the rest of the sidebar

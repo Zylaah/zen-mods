@@ -840,7 +840,7 @@
   function loadGlowEngine() {
     if (window.BmtGlow?.create) return true;
     try {
-      Services.scriptloader.loadSubScript("chrome://sine/content/media-volume-slider/media-glow.js", window);
+      Services.scriptloader.loadSubScript("chrome://sine/content/better-media-toolbar/media-glow.js", window);
     } catch (err) {
       noteError("glow script", err);
     }
