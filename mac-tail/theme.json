@@ -1,0 +1,25 @@
+{
+  "version": "1.0.0",
+  "id": "mac-tail",
+  "name": "Mac Tail",
+  "description": "A Mac-like tail for the browser",
+  "scripts": {
+    "mac-tail.uc.js": {
+      "include": [
+        "chrome://browser/content/browser.xhtml"
+      ]
+    }
+  },
+  "homepage": "https://github.com/Zylaah/zen-mods/tree/main/mac-tail",
+  "readme": "https://raw.githubusercontent.com/Zylaah/zen-mods/refs/heads/main/mac-tail/README.md",
+  "author": "Bxth",
+  "tags": [
+    "Zen Browser",
+    "Mac",
+    "Tail"
+  ],
+  "createdAt": "2026-11-24",
+  "updatedAt": "2026-11-24",
+  "fork": ["zen"],
+  "ai": "yes"
+}
