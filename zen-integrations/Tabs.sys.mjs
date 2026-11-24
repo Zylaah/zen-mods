@@ -388,6 +388,9 @@ export class ZenTabs {
     const link = provider?.readingPaneUrl?.(email) || '';
     if (link) {
       this.openOutlookLink(tab, link);
+      provider.markOpened?.(this.app, tab, this.getUrlHints(tab), email)?.catch((err) => {
+        console.warn('[Zen Integrations] Outlook mark-read failed:', err && err.message ? err.message : err);
+      });
       return;
     }
     const browser = tab?.linkedBrowser;

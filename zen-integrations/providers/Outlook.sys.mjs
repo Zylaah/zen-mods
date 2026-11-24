@@ -13,6 +13,7 @@ const { isEnabled, isExpired } = ChromeUtils.importESModule(
 const {
   beginOutlookSignIn,
   fetchOutlookGraph,
+  markOutlookRead,
   outlookSignInMessage,
   readOutlookClientId
 } = ChromeUtils.importESModule(
@@ -128,6 +129,13 @@ export const outlookProvider = {
 
   readingPaneUrl(email) {
     return outlookReadingPaneUrl(email?.url || '');
+  },
+
+  // Only Graph rows have a message id Graph accepts.
+  markOpened(app, tab, hints, email) {
+    const id = String(email?.threadId || '');
+    if (!id || !outlookReadingPaneUrl(email?.url || '')) return null;
+    return markOutlookRead(app, tab, this.contextKey(tab, hints), id);
   },
 
   matches(hints) {

@@ -17,6 +17,7 @@ const {
   OUTLOOK_TOKEN_URL,
   authorizeUrl,
   formEncode,
+  graphMessageUrl,
   graphMessagesUrl,
   graphUnreadRows,
   outlookClientState
@@ -458,4 +459,54 @@ export async function fetchOutlookGraph(app, tab, contextKey) {
   const messages = pages.flatMap(readPage);
   debugLog('Outlook Graph', pages.map((page) => page.status).join(','), messages.length);
   return graphUnreadRows({ value: messages }, CONFIG.MAX_EMAILS);
+}
+
+// Outlook web only marks a message read on view when its "mark as read"
+// setting allows it; the default waits for the selection to change.
+// Returns 'ok', 'scope' (token lacks Mail.ReadWrite), or 'failed'.
+export async function markOutlookRead(app, tab, contextKey, messageId) {
+  const id = String(messageId || '').trim();
+  if (!id) return 'failed';
+  const clientId = readOutlookClientId();
+  if (outlookClientState(clientId) !== 'ok') return 'failed';
+
+  const win = app.window;
+  const userContextId = getTabUserContextId(tab);
+  const accountKey = outlookAccountId(contextKey);
+  let bearer = await accessToken(win, userContextId, contextKey, clientId);
+  if (!bearer) return 'failed';
+
+  const send = (token) => httpRequest(win, {
+    url: graphMessageUrl(id),
+    userContextId,
+    method: 'PATCH',
+    anonymous: true,
+    headers: {
+      Authorization: 'Bearer ' + token,
+      Accept: 'application/json'
+    },
+    body: '{"isRead":true}',
+    contentType: 'application/json',
+    maxBytes: 200000
+  });
+
+  let fetched = await send(bearer);
+  if (fetched.status === 401) {
+    const entry = await tokenFor(contextKey);
+    const refreshed = await refreshToken(win, userContextId, contextKey, entry, clientId);
+    bearer = refreshed?.accessToken || '';
+    if (!bearer) return 'failed';
+    fetched = await send(bearer);
+  }
+  if (fetched.status === 403) {
+    await setAccountMessage(accountKey, 'Reconnect Outlook so opened mail is marked read');
+    console.warn('[Zen Integrations] Outlook mark-read was refused (403). Add Mail.ReadWrite to the Entra app, then Connect again.');
+    return 'scope';
+  }
+  if (fetched.status < 200 || fetched.status >= 300) {
+    console.warn('[Zen Integrations] Outlook mark-read failed with HTTP', fetched.status);
+    return 'failed';
+  }
+  debugLog('Outlook marked read', id);
+  return 'ok';
 }

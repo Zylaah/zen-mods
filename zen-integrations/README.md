@@ -47,10 +47,10 @@ Gmail does not use either app. It reads the Atom feed with the pinned tab's cook
 6. Choose **Register**.
 7. On **Overview**, copy **Application (client) ID**.
 8. Open **Authentication**. Set **Allow public client flows** to **Yes** and save. Do not create a client secret. This app is a public client and signs in with PKCE.
-9. Open **API permissions**, then **Add a permission**, then **Microsoft Graph**, then **Delegated permissions**. Add **Mail.Read**. If this is a work tenant and the permission stays ungranted, choose **Grant admin consent**. Personal Microsoft accounts can consent on the sign-in page.
+9. Open **API permissions**, then **Add a permission**, then **Microsoft Graph**, then **Delegated permissions**. Add **Mail.ReadWrite**. If this is a work tenant and the permission stays ungranted, choose **Grant admin consent**. Personal Microsoft accounts can consent on the sign-in page.
 10. In Zen, open **Zen Integrations accounts**. On the Outlook section, open **…**, paste the application id into **App id**, and save. Then choose **Connect** on that account.
 
-Sign-in asks for `Mail.Read` and offline access. Opening a row does not write to Graph. It opens that message in the Outlook tab, and Outlook marks it read.
+Sign-in asks for `Mail.ReadWrite` and offline access. Opening a row opens the message in the Outlook tab and sets it read through Graph, because Outlook web itself only marks a message read once you move to another one. A token from before `Mail.ReadWrite` is refused; **Connect** again after adding the permission.
 
 ### Google Cloud Console app
 
@@ -80,7 +80,7 @@ While the consent screen stays in **Testing**, Google expires the refresh token 
 
 - The list is the unread inbox. Outlook's Focused and Other views are both included.
 - Opening a Gmail row selects the Gmail tab, waits until the inbox is ready, then opens that thread.
-- Opening an Outlook Graph row navigates that Outlook tab to the message. A popout web link is forced into the review pane with `ispopout=0`, which is the view Outlook marks as read. A scraped row still clicks the matching conversation.
+- Opening an Outlook Graph row opens the message in the reading pane (`ispopout=0`) and sends `PATCH /me/messages/{id}` with `isRead: true`. A scraped row still clicks the matching conversation.
 - Cached rows are stored in `zen-integrations-cache.json` in the profile. An old `live-gmail-cache.json` is read once and treated as Gmail.
 - Account records live in `zen-integrations-accounts.json`. Google tokens stay in `live-calendar-google-tokens.json`, and Outlook tokens stay in `zen-integrations-outlook-tokens.json`. Old container-only keys are migrated to account ids on first load.
 - Removing an account deletes its record and token. Disconnecting keeps the record, label, and email so the account can reconnect later.
