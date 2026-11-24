@@ -399,12 +399,15 @@ export async function showAccountSettings(win, notice = '') {
     return svg;
   };
 
-  const overlay = make('div');
+  const overlay = make('dialog');
   overlay.id = 'zi-accounts';
   overlay.setAttribute('popover', 'manual');
+  overlay.setAttribute('aria-labelledby', 'zi-accounts-title');
+  overlay.tabIndex = -1;
   const card = make('div', 'zi-accounts-card', overlay);
   const head = make('div', 'zi-accounts-head', card);
-  make('div', 'zi-accounts-title', head, 'Accounts');
+  const title = make('div', 'zi-accounts-title', head, 'Accounts');
+  title.id = 'zi-accounts-title';
   const close = make('button', 'zi-accounts-close', head, '\u00d7');
   close.type = 'button';
   close.setAttribute('aria-label', 'Close');
@@ -679,10 +682,14 @@ export async function showAccountSettings(win, notice = '') {
   sheet.addEventListener('click', (event) => {
     if (event.target === sheet) closeSheet();
   });
+  const returnFocus = win.document.activeElement;
   const cleanup = () => {
     win.removeEventListener('keydown', onKey, true);
     if (overlay.isConnected) overlay.remove();
     if (activeSettingsCleanup === cleanup) activeSettingsCleanup = null;
+    if (returnFocus?.isConnected && returnFocus !== overlay && typeof returnFocus.focus === 'function') {
+      try { returnFocus.focus(); } catch (e) {}
+    }
   };
   overlay.addEventListener('toggle', (event) => {
     if (event.newState !== 'closed') return;
@@ -693,4 +700,5 @@ export async function showAccountSettings(win, notice = '') {
   paint(notice);
   win.document.documentElement.appendChild(overlay);
   overlay.showPopover();
+  try { overlay.focus(); } catch (e) {}
 }

@@ -88,7 +88,6 @@ export class ZenIntegrations {
     }
     this.scan.startPoll();
     this.calendar.init();
-    console.log('[Zen Integrations] Initialized');
     debugLog('Initialized');
   }
 

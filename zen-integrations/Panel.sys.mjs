@@ -1,7 +1,6 @@
 const {
   CONFIG,
   XUL_NS,
-  escapeHtml,
   isPinnedStripTab
 } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
@@ -29,6 +28,31 @@ function formatDate(dateString) {
   } catch (e) {
     return dateString;
   }
+}
+
+function mailItem(document, { from, date, subject, snippet, unread }) {
+  const el = document.createElement('div');
+  el.className = unread ? 'zi-item zi-unread' : 'zi-item';
+  const header = document.createElement('div');
+  header.className = 'zi-item-header';
+  const fromEl = document.createElement('span');
+  fromEl.className = 'zi-from';
+  fromEl.textContent = from;
+  const dateEl = document.createElement('span');
+  dateEl.className = 'zi-date';
+  dateEl.textContent = date;
+  header.append(fromEl, dateEl);
+  const subjectEl = document.createElement('div');
+  subjectEl.className = 'zi-subject';
+  subjectEl.textContent = subject;
+  const wrap = document.createElement('div');
+  wrap.className = 'zi-snippet-wrap';
+  const snippetEl = document.createElement('div');
+  snippetEl.className = 'zi-snippet';
+  snippetEl.textContent = snippet;
+  wrap.append(snippetEl);
+  el.append(header, subjectEl, wrap);
+  return el;
 }
 
 export class ZenPanel {
@@ -94,7 +118,7 @@ export class ZenPanel {
     composeButton.className = 'zi-compose';
     composeButton.setAttribute('aria-label', 'New message');
     composeButton.title = 'New message';
-    composeButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="2" x2="8" y2="14"/><line x1="2" y1="8" x2="14" y2="8"/></svg>`;
+    composeButton.innerHTML = `<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="2" x2="8" y2="14"/><line x1="2" y1="8" x2="14" y2="8"/></svg>`;
     composeButton.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -373,13 +397,13 @@ export class ZenPanel {
     const awaitingFirstScan = app.loadScansInFlight.has(app.activePanelContextKey);
     if ((app.scanInProgress || awaitingFirstScan) && emailsToShow.length === 0) {
       if (loadingContainer) loadingContainer.style.display = 'block';
-      emailsContainer.innerHTML = '';
+      emailsContainer.replaceChildren();
       setComposeVisible(false);
       return;
     }
 
     if (loadingContainer) loadingContainer.style.display = 'none';
-    emailsContainer.innerHTML = '';
+    emailsContainer.replaceChildren();
 
     const provider = app.providerForKey(app.activePanelContextKey);
     const anchor = app.hoveredTab || app.tabs.findAnchor(app.activePanelContextKey);
@@ -395,27 +419,26 @@ export class ZenPanel {
     }
 
     if (emailsToShow.length === 0) {
-      emailsContainer.innerHTML = '<div class="zi-empty">No unread mail</div>';
+      const empty = document.createElement('div');
+      empty.className = 'zi-empty';
+      empty.textContent = 'No unread mail';
+      emailsContainer.replaceChildren(empty);
       setComposeVisible(false);
       return;
     }
 
     setComposeVisible(true);
     for (const email of emailsToShow) {
-      const el = document.createElement('div');
-      el.className = 'zi-item';
-      if (email.isUnread) el.classList.add('zi-unread');
       const outlook = String(app.activePanelContextKey || '').startsWith('outlook:');
       const fields = outlook ? normalizeOutlookFields(email) : email;
       const from = String(email.from || '').replace(/<[^>]*>/g, '').trim();
-      el.innerHTML = `
-        <div class="zi-item-header">
-          <span class="zi-from">${escapeHtml(document, from)}</span>
-          <span class="zi-date">${escapeHtml(document, formatDate(fields.date))}</span>
-        </div>
-        <div class="zi-subject">${escapeHtml(document, email.subject || '(No subject)')}</div>
-        <div class="zi-snippet-wrap"><div class="zi-snippet">${escapeHtml(document, fields.snippet || '')}</div></div>
-      `;
+      const el = mailItem(document, {
+        from,
+        date: formatDate(fields.date),
+        subject: email.subject || '(No subject)',
+        snippet: fields.snippet || '',
+        unread: !!email.isUnread
+      });
       el.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();

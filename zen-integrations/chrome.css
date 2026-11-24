@@ -4,6 +4,243 @@
   --panel-padding: 0;
   /* Match Zen's folder tabs popup (#zen-folder-tabs-popup). */
   width: 250px;
+
+  @media (max-width: 600px) {
+    max-width: calc(100vw - 20px);
+    min-width: 250px;
+  }
+
+  .zi-wrapper {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    max-height: 360px;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 11px;
+    color: light-dark(#0c0c0d, #f9f9fa);
+  }
+
+  .zi-content {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    max-height: 300px;
+
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
+      border-radius: 4px;
+    }
+
+    &::-webkit-scrollbar-thumb:hover {
+      background: light-dark(rgba(0, 0, 0, 0.3), rgba(255, 255, 255, 0.3));
+    }
+  }
+
+  .zi-compose {
+    appearance: none;
+    -moz-appearance: none;
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 1;
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    padding: 0;
+    margin: 0;
+    border: 1px solid light-dark(rgba(0,0,0,0.1), rgba(255,255,255,0.1));
+    border-radius: 50%;
+    /* Beat Zen's *:not(.no-squircles) superellipse so these stay true circles */
+    --zen-squircle-value: 1;
+    corner-shape: round !important;
+    box-sizing: border-box;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: light-dark(rgba(210, 210, 210), rgba(69, 69, 69));
+    color: light-dark(#0c0c0d, #f9f9fa);
+    box-shadow:
+      inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.1)),
+      0px 2px 3px 0px rgba(0, 0, 0, 0.15);
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+
+    & > svg {
+      display: block;
+      flex-shrink: 0;
+    }
+
+    &:hover {
+      background-color: light-dark(rgba(200, 200, 200), rgba(80, 80, 80));
+      box-shadow:
+        inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.15)),
+        0px 3px 8px 0px rgba(0, 0, 0, 0.2);
+    }
+  }
+
+  .zi-loading,
+  .zi-empty {
+    padding: 16px;
+    text-align: center;
+    color: light-dark(#737373, #b1b1b1);
+    font-size: 12px;
+  }
+
+  button.zi-reconnect {
+    display: block;
+    margin: 28px auto;
+    padding: 6px 12px;
+    border: 0;
+    border-radius: 999px;
+    --zen-squircle-value: 1;
+    corner-shape: round !important;
+    cursor: pointer;
+    background-color: light-dark(rgba(210, 210, 210), rgba(69, 69, 69));
+    color: light-dark(#0c0c0d, #f9f9fa);
+    font: inherit;
+  }
+
+  button.zi-signin {
+    display: block;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    cursor: pointer;
+    --zen-squircle-value: 1;
+    corner-shape: round !important;
+  }
+
+  .zi-error {
+    padding: 16px;
+    background: light-dark(rgba(255, 0, 0, 0.1), rgba(255, 0, 0, 0.2));
+    color: light-dark(#d70022, #ff6b6b);
+    border-radius: 4px;
+    margin: 12px;
+    font-size: 12px;
+    line-height: 1.5;
+
+    &[data-signin='1'] {
+      cursor: pointer;
+      --zen-squircle-value: 1;
+      corner-shape: round !important;
+    }
+  }
+
+  .zi-emails {
+    padding: 0;
+  }
+
+  .zi-item {
+    padding: 8px 10px;
+    cursor: pointer;
+    position: relative;
+    border-bottom: 1px solid light-dark(rgba(0,0,0,0.07), rgba(255,255,255,0.07));
+    min-height: 76px;
+    height: 76px;
+    display: flex;
+    flex-direction: column;
+
+    /* Hover fill is an inset pill so the row keeps its full-bleed separator. */
+    &::before {
+      content: '';
+      position: absolute;
+      inset: 4px;
+      border-radius: 6px;
+      background-color: transparent;
+      pointer-events: none;
+      transition: background-color 0.15s ease;
+    }
+
+    & > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    &:last-child {
+      border-bottom: none;
+    }
+
+    &.zi-unread {
+      padding-left: 10px;
+
+      .zi-from {
+        font-weight: 700;
+      }
+
+      .zi-subject {
+        font-weight: 600;
+      }
+    }
+
+    &:hover::before {
+      background-color: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.1));
+    }
+  }
+
+  .zi-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+    flex-shrink: 0;
+  }
+
+  .zi-from {
+    font-weight: 600;
+    font-size: 11px;
+    color: light-dark(#0c0c0d, #f9f9fa);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-right: 6px;
+  }
+
+  .zi-date {
+    font-size: 10px;
+    color: light-dark(#737373, #b1b1b1);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .zi-subject {
+    font-weight: 500;
+    font-size: 11px;
+    color: light-dark(#0c0c0d, #f9f9fa);
+    margin-bottom: 3px;
+    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Snippet wrap takes the flex height. The clamp box stays at auto height.
+     Firefox fails to ellipsize a line-clamp box that has a definite height
+     (Mozilla bug 1790882). */
+  .zi-snippet-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .zi-snippet {
+    font-size: 10px;
+    color: light-dark(#737373, #b1b1b1);
+    line-height: 1.3;
+    padding-top: 2px;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
 }
 
 #zi-connect {
@@ -28,10 +265,79 @@
   color-scheme: inherit;
   overflow: visible;
   pointer-events: auto;
-}
 
-#zi-connect[data-open] {
-  animation: zi-connect-in 0.26s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  &[data-open] {
+    @media (prefers-reduced-motion: no-preference) {
+      animation: zi-connect-in 0.26s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+    }
+  }
+
+  .zi-connect-arrow {
+    position: absolute;
+    top: var(--zi-tail-y, 50%);
+    left: -6px;
+    width: 12px;
+    height: 12px;
+    margin-top: -6px;
+    background: var(--zi-connect-bg);
+    border-left: 1px solid var(--zi-connect-line);
+    border-bottom: 1px solid var(--zi-connect-line);
+    transform: rotate(45deg);
+    pointer-events: none;
+  }
+
+  &[data-side="right"] .zi-connect-arrow {
+    left: auto;
+    right: -6px;
+    transform: rotate(225deg);
+  }
+
+  .zi-connect-title {
+    margin: 0 20px 12px 0;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
+  }
+
+  .zi-connect-button {
+    appearance: none;
+    border: 0;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    background: light-dark(#151518, #f4f4f5);
+    color: light-dark(#f4f4f5, #151518);
+
+    &:hover {
+      filter: brightness(1.08);
+    }
+  }
+
+  .zi-connect-close {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    opacity: 0.65;
+    font: inherit;
+    font-size: 16px;
+    line-height: 22px;
+    cursor: pointer;
+
+    &:hover {
+      opacity: 1;
+      background: color-mix(in srgb, currentColor 10%, transparent);
+    }
+  }
 }
 
 @keyframes zi-connect-in {
@@ -45,564 +351,258 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  #zi-connect[data-open] {
-    animation: none;
-  }
-}
-
-.zi-connect-arrow {
-  position: absolute;
-  top: var(--zi-tail-y, 50%);
-  left: -6px;
-  width: 12px;
-  height: 12px;
-  margin-top: -6px;
-  background: var(--zi-connect-bg);
-  border-left: 1px solid var(--zi-connect-line);
-  border-bottom: 1px solid var(--zi-connect-line);
-  transform: rotate(45deg);
-  pointer-events: none;
-}
-
-#zi-connect[data-side="right"] .zi-connect-arrow {
-  left: auto;
-  right: -6px;
-  transform: rotate(225deg);
-}
-
-.zi-connect-title {
-  margin: 0 20px 12px 0;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.35;
-}
-
-.zi-connect-button {
-  appearance: none;
-  border: 0;
-  border-radius: 6px;
-  padding: 6px 12px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  background: light-dark(#151518, #f4f4f5);
-  color: light-dark(#f4f4f5, #151518);
-}
-
-.zi-connect-button:hover {
-  filter: brightness(1.08);
-}
-
-.zi-connect-close {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  opacity: 0.65;
-  font: inherit;
-  font-size: 16px;
-  line-height: 22px;
-  cursor: pointer;
-}
-
-.zi-connect-close:hover {
-  opacity: 1;
-  background: color-mix(in srgb, currentColor 10%, transparent);
-}
-
-.zi-wrapper {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  max-height: 360px;
-  overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  font-size: 11px;
-  color: light-dark(#0c0c0d, #f9f9fa);
-}
-
-.zi-content {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  max-height: 300px;
-}
-
-.zi-compose {
-  appearance: none;
-  -moz-appearance: none;
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  z-index: 1;
-  width: 32px;
-  height: 32px;
-  min-width: 32px;
-  min-height: 32px;
-  padding: 0;
-  margin: 0;
-  border: 1px solid light-dark(rgba(0,0,0,0.1), rgba(255,255,255,0.1));
-  border-radius: 50%;
-  /* Beat Zen's *:not(.no-squircles) superellipse so these stay true circles */
-  --zen-squircle-value: 1;
-  corner-shape: round !important;
-  box-sizing: border-box;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: light-dark(rgba(210, 210, 210), rgba(69, 69, 69));
-  color: light-dark(#0c0c0d, #f9f9fa);
-  box-shadow:
-    inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.1)),
-    0px 2px 3px 0px rgba(0, 0, 0, 0.15);
-  transition: background-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.zi-compose > svg {
-  display: block;
-  flex-shrink: 0;
-}
-
-.zi-compose:hover {
-  background-color: light-dark(rgba(200, 200, 200), rgba(80, 80, 80));
-  box-shadow:
-    inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.15)),
-    0px 3px 8px 0px rgba(0, 0, 0, 0.2);
-}
-
-.zi-loading,
-.zi-empty {
-  padding: 16px;
-  text-align: center;
-  color: light-dark(#737373, #b1b1b1);
-  font-size: 12px;
-}
-
-button.zi-reconnect {
-  display: block;
-  margin: 28px auto;
-  padding: 6px 12px;
-  border: 0;
-  border-radius: 999px;
-  --zen-squircle-value: 1;
-  corner-shape: round !important;
-  cursor: pointer;
-  background-color: light-dark(rgba(210, 210, 210), rgba(69, 69, 69));
-  color: light-dark(#0c0c0d, #f9f9fa);
-  font: inherit;
-}
-
-button.zi-signin {
-  display: block;
-  width: 100%;
-  border: 0;
-  background: transparent;
-  font: inherit;
-  cursor: pointer;
-  --zen-squircle-value: 1;
-  corner-shape: round !important;
-}
-
-.zi-error {
-  padding: 16px;
-  background: light-dark(rgba(255, 0, 0, 0.1), rgba(255, 0, 0, 0.2));
-  color: light-dark(#d70022, #ff6b6b);
-  border-radius: 4px;
-  margin: 12px;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.zi-error[data-signin='1'] {
-  cursor: pointer;
-  --zen-squircle-value: 1;
-  corner-shape: round !important;
-}
-
-.zi-emails {
-  padding: 0;
-}
-
-.zi-item {
-  padding: 8px 10px;
-  cursor: pointer;
-  position: relative;
-  border-bottom: 1px solid light-dark(rgba(0,0,0,0.07), rgba(255,255,255,0.07));
-  min-height: 76px;
-  height: 76px;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Hover fill is an inset pill so the row keeps its full-bleed separator. */
-.zi-item::before {
-  content: '';
-  position: absolute;
-  inset: 4px;
-  border-radius: 6px;
-  background-color: transparent;
-  pointer-events: none;
-  transition: background-color 0.15s ease;
-}
-
-.zi-item > * {
-  position: relative;
-  z-index: 1;
-}
-
-.zi-item:last-child {
-  border-bottom: none;
-}
-
-.zi-item.zi-unread {
-  padding-left: 10px;
-}
-
-.zi-item.zi-unread .zi-from {
-  font-weight: 700;
-}
-
-.zi-item.zi-unread .zi-subject {
-  font-weight: 600;
-}
-
-.zi-item:hover::before {
-  background-color: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.1));
-}
-
-.zi-item-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 4px;
-  flex-shrink: 0;
-}
-
-.zi-from {
-  font-weight: 600;
-  font-size: 11px;
-  color: light-dark(#0c0c0d, #f9f9fa);
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-right: 6px;
-}
-
-.zi-date {
-  font-size: 10px;
-  color: light-dark(#737373, #b1b1b1);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.zi-subject {
-  font-weight: 500;
-  font-size: 11px;
-  color: light-dark(#0c0c0d, #f9f9fa);
-  margin-bottom: 3px;
-  flex-shrink: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Snippet wrap takes the flex height. The clamp box stays at auto height.
-   Firefox fails to ellipsize a line-clamp box that has a definite height
-   (Mozilla bug 1790882). */
-.zi-snippet-wrap {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.zi-snippet {
-  font-size: 10px;
-  color: light-dark(#737373, #b1b1b1);
-  line-height: 1.3;
-  padding-top: 2px;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
-}
-
-.zi-content::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.zi-content::-webkit-scrollbar-thumb {
-  background: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
-  border-radius: 4px;
-}
-
-.zi-content::-webkit-scrollbar-thumb:hover {
-  background: light-dark(rgba(0, 0, 0, 0.3), rgba(255, 255, 255, 0.3));
-}
-
-@media (max-width: 600px) {
-  #zi-panel {
-    max-width: calc(100vw - 20px);
-    min-width: 250px;
-  }
-}
-
 #live-calendar-panel {
   --panel-padding: 0;
   /* Match Zen's folder tabs popup (#zen-folder-tabs-popup). */
   width: 250px;
+
+  @media (max-width: 600px) {
+    max-width: calc(100vw - 20px);
+    min-width: 250px;
+  }
+
+  .live-calendar-wrapper {
+    --lc-gutter: 52px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    max-height: 300px;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 12px;
+    color: light-dark(#0c0c0d, #f9f9fa);
+  }
+
+  .live-calendar-scroll {
+    position: relative;
+    height: 300px;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: scroll;
+    scrollbar-width: none;
+  }
+
+  .live-calendar-empty {
+    padding: 90px 14px;
+    text-align: center;
+    color: light-dark(#737373, #b1b1b1);
+  }
+
+  .live-calendar-gate,
+  .live-calendar-note {
+    display: flex;
+    justify-content: center;
+  }
+
+  .live-calendar-gate {
+    align-items: center;
+    height: 100%;
+    padding: 24px 16px;
+    box-sizing: border-box;
+  }
+
+  .live-calendar-note {
+    padding: 8px 12px 0;
+  }
+
+  .live-calendar-note-text {
+    margin: 0;
+    text-align: center;
+    color: light-dark(#737373, #b1b1b1);
+  }
+
+  .live-calendar-signin {
+    appearance: none;
+    -moz-appearance: none;
+    margin: 0;
+    padding: 6px 12px;
+    border: 0;
+    border-radius: 999px;
+    --zen-squircle-value: 1;
+    corner-shape: round !important;
+    cursor: pointer;
+    background-color: light-dark(rgba(210, 210, 210), rgba(69, 69, 69));
+    color: light-dark(#0c0c0d, #f9f9fa);
+    font: inherit;
+  }
+
+  .live-calendar-loose {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px 8px 2px var(--lc-gutter);
+  }
+
+  .live-calendar-chip {
+    appearance: none;
+    -moz-appearance: none;
+    margin: 0;
+    padding: 2px 8px;
+    border: 0;
+    border-radius: 999px;
+    background: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.12));
+    color: inherit;
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .live-calendar-grid {
+    position: relative;
+    width: 100%;
+  }
+
+  .live-calendar-hour {
+    position: absolute;
+    left: 0;
+    right: 0;
+    pointer-events: none;
+
+    /* The topmost hour row has nothing above it, so its divider is just a stray line. */
+    &:first-child .live-calendar-hour-line {
+      display: none;
+    }
+  }
+
+  .live-calendar-hour-line {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
+  }
+
+  .live-calendar-hour-label {
+    position: absolute;
+    top: 4px;
+    left: 0;
+    padding: 0 10px;
+    font-size: 10px;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    text-align: start;
+    color: light-dark(#6b6b6b, #a8a8a8);
+  }
+
+  .live-calendar-block {
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 1px;
+    padding: 3px 8px;
+    overflow: hidden;
+    border-radius: 7px;
+    background: light-dark(rgba(150, 110, 70, 0.28), rgba(130, 105, 80, 0.55));
+    color: light-dark(#1b1208, #f4ece4);
+    cursor: pointer;
+
+    &:hover {
+      background: light-dark(rgba(150, 110, 70, 0.38), rgba(145, 118, 90, 0.7));
+    }
+
+    &[data-live="true"] {
+      box-shadow: inset 0 0 0 1px light-dark(rgba(0, 0, 0, 0.25), rgba(255, 255, 255, 0.35));
+    }
+  }
+
+  .live-calendar-block-title {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .live-calendar-block-time {
+    font-size: 10px;
+    opacity: 0.75;
+    white-space: nowrap;
+  }
+
+  .live-calendar-join {
+    appearance: none;
+    -moz-appearance: none;
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    margin: 0;
+    padding: 3px 10px;
+    border: 0;
+    border-radius: 999px;
+    background: light-dark(#0c0c0d, #f9f9fa);
+    color: light-dark(#f9f9fa, #0c0c0d);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .live-calendar-now {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 0;
+    border-top: 1.5px solid light-dark(#0c0c0d, #ffffff);
+    pointer-events: none;
+  }
+
+  .live-calendar-now-dot {
+    position: absolute;
+    left: 8px;
+    top: -4.5px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: light-dark(#0c0c0d, #ffffff);
+  }
+
+  .live-calendar-add {
+    appearance: none;
+    -moz-appearance: none;
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 1;
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    padding: 0;
+    margin: 0;
+    border: 1px solid light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
+    border-radius: 50%;
+    --zen-squircle-value: 1;
+    corner-shape: round !important;
+    box-sizing: border-box;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: light-dark(rgba(210, 210, 210), rgba(69, 69, 69));
+    color: light-dark(#0c0c0d, #f9f9fa);
+    box-shadow:
+      inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.1)),
+      0px 2px 3px 0px rgba(0, 0, 0, 0.15);
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+
+    & > svg {
+      display: block;
+      flex-shrink: 0;
+    }
+
+    &:hover {
+      background-color: light-dark(rgba(200, 200, 200), rgba(80, 80, 80));
+      box-shadow:
+        inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.15)),
+        0px 3px 8px 0px rgba(0, 0, 0, 0.2);
+    }
+  }
 }
 
-.live-calendar-wrapper {
-  --lc-gutter: 52px;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  max-height: 300px;
-  overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  font-size: 12px;
-  color: light-dark(#0c0c0d, #f9f9fa);
-}
-
-.live-calendar-scroll {
-  position: relative;
-  height: 300px;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: scroll;
-  scrollbar-width: none;
-}
-
-.live-calendar-empty {
-  padding: 90px 14px;
-  text-align: center;
-  color: light-dark(#737373, #b1b1b1);
-}
-
-.live-calendar-gate,
-.live-calendar-note {
-  display: flex;
-  justify-content: center;
-}
-
-.live-calendar-gate {
-  align-items: center;
-  height: 100%;
-  padding: 24px 16px;
-  box-sizing: border-box;
-}
-
-.live-calendar-note {
-  padding: 8px 12px 0;
-}
-
-.live-calendar-note-text {
-  margin: 0;
-  text-align: center;
-  color: light-dark(#737373, #b1b1b1);
-}
-
-.live-calendar-signin {
-  appearance: none;
-  -moz-appearance: none;
-  margin: 0;
-  padding: 6px 12px;
-  border: 0;
-  border-radius: 999px;
-  --zen-squircle-value: 1;
-  corner-shape: round !important;
-  cursor: pointer;
-  background-color: light-dark(rgba(210, 210, 210), rgba(69, 69, 69));
-  color: light-dark(#0c0c0d, #f9f9fa);
-  font: inherit;
-}
-
-.live-calendar-loose {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 8px 8px 2px var(--lc-gutter);
-}
-
-.live-calendar-chip {
-  appearance: none;
-  -moz-appearance: none;
-  margin: 0;
-  padding: 2px 8px;
-  border: 0;
-  border-radius: 999px;
-  background: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.12));
-  color: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.live-calendar-grid {
-  position: relative;
-  width: 100%;
-}
-
-.live-calendar-hour {
-  position: absolute;
-  left: 0;
-  right: 0;
-  pointer-events: none;
-}
-
-.live-calendar-hour-line {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
-}
-
-/* The topmost hour row has nothing above it, so its divider is just a stray line. */
-.live-calendar-hour:first-child .live-calendar-hour-line {
-  display: none;
-}
-
-.live-calendar-hour-label {
-  position: absolute;
-  top: 4px;
-  left: 0;
-  padding: 0 10px;
-  font-size: 10px;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  text-align: start;
-  color: light-dark(#6b6b6b, #a8a8a8);
-}
-
-.live-calendar-block {
-  position: absolute;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 1px;
-  padding: 3px 8px;
-  overflow: hidden;
-  border-radius: 7px;
-  background: light-dark(rgba(150, 110, 70, 0.28), rgba(130, 105, 80, 0.55));
-  color: light-dark(#1b1208, #f4ece4);
-  cursor: pointer;
-}
-
-.live-calendar-block:hover {
-  background: light-dark(rgba(150, 110, 70, 0.38), rgba(145, 118, 90, 0.7));
-}
-
-.live-calendar-block[data-live="true"] {
-  box-shadow: inset 0 0 0 1px light-dark(rgba(0, 0, 0, 0.25), rgba(255, 255, 255, 0.35));
-}
-
-.live-calendar-block-title {
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.25;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.live-calendar-block-time {
-  font-size: 10px;
-  opacity: 0.75;
-  white-space: nowrap;
-}
-
-.live-calendar-join {
-  appearance: none;
-  -moz-appearance: none;
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  margin: 0;
-  padding: 3px 10px;
-  border: 0;
-  border-radius: 999px;
-  background: light-dark(#0c0c0d, #f9f9fa);
-  color: light-dark(#f9f9fa, #0c0c0d);
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.live-calendar-now {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 0;
-  border-top: 1.5px solid light-dark(#0c0c0d, #ffffff);
-  pointer-events: none;
-}
-
-.live-calendar-now-dot {
-  position: absolute;
-  left: 8px;
-  top: -4.5px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: light-dark(#0c0c0d, #ffffff);
-}
-
-.live-calendar-add {
-  appearance: none;
-  -moz-appearance: none;
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  z-index: 1;
-  width: 32px;
-  height: 32px;
-  min-width: 32px;
-  min-height: 32px;
-  padding: 0;
-  margin: 0;
-  border: 1px solid light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
-  border-radius: 50%;
-  --zen-squircle-value: 1;
-  corner-shape: round !important;
-  box-sizing: border-box;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: light-dark(rgba(210, 210, 210), rgba(69, 69, 69));
-  color: light-dark(#0c0c0d, #f9f9fa);
-  box-shadow:
-    inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.1)),
-    0px 2px 3px 0px rgba(0, 0, 0, 0.15);
-  transition: background-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.live-calendar-add > svg {
-  display: block;
-  flex-shrink: 0;
-}
-
-.live-calendar-add:hover {
-  background-color: light-dark(rgba(200, 200, 200), rgba(80, 80, 80));
-  box-shadow:
-    inset 0px 6px 10px 0px light-dark(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.15)),
-    0px 3px 8px 0px rgba(0, 0, 0, 0.2);
-}
-
+/* The join pill is painted on the tab, outside #live-calendar-panel. */
 .live-calendar-pill {
   pointer-events: none;
   margin: 0;
@@ -613,10 +613,10 @@ button.zi-signin {
   line-height: 13px;
   background: light-dark(rgba(12, 12, 13, 0.4),rgba(249, 249, 250, 0.4));
   color: light-dark(#f9f9fa,#0c0c0d);
-}
 
-.live-calendar-pill[hidden] {
-  display: none !important;
+  &[hidden] {
+    display: none !important;
+  }
 }
 
 .tabbrowser-tab[zen-essential][data-live-calendar-pill] > .tab-stack > .tab-content {
@@ -629,11 +629,15 @@ button.zi-signin {
   transform: translateY(1px);
 }
 
-@media (max-width: 600px) {
-  #live-calendar-panel {
-    max-width: calc(100vw - 20px);
-    min-width: 250px;
-  }
+.tabbrowser-tab[zen-essential] .live-calendar-pill {
+  position: relative;
+  align-self: center;
+  margin: -4px 0 0;
+  transform: translateY(4px);
+  max-width: calc(100% - 8px);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #zi-accounts {
@@ -653,278 +657,270 @@ button.zi-signin {
   max-width: none;
   max-height: none;
   background: rgba(0, 0, 0, 0.45);
-  display: flex;
   align-items: center;
   justify-content: center;
   color: var(--zi-fg);
   font: message-box;
   font-size: 13px;
-}
 
-#zi-accounts::backdrop {
-  background: transparent;
-}
+  /* Author display beats the UA display:none on a closed popover. Scope it. */
+  &:popover-open {
+    display: flex;
+  }
 
-#zi-accounts.zi-accounts-auth {
-  background: transparent;
-  pointer-events: none;
-}
+  &::backdrop {
+    background: transparent;
+  }
 
-#zi-accounts.zi-accounts-auth .zi-accounts-card,
-#zi-accounts.zi-accounts-auth .zi-accounts-sheet {
-  display: none;
-}
+  &.zi-accounts-auth {
+    background: transparent;
+    pointer-events: none;
 
-.zi-accounts-card,
-.zi-accounts-sheet-card {
-  width: min(400px, calc(100vw - 32px));
-  border-radius: 18px;
-  background: var(--zen-themed-toolbar-bg, var(--toolbar-bgcolor, Canvas));
-  border: 1px solid var(--zi-line);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
-  color: var(--zi-fg);
-}
+    .zi-accounts-card,
+    .zi-accounts-sheet {
+      display: none;
+    }
+  }
 
-.zi-accounts-card {
-  max-height: calc(100vh - 48px);
-  overflow: auto;
-}
+  .zi-accounts-card,
+  .zi-accounts-sheet-card {
+    width: min(400px, calc(100vw - 32px));
+    border-radius: 18px;
+    background: var(--zen-themed-toolbar-bg, var(--toolbar-bgcolor, Canvas));
+    border: 1px solid var(--zi-line);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
+    color: var(--zi-fg);
+  }
 
-.zi-accounts-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 16px 4px;
-}
+  .zi-accounts-card {
+    max-height: calc(100vh - 48px);
+    overflow: auto;
+  }
 
-.zi-accounts-title {
-  font-size: 15px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-}
+  .zi-accounts-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 16px 4px;
+  }
 
-.zi-accounts-close,
-.zi-accounts-more,
-.zi-accounts-action {
-  appearance: none;
-  border: 0;
-  cursor: pointer;
-  color: inherit;
-  font: inherit;
-  --zen-squircle-value: 1;
-  corner-shape: round !important;
-}
+  .zi-accounts-title {
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
 
-.zi-accounts-close,
-.zi-accounts-more {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  flex: 0 0 auto;
-  padding: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--zi-muted);
-}
+  .zi-accounts-close,
+  .zi-accounts-more,
+  .zi-accounts-action {
+    appearance: none;
+    border: 0;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+    --zen-squircle-value: 1;
+    corner-shape: round !important;
 
-.zi-accounts-close {
-  font-size: 18px;
-  line-height: 1;
-}
+    &:focus-visible {
+      outline: 2px solid var(--zi-fg);
+      outline-offset: 2px;
+    }
+  }
 
-.zi-accounts-close:hover,
-.zi-accounts-more:hover {
-  background: var(--zi-hover);
-  color: var(--zi-fg);
-}
+  .zi-accounts-close,
+  .zi-accounts-more {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 auto;
+    padding: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--zi-muted);
 
-.zi-accounts-close:focus-visible,
-.zi-accounts-more:focus-visible,
-.zi-accounts-action:focus-visible {
-  outline: 2px solid var(--zi-fg);
-  outline-offset: 2px;
-}
+    &:hover {
+      background: var(--zi-hover);
+      color: var(--zi-fg);
+    }
+  }
 
-.zi-accounts-more:active {
-  background: var(--zi-hover);
-}
+  .zi-accounts-close {
+    font-size: 18px;
+    line-height: 1;
+  }
 
-.zi-accounts-more svg {
-  display: block;
-  pointer-events: none;
-}
+  .zi-accounts-more {
+    &:active {
+      background: var(--zi-hover);
+    }
 
-.zi-accounts-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 8px 12px 12px;
-}
+    svg {
+      display: block;
+      pointer-events: none;
+    }
+  }
 
-.zi-accounts-list {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
+  .zi-accounts-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 12px 12px;
+  }
 
-.zi-accounts-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+  .zi-accounts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
 
-.zi-accounts-section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 0 4px;
-}
+  .zi-accounts-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
 
-.zi-accounts-section-title {
-  font-size: 12px;
-  font-weight: 650;
-  letter-spacing: 0.01em;
-}
+  .zi-accounts-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 4px;
+  }
 
-.zi-accounts-empty {
-  padding: 6px 4px 2px;
-  color: var(--zi-muted);
-  font-size: 12px;
-}
+  .zi-accounts-section-title {
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: 0.01em;
+  }
 
-.zi-accounts-detected {
-  border: 1px dashed var(--zi-line);
-  background: transparent;
-}
+  .zi-accounts-empty {
+    padding: 6px 4px 2px;
+    color: var(--zi-muted);
+    font-size: 12px;
+  }
 
-.zi-accounts-status:empty {
-  display: none;
-}
+  .zi-accounts-detected {
+    border: 1px dashed var(--zi-line);
+    background: transparent;
+  }
 
-.zi-accounts-status {
-  margin: 0 4px 4px;
-  color: var(--zi-muted);
-  font-size: 12px;
-}
+  .zi-accounts-status {
+    margin: 0 4px 4px;
+    color: var(--zi-muted);
+    font-size: 12px;
 
-.zi-accounts-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px;
-  border-radius: 14px;
-  background: var(--zi-fill);
-}
+    &:empty {
+      display: none;
+    }
+  }
 
-.zi-accounts-copy {
-  min-width: 0;
-}
+  .zi-accounts-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px;
+    border-radius: 14px;
+    background: var(--zi-fill);
+  }
 
-.zi-accounts-name {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+  .zi-accounts-copy {
+    min-width: 0;
+  }
 
-.zi-accounts-detail {
-  color: var(--zi-muted);
-  font-size: 12px;
-  line-height: 1.4;
-}
+  .zi-accounts-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
-.zi-accounts-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 6px;
-  flex: 0 0 auto;
-}
+  .zi-accounts-detail {
+    color: var(--zi-muted);
+    font-size: 12px;
+    line-height: 1.4;
+  }
 
-.zi-accounts-action {
-  height: 28px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: light-dark(#151518, #f4f4f5);
-  color: light-dark(#f4f4f5, #151518);
-}
+  .zi-accounts-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+    flex: 0 0 auto;
+  }
 
-.zi-accounts-action.zi-accounts-secondary {
-  background: var(--zi-fill);
-  color: var(--zi-fg);
-}
+  .zi-accounts-action {
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 999px;
+    background: light-dark(#151518, #f4f4f5);
+    color: light-dark(#f4f4f5, #151518);
 
-.zi-accounts-action.zi-accounts-danger {
-  margin-top: 4px;
-  align-self: flex-start;
-  background: transparent;
-  border: 1px solid light-dark(rgba(180, 30, 30, 0.35), rgba(255, 120, 120, 0.4));
-  color: light-dark(#a11b1b, #ff9d9d);
-}
+    &.zi-accounts-secondary {
+      background: var(--zi-fill);
+      color: var(--zi-fg);
+    }
 
-.zi-accounts-action:disabled {
-  opacity: 0.55;
-}
+    &.zi-accounts-danger {
+      margin-top: 4px;
+      align-self: flex-start;
+      background: transparent;
+      border: 1px solid light-dark(rgba(180, 30, 30, 0.35), rgba(255, 120, 120, 0.4));
+      color: light-dark(#a11b1b, #ff9d9d);
+    }
 
-.zi-accounts-add {
-  background: var(--zi-fill);
-  color: var(--zi-fg);
-}
+    &:disabled {
+      opacity: 0.55;
+    }
+  }
 
-.zi-accounts-sheet {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.28);
-}
+  .zi-accounts-add {
+    background: var(--zi-fill);
+    color: var(--zi-fg);
+  }
 
-.zi-accounts-sheet[hidden] {
-  display: none;
-}
+  .zi-accounts-sheet {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.28);
 
-.zi-accounts-sheet-card {
-  width: min(360px, calc(100vw - 48px));
-  max-height: calc(100vh - 64px);
-  overflow: auto;
-}
+    &[hidden] {
+      display: none;
+    }
+  }
 
-.zi-accounts-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
+  .zi-accounts-sheet-card {
+    width: min(360px, calc(100vw - 48px));
+    max-height: calc(100vh - 64px);
+    overflow: auto;
+  }
 
-.zi-accounts-input {
-  width: 100%;
-  box-sizing: border-box;
-  border: 0;
-  border-radius: 10px;
-  padding: 9px 10px;
-  background: var(--zi-fill);
-  color: inherit;
-  font: inherit;
-}
+  .zi-accounts-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
 
-.zi-accounts-input:focus {
-  outline: 2px solid light-dark(rgba(0, 0, 0, 0.25), rgba(255, 255, 255, 0.35));
-  outline-offset: 1px;
-}
+  .zi-accounts-input {
+    width: 100%;
+    box-sizing: border-box;
+    border: 0;
+    border-radius: 10px;
+    padding: 9px 10px;
+    background: var(--zi-fill);
+    color: inherit;
+    font: inherit;
 
-.tabbrowser-tab[zen-essential] .live-calendar-pill {
-  position: relative;
-  align-self: center;
-  margin: -4px 0 0;
-  transform: translateY(4px);
-  max-width: calc(100% - 8px);
-  text-align: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
+    &:focus {
+      outline: 2px solid light-dark(rgba(0, 0, 0, 0.25), rgba(255, 255, 255, 0.35));
+      outline-offset: 1px;
+    }
+  }
 }

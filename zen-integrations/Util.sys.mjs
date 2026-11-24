@@ -177,12 +177,6 @@ export function fnv1a(str) {
   return ('0000000' + (h >>> 0).toString(36)).slice(-8);
 }
 
-export function escapeHtml(doc, text) {
-  const div = doc.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
 export function profilePath(name) {
   const profileDir = Services.dirsvc.get('ProfD', Ci.nsIFile).path;
   return PathUtils.join(profileDir, name);

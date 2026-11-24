@@ -148,9 +148,3 @@ export function findCallUrl(...parts) {
   }
   return '';
 }
-
-export function escapeHtml(doc, text) {
-  const div = doc.createElement('div');
-  div.textContent = text == null ? '' : String(text);
-  return div.innerHTML.replace(/"/g, '&quot;');
-}

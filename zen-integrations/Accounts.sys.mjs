@@ -1,3 +1,7 @@
+const { profilePath } = ChromeUtils.importESModule(
+  'chrome://sine/content/zen-integrations/Util.sys.mjs' + new URL(import.meta.url).search
+);
+
 const FILE = 'zen-integrations-accounts.json';
 const GOOGLE_TOKEN_FILE = 'live-calendar-google-tokens.json';
 const OUTLOOK_TOKEN_FILE = 'zen-integrations-outlook-tokens.json';
@@ -18,11 +22,6 @@ function blank(id = '', provider = '') {
     contextKey: String(id || ''),
     message: ''
   };
-}
-
-function profilePath(name) {
-  const profileDir = Services.dirsvc.get('ProfD', Ci.nsIFile).path;
-  return PathUtils.join(profileDir, name);
 }
 
 function profileFile() {

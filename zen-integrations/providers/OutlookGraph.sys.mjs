@@ -134,7 +134,7 @@ function dedupedUnread(payload) {
 function pickUnread(messages, cap) {
   const focused = messages.filter((message) => String(message.inferenceClassification || '').toLowerCase() !== 'other').sort(byNewest);
   const other = messages.filter((message) => String(message.inferenceClassification || '').toLowerCase() === 'other').sort(byNewest);
-  if (!focused.length || !other.length) return messages.slice().sort(byNewest).slice(0, cap);
+  if (!focused.length || !other.length) return messages.toSorted(byNewest).slice(0, cap);
   const share = Math.ceil(cap / 2);
   const picked = focused.slice(0, share).concat(other.slice(0, share));
   if (picked.length < cap) {

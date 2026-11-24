@@ -110,8 +110,8 @@ export class LiveCalendar {
     this.dayInFlight.add(key);
     fetchGoogleDay(this.window, tab, accountKey).then((events) => {
       this.cache.applyDay(key, localDay(), events, 'google', 'complete');
-      console.log(
-        '[Live Calendar] google',
+      debugLog(
+        'google',
         localDay(),
         events.map((event) => `${event.title || '?'} ${event.allDay ? 'all-day' : event.start || ''}`)
       );
