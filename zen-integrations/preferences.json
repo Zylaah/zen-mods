@@ -21,6 +21,6 @@
     "type": "string",
     "defaultValue": "",
     "placeholder": "00000000-0000-0000-0000-000000000000",
-    "description": "Your public Microsoft app id. Redirect is https://login.microsoftonline.com/common/oauth2/nativeclient, with delegated Mail.ReadWrite."
+    "description": "Your public Microsoft app id. Redirect is https://login.microsoftonline.com/common/oauth2/nativeclient, with delegated Mail.Read."
   }
 ]

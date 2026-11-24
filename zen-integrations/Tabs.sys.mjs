@@ -385,13 +385,9 @@ export class ZenTabs {
 
   openOutlook(tab, email) {
     const provider = this.providerFor(tab) || this.app.providerForKey(this.app.activePanelContextKey);
-    const hints = this.getUrlHints(tab);
-    provider?.markOpened?.(this.app, tab, hints, email)?.catch((err) => {
-      debugLog('Outlook mark-read failed', err && err.message ? err.message : err);
-    });
-    const link = String(email?.url || '');
-    if (link.startsWith('https://')) {
-      this.loadMailUrl(tab?.linkedBrowser, link);
+    const link = provider?.readingPaneUrl?.(email) || '';
+    if (link) {
+      this.openOutlookLink(tab, link);
       return;
     }
     const browser = tab?.linkedBrowser;
@@ -415,6 +411,16 @@ export class ZenTabs {
       win.setTimeout(tick, 200);
     };
     tick();
+  }
+
+  openOutlookLink(tab, url) {
+    const browser = tab?.linkedBrowser;
+    const actor = this.outlookActor(browser);
+    if (actor?.sendQuery && this.isLoadedMailBrowser(tab)) {
+      actor.sendQuery('ZenOutlook:OpenLink', { url }).catch(() => this.loadMailUrl(browser, url));
+      return;
+    }
+    this.loadMailUrl(browser, url);
   }
 
   gmailActor(browser) {

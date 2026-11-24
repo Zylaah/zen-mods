@@ -4,7 +4,7 @@ const { CONFIG, debugLog, fnv1a, getTabUserContextId } = ChromeUtils.importESMod
 const { normalizeOutlookFields } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/providers/OutlookDate.sys.mjs' + new URL(import.meta.url).search
 );
-const { outlookClientState } = ChromeUtils.importESModule(
+const { outlookClientState, outlookReadingPaneUrl } = ChromeUtils.importESModule(
   'chrome://sine/content/zen-integrations/providers/OutlookGraph.sys.mjs' + new URL(import.meta.url).search
 );
 const { isEnabled, isExpired } = ChromeUtils.importESModule(
@@ -13,7 +13,6 @@ const { isEnabled, isExpired } = ChromeUtils.importESModule(
 const {
   beginOutlookSignIn,
   fetchOutlookGraph,
-  markOutlookRead,
   outlookSignInMessage,
   readOutlookClientId
 } = ChromeUtils.importESModule(
@@ -127,12 +126,8 @@ export const outlookProvider = {
     return beginOutlookSignIn(app, tab, this.contextKey(tab, hints));
   },
 
-  // Graph rows carry the message web link. Scraped rows do not, and the
-  // page click is what marks those read.
-  markOpened(app, tab, hints, email) {
-    const id = String(email?.threadId || '');
-    if (!id || !String(email?.url || '').startsWith('https://')) return null;
-    return markOutlookRead(app, tab, this.contextKey(tab, hints), id);
+  readingPaneUrl(email) {
+    return outlookReadingPaneUrl(email?.url || '');
   },
 
   matches(hints) {

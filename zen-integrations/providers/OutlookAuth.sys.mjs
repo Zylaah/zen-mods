@@ -17,7 +17,6 @@ const {
   OUTLOOK_TOKEN_URL,
   authorizeUrl,
   formEncode,
-  graphMessageUrl,
   graphMessagesUrl,
   graphUnreadRows,
   outlookClientState
@@ -459,66 +458,4 @@ export async function fetchOutlookGraph(app, tab, contextKey) {
   const messages = pages.flatMap(readPage);
   debugLog('Outlook Graph', pages.map((page) => page.status).join(','), messages.length);
   return graphUnreadRows({ value: messages }, CONFIG.MAX_EMAILS);
-}
-
-function tokenCanMarkRead(entry) {
-  const scope = String(entry?.scope || '');
-  if (!scope) return true;
-  return /Mail\.ReadWrite/i.test(scope);
-}
-
-// Opening a web link does not mark the message read, so the next unread
-// query puts it back in the panel. Mail.Read cannot PATCH isRead.
-export async function markOutlookRead(app, tab, contextKey, messageId) {
-  const id = String(messageId || '').trim();
-  if (!id) return false;
-  const clientId = readOutlookClientId();
-  if (outlookClientState(clientId) !== 'ok') return false;
-
-  const win = app.window;
-  const userContextId = getTabUserContextId(tab);
-  const accountKey = outlookAccountId(contextKey);
-  const current = await tokenFor(contextKey);
-  if (current && !tokenCanMarkRead(current)) {
-    await setAccountMessage(accountKey, 'Reconnect Outlook to mark opened mail as read');
-    debugLog('Outlook mark-read needs Mail.ReadWrite', accountKey);
-    return false;
-  }
-
-  let bearer = await accessToken(win, userContextId, contextKey, clientId);
-  if (!bearer) return false;
-
-  const send = (token) => httpRequest(win, {
-    url: graphMessageUrl(id),
-    userContextId,
-    method: 'PATCH',
-    anonymous: true,
-    headers: {
-      Authorization: 'Bearer ' + token,
-      Accept: 'application/json'
-    },
-    body: '{"isRead":true}',
-    contentType: 'application/json',
-    maxBytes: 200000
-  });
-
-  let fetched = await send(bearer);
-  if (fetched.status === 401) {
-    const entry = await tokenFor(contextKey);
-    const refreshed = await refreshToken(win, userContextId, contextKey, entry, clientId);
-    bearer = refreshed?.accessToken || '';
-    if (!bearer) return false;
-    fetched = await send(bearer);
-  }
-  if (fetched.status === 403) {
-    await setAccountMessage(accountKey, 'Reconnect Outlook to mark opened mail as read');
-    debugLog('Outlook mark-read forbidden', accountKey);
-    return false;
-  }
-  if (fetched.status < 200 || fetched.status >= 300) {
-    debugLog('Outlook mark-read failed', fetched.status);
-    return false;
-  }
-  debugLog('Outlook marked read', id);
-  return true;
 }

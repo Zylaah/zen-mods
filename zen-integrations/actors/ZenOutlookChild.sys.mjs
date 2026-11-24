@@ -205,6 +205,15 @@ export class ZenOutlookChild extends JSWindowActorChild {
   receiveMessage(message) {
     if (this.contentWindow !== this.contentWindow?.top) return null;
     if (message.name === 'ZenOutlook:Scrape') return scrapeDocument(this.document);
+    if (message.name === 'ZenOutlook:OpenLink') {
+      let parsed;
+      try { parsed = new URL(String(message.data?.url || '')); } catch (e) { return { ok: false }; }
+      const host = parsed.hostname.toLowerCase();
+      const allowed = host === 'outlook.office.com' || host === 'outlook.office365.com' || host === 'outlook.live.com' || host === 'outlook.cloud.microsoft';
+      if (parsed.protocol !== 'https:' || !allowed) return { ok: false };
+      this.contentWindow.location.assign(parsed.href);
+      return { ok: true };
+    }
     if (message.name === 'ZenOutlook:Open') {
       const row = findRow(this.document, message.data);
       if (!row) return { ok: false };

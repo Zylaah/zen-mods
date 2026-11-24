@@ -6,7 +6,7 @@ const CLIENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 export const OUTLOOK_REDIRECT_URI = 'https://login.microsoftonline.com/common/oauth2/nativeclient';
 export const OUTLOOK_AUTHORIZE_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
 export const OUTLOOK_TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
-export const OUTLOOK_SCOPE = 'https://graph.microsoft.com/Mail.ReadWrite offline_access';
+export const OUTLOOK_SCOPE = 'https://graph.microsoft.com/Mail.Read offline_access';
 
 function fnv1a(str) {
   let h = 0x811c9dc5;
@@ -33,8 +33,27 @@ export function formEncode(fields) {
     .join('&');
 }
 
-export function graphMessageUrl(messageId) {
-  return 'https://graph.microsoft.com/v1.0/me/messages/' + encodeURIComponent(String(messageId || ''));
+const OUTLOOK_HOSTS = new Set([
+  'outlook.office.com',
+  'outlook.office365.com',
+  'outlook.live.com',
+  'outlook.cloud.microsoft'
+]);
+
+// Graph's webLink opens a popout unless ispopout=0. The popout does not mark
+// the inbox item read. The review pane does, which is what Arc's tab open hits
+// when the link is already /mail/inbox/id/.
+export function outlookReadingPaneUrl(raw) {
+  let parsed;
+  try {
+    parsed = new URL(String(raw || ''));
+  } catch (e) {
+    return '';
+  }
+  if (parsed.protocol !== 'https:' || !OUTLOOK_HOSTS.has(parsed.hostname.toLowerCase())) return '';
+  const popout = parsed.searchParams.has('ItemID') || parsed.searchParams.get('viewmodel') === 'ReadMessageItem';
+  if (popout) parsed.searchParams.set('ispopout', '0');
+  return parsed.href;
 }
 
 export function graphMessagesUrl(view, top) {
