@@ -209,6 +209,10 @@ export class ZenOutlookChild extends JSWindowActorChild {
       const row = findRow(this.document, message.data);
       if (!row) return { ok: false };
       row.click();
+      // A list click does not always clear unread. The command-bar control does.
+      const icon = this.document.querySelector('[data-icon-name^="MailRead"]');
+      const button = icon?.closest('button') || null;
+      if (button && !button.disabled && button.getAttribute('aria-disabled') !== 'true') button.click();
       return { ok: true };
     }
     return null;

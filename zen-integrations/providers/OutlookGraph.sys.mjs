@@ -6,7 +6,7 @@ const CLIENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 export const OUTLOOK_REDIRECT_URI = 'https://login.microsoftonline.com/common/oauth2/nativeclient';
 export const OUTLOOK_AUTHORIZE_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
 export const OUTLOOK_TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
-export const OUTLOOK_SCOPE = 'https://graph.microsoft.com/Mail.Read offline_access';
+export const OUTLOOK_SCOPE = 'https://graph.microsoft.com/Mail.ReadWrite offline_access';
 
 function fnv1a(str) {
   let h = 0x811c9dc5;
@@ -31,6 +31,10 @@ export function formEncode(fields) {
     .filter(([, value]) => value != null && value !== '')
     .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(String(value)))
     .join('&');
+}
+
+export function graphMessageUrl(messageId) {
+  return 'https://graph.microsoft.com/v1.0/me/messages/' + encodeURIComponent(String(messageId || ''));
 }
 
 export function graphMessagesUrl(view, top) {

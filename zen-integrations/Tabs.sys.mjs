@@ -384,12 +384,16 @@ export class ZenTabs {
   }
 
   openOutlook(tab, email) {
+    const provider = this.providerFor(tab) || this.app.providerForKey(this.app.activePanelContextKey);
+    const hints = this.getUrlHints(tab);
+    provider?.markOpened?.(this.app, tab, hints, email)?.catch((err) => {
+      debugLog('Outlook mark-read failed', err && err.message ? err.message : err);
+    });
     const link = String(email?.url || '');
     if (link.startsWith('https://')) {
       this.loadMailUrl(tab?.linkedBrowser, link);
       return;
     }
-    const provider = this.providerFor(tab) || this.app.providerForKey(this.app.activePanelContextKey);
     const browser = tab?.linkedBrowser;
     if (browser && !this.isLoadedMailBrowser(tab)) {
       this.loadMailUrl(browser, provider?.homeUrl(this.getUrlHints(tab)) || '');
